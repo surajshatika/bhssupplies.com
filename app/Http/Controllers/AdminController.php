@@ -290,6 +290,7 @@ class AdminController extends Controller
     }
 
 
+    
     public function CheckSitemapItem($item)
     {    
         $header = array(

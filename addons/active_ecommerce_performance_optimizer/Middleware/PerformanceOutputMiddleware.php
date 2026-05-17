@@ -1,0 +1,271 @@
+<?php
+
+namespace App\Http\Middleware\PerformanceOptimizer;
+
+use App\Services\PerformanceOptimizer\CssJsMinifierService;
+use App\Services\PerformanceOptimizer\FontOptimizerService;
+use App\Services\PerformanceOptimizer\ScriptManagerService;
+use Closure;
+use Illuminate\Http\Request;
+
+/**
+ * Post-processes the HTML response on the frontend, performing the
+ * optimizations the user has enabled via the admin UI:
+ *
+ *  - perf_image_lazyload         → adds loading="lazy" decoding="async" to <img>
+ *  - perf_critical_css           → injects <style> in <head>
+ *  - perf_fonts_preload_status   → injects <link rel="preload" as="font"> in <head>
+ *  - perf_fonts_swap_status      → forces font-display: swap
+ *  - perf_js_defer_status        → adds defer to <script src> (excluding allowlist)
+ *  - perf_js_delay_status        → injects user-interaction-triggered delay-JS bootstrap
+ *  - perf_image_serve_webp_auto  → rewrites <img src> from .jpg/.png to .webp when sibling exists
+ *  - perf_vitals_collect_status  → injects the Web Vitals tracker before </body>
+ *
+ * Runs only when:
+ *  - perf_status == 1
+ *  - admin / API / non-HTML responses are skipped
+ *  - response is 200 OK and Content-Type is text/html
+ */
+class PerformanceOutputMiddleware
+{
+    protected FontOptimizerService $fonts;
+    protected CssJsMinifierService $cssjs;
+
+    public function __construct(FontOptimizerService $fonts, CssJsMinifierService $cssjs)
+    {
+        $this->fonts = $fonts;
+        $this->cssjs = $cssjs;
+    }
+
+    public function handle(Request $request, Closure $next)
+    {
+        $response = $next($request);
+
+        if (!$this->shouldProcess($request, $response)) {
+            return $response;
+        }
+
+        $html = (string) $response->getContent();
+        if ($html === '') return $response;
+
+        $html = $this->injectHead($html, $request);
+        $html = $this->processImages($html);
+        $html = $this->processScripts($html);
+        $html = $this->processScriptManager($html, $request);
+        $html = $this->injectBodyEnd($html);
+
+        $response->setContent($html);
+        return $response;
+    }
+
+    protected function shouldProcess(Request $request, $response): bool
+    {
+        if ((int) get_setting('perf_status', 1) !== 1) return false;
+        if (!method_exists($response, 'getStatusCode') || $response->getStatusCode() !== 200) return false;
+
+        $ct = (string) $response->headers->get('Content-Type', '');
+        if (stripos($ct, 'text/html') === false) return false;
+
+        // Skip admin / API / debug paths
+        $path = ltrim($request->path(), '/');
+        $skipPrefixes = ['admin', 'api', 'install', 'update', '_debugbar', 'performance-optimizer'];
+        foreach ($skipPrefixes as $p) {
+            if (str_starts_with($path, $p)) return false;
+        }
+        return true;
+    }
+
+    // ── <head> injections ────────────────────────────────────────────
+
+    protected function injectHead(string $html, Request $request): string
+    {
+        $injects = [];
+
+        // Critical CSS (inlined)
+        if ($cc = trim((string) get_setting('perf_critical_css', ''))) {
+            $injects[] = '<style data-perfopt="critical-css">' . $cc . '</style>';
+        }
+
+        // Font preload tags
+        if ((int) get_setting('perf_fonts_preload_status', 0) === 1) {
+            $tags = $this->fonts->renderPreloadTags();
+            if ($tags !== '') $injects[] = $tags;
+        }
+
+        // Force font-display: swap
+        if ((int) get_setting('perf_fonts_swap_status', 1) === 1) {
+            $injects[] = $this->fonts->renderFontDisplaySwap();
+        }
+
+        if (empty($injects)) return $html;
+
+        $block = "\n" . implode("\n", $injects) . "\n";
+        // Inject just before </head>, fallback to start of <body>
+        if (stripos($html, '</head>') !== false) {
+            return preg_replace('/<\/head>/i', $block . '</head>', $html, 1);
+        }
+        return preg_replace('/<body\b/i', $block . '<body', $html, 1);
+    }
+
+    // ── <img> processing ─────────────────────────────────────────────
+
+    protected function processImages(string $html): string
+    {
+        $lazy   = (int) get_setting('perf_image_lazyload', 1) === 1;
+        $serveWebp = (int) get_setting('perf_image_serve_webp_auto', 0) === 1;
+        $imageCdn  = (int) get_setting('perf_image_cdn_status', 0) === 1;
+        $cdnUrl    = rtrim((string) get_setting('perf_image_cdn_url', ''), '/');
+        if (!$lazy && !$serveWebp && !($imageCdn && $cdnUrl !== '')) return $html;
+
+        $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+
+        return preg_replace_callback('/<img\b([^>]*)>/i', function ($m) use ($lazy, $serveWebp, $imageCdn, $cdnUrl, $appHost) {
+            $attrs = $m[1];
+
+            // Skip if user explicitly opted out via data-no-perf
+            if (preg_match('/\bdata-no-perf\b/i', $attrs)) return $m[0];
+
+            // Lazyload
+            if ($lazy && !preg_match('/\bloading\s*=/i', $attrs)) {
+                $attrs .= ' loading="lazy"';
+            }
+            if ($lazy && !preg_match('/\bdecoding\s*=/i', $attrs)) {
+                $attrs .= ' decoding="async"';
+            }
+
+            // WebP auto-rewrite (only if sibling .webp exists)
+            if ($serveWebp && preg_match('/\bsrc\s*=\s*(["\'])([^"\']+)\1/i', $attrs, $sm)) {
+                $src = $sm[2];
+                if (preg_match('/\.(jpe?g|png)$/i', $src)) {
+                    $webpUrl = preg_replace('/\.(jpe?g|png)$/i', '.webp', $src);
+                    $localPath = $this->urlToLocal($webpUrl);
+                    if ($localPath && file_exists($localPath)) {
+                        $attrs = preg_replace(
+                            '/\bsrc\s*=\s*(["\'])[^"\']+\1/i',
+                            'src="' . $webpUrl . '"',
+                            $attrs,
+                            1
+                        );
+                    }
+                }
+            }
+
+            // Image CDN — rewrite /uploads/* (relative or same-host absolute) to {cdnUrl}/uploads/*
+            if ($imageCdn && $cdnUrl !== '' && preg_match('/\bsrc\s*=\s*(["\'])([^"\']+)\1/i', $attrs, $sm)) {
+                $src = $sm[2];
+                $rewritten = $this->rewriteToImageCdn($src, $cdnUrl, $appHost);
+                if ($rewritten !== null && $rewritten !== $src) {
+                    $attrs = preg_replace(
+                        '/\bsrc\s*=\s*(["\'])[^"\']+\1/i',
+                        'src="' . $rewritten . '"',
+                        $attrs,
+                        1
+                    );
+                }
+            }
+
+            return '<img' . $attrs . '>';
+        }, $html);
+    }
+
+    /**
+     * Rewrite an image URL to use the configured Image CDN if it points to a
+     * local /uploads/* path. Returns null if no rewrite is appropriate.
+     */
+    protected function rewriteToImageCdn(string $src, string $cdnUrl, ?string $appHost): ?string
+    {
+        if ($src === '' || str_starts_with($src, 'data:')) return null;
+        if (str_starts_with($src, $cdnUrl . '/')) return null;
+
+        // Same-host absolute → strip origin to relative
+        if (preg_match('#^https?://([^/]+)(/.*)$#i', $src, $um)) {
+            if ($appHost && stripos($um[1], (string) $appHost) === false) return null;
+            $rel = $um[2];
+        } else {
+            $rel = $src;
+        }
+        $rel = '/' . ltrim($rel, '/');
+
+        if (!preg_match('#^/(?:public/)?uploads/#i', $rel)) return null;
+        return $cdnUrl . $rel;
+    }
+
+    protected function urlToLocal(string $url): ?string
+    {
+        $parsed = parse_url($url);
+        $path   = ltrim((string) ($parsed['path'] ?? ''), '/');
+        if ($path === '') return null;
+        return public_path($path);
+    }
+
+    // ── <script> processing (defer) ──────────────────────────────────
+
+    protected function processScripts(string $html): string
+    {
+        if ((int) get_setting('perf_js_defer_status', 0) !== 1) return $html;
+
+        // Safety baseline: never defer scripts that ship jQuery or the AIZ core,
+        // because the layout has inline <script> blocks that call $() / AIZ.* at parse time.
+        // Deferring these breaks home-section AJAX loaders, infinite scroll, modals, etc.
+        $defaultExcludes = ['jquery', 'vendors.js', 'aiz-core.js'];
+        $userExcludes    = array_filter(array_map('trim', explode("\n", (string) get_setting('perf_js_defer_exclude', ''))));
+        $excludes        = array_values(array_unique(array_merge($defaultExcludes, $userExcludes)));
+
+        return preg_replace_callback('/<script\b([^>]*)>/i', function ($m) use ($excludes) {
+            $attrs = $m[1];
+
+            // Already has defer / async / module
+            if (preg_match('/\b(defer|async|type\s*=\s*["\']?module)\b/i', $attrs)) return $m[0];
+            // Skip inline (no src) — too risky to defer
+            if (!preg_match('/\bsrc\s*=\s*(["\'])([^"\']+)\1/i', $attrs, $sm)) return $m[0];
+
+            $src = $sm[2];
+            foreach ($excludes as $ex) {
+                if ($ex !== '' && stripos($src, $ex) !== false) return $m[0];
+            }
+            return '<script defer' . $attrs . '>';
+        }, $html);
+    }
+
+    // ── Script Manager (per-route allow/deny/defer/async/delay rules) ─
+
+    protected function processScriptManager(string $html, Request $request): string
+    {
+        if ((int) get_setting('perf_script_manager_status', 0) !== 1) return $html;
+
+        $sm        = app(ScriptManagerService::class);
+        $routePath = ltrim($request->path(), '/');
+        $ua        = (string) $request->userAgent();
+        $device    = preg_match('/Mobi|Android/i', $ua) ? 'mobile' : 'desktop';
+
+        $rules = $sm->rulesFor($routePath, $device);
+        if (empty($rules)) return $html;
+        return $sm->applyToHtml($html, $rules);
+    }
+
+    // ── Body-end injections (delay-JS + vitals tracker) ──────────────
+
+    protected function injectBodyEnd(string $html): string
+    {
+        $injects = [];
+
+        if ((int) get_setting('perf_js_delay_status', 0) === 1) {
+            $injects[] = $this->cssjs->getDelayScript();
+        }
+
+        if ((int) get_setting('perf_vitals_collect_status', 0) === 1) {
+            $rate     = max(1, min(100, (int) get_setting('perf_vitals_sample_rate', 10)));
+            $endpoint = route('performance_optimizer.collect_vital');
+            $injects[] = "<script data-perfopt=\"vitals-bootstrap\">\nwindow.PERF_VITALS_ENDPOINT='{$endpoint}';\nwindow.PERF_VITALS_RATE={$rate};\n</script>";
+            $injects[] = '<script defer src="' . asset('assets/performance_optimizer/js/web_vitals_tracker.js') . '"></script>';
+        }
+
+        if (empty($injects)) return $html;
+
+        $block = "\n" . implode("\n", $injects) . "\n";
+        if (stripos($html, '</body>') !== false) {
+            return preg_replace('/<\/body>/i', $block . '</body>', $html, 1);
+        }
+        return $html . $block;
+    }
+}

@@ -1,0 +1,570 @@
+/* ============================================================
+   Performance Optimizer Addon — Backend UI (v2.0)
+   Sevenopal-style polished dashboard
+   ============================================================ */
+
+:root {
+    --perf-bg:        #f5f7fa;
+    --perf-card-bg:   #ffffff;
+    --perf-border:    #e6e9ed;
+    --perf-text:      #2d3748;
+    --perf-muted:     #6c757d;
+    --perf-blue:      #2196f3;
+    --perf-green:     #28a745;
+    --perf-yellow:    #ffc107;
+    --perf-red:       #dc3545;
+    --perf-cyan:      #17a2b8;
+    --perf-purple:    #9c27b0;
+    --perf-shadow:    0 1px 3px rgba(0,0,0,.05), 0 1px 2px rgba(0,0,0,.04);
+    --perf-shadow-h:  0 4px 12px rgba(0,0,0,.08), 0 2px 4px rgba(0,0,0,.05);
+    --perf-radius:    10px;
+    --perf-pad:       1rem;
+}
+
+.perf-page {
+    color: var(--perf-text);
+    padding-bottom: 60px;
+}
+
+/* ── Header ──────────────────────────────────────────────── */
+
+.perf-header { margin-bottom: 16px; }
+
+.perf-breadcrumb {
+    font-size: 13px;
+    color: var(--perf-muted);
+    margin-bottom: 10px;
+}
+.perf-breadcrumb a { color: var(--perf-muted); text-decoration: none; }
+.perf-breadcrumb a:hover { color: var(--perf-blue); }
+.perf-breadcrumb span { margin: 0 6px; }
+
+.perf-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.perf-title {
+    font-size: 1.7rem;
+    font-weight: 600;
+    margin: 0;
+    line-height: 1.2;
+}
+.perf-title-icon { display: inline-block; transform: translateY(-2px); }
+.perf-header-actions { display: flex; gap: 8px; }
+
+/* ── Card primitive ──────────────────────────────────────── */
+
+.perf-card {
+    background: var(--perf-card-bg);
+    border: 1px solid var(--perf-border);
+    border-radius: var(--perf-radius);
+    box-shadow: var(--perf-shadow);
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+.perf-card-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--perf-border);
+    background: #fafbfc;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.perf-card-header h5 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+.perf-card-header h5 i { color: var(--perf-blue); margin-right: 6px; }
+.perf-card-body { padding: 18px; }
+
+/* ── Core Web Vitals strip ───────────────────────────────── */
+
+.perf-vitals-strip { border-top: 3px solid var(--perf-blue); }
+
+.perf-vitals-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+}
+.perf-vital-gauge {
+    position: relative;
+    background: linear-gradient(180deg, #fafbfc, #fff);
+    border: 1px solid var(--perf-border);
+    border-radius: var(--perf-radius);
+    padding: 14px 10px 16px;
+    text-align: center;
+    transition: transform .15s, box-shadow .15s;
+}
+.perf-vital-gauge:hover { transform: translateY(-2px); box-shadow: var(--perf-shadow-h); }
+
+.perf-vital-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: .3px;
+}
+.perf-vital-badge-good             { background: #d4edda; color: #155724; }
+.perf-vital-badge-needs-improvement{ background: #fff3cd; color: #856404; }
+.perf-vital-badge-poor             { background: #f8d7da; color: #721c24; }
+
+.perf-gauge {
+    width: 100px;
+    height: 100px;
+    display: block;
+    margin: 0 auto;
+}
+
+.perf-vital-value {
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.1;
+    margin-top: 6px;
+}
+.perf-vital-unit  { font-size: 14px; font-weight: 500; margin-left: 2px; }
+.perf-vital-label { font-size: 14px; font-weight: 600; margin-top: 4px; letter-spacing: .5px; }
+.perf-vital-sub   { font-size: 11px; color: var(--perf-muted); }
+
+.perf-vital-notice {
+    margin-top: 16px;
+    padding: 10px 14px;
+    background: #e7f5ff;
+    color: #1864ab;
+    border-left: 3px solid var(--perf-blue);
+    border-radius: 4px;
+    font-size: 13px;
+}
+.perf-vital-notice i { margin-right: 6px; }
+
+/* ── Top stat cards ──────────────────────────────────────── */
+
+.perf-top-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-bottom: 16px;
+}
+.perf-stat-card {
+    background: var(--perf-card-bg);
+    border: 1px solid var(--perf-border);
+    border-radius: var(--perf-radius);
+    padding: 18px 20px;
+    box-shadow: var(--perf-shadow);
+    transition: transform .15s, box-shadow .15s;
+    border-top: 3px solid var(--perf-border);
+}
+.perf-stat-card:hover { transform: translateY(-2px); box-shadow: var(--perf-shadow-h); }
+.perf-stat-blue   { border-top-color: var(--perf-blue);   }
+.perf-stat-green  { border-top-color: var(--perf-green);  }
+.perf-stat-cyan   { border-top-color: var(--perf-cyan);   }
+.perf-stat-yellow { border-top-color: var(--perf-yellow); }
+.perf-stat-red    { border-top-color: var(--perf-red);    }
+.perf-stat-purple { border-top-color: var(--perf-purple); }
+
+.perf-stat-card .perf-stat-value {
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--perf-text);
+}
+.perf-stat-blue   .perf-stat-value { color: var(--perf-blue);   }
+.perf-stat-green  .perf-stat-value { color: var(--perf-green);  }
+.perf-stat-cyan   .perf-stat-value { color: var(--perf-cyan);   }
+.perf-stat-yellow .perf-stat-value { color: #b8860b;            }
+.perf-stat-red    .perf-stat-value { color: var(--perf-red);    }
+.perf-stat-purple .perf-stat-value { color: var(--perf-purple); }
+
+.perf-stat-label { font-size: 13px; color: var(--perf-muted); margin-top: 4px; }
+.perf-stat-sub   { font-size: 11px; color: var(--perf-muted); margin-top: 6px; }
+
+/* ── Tab bar ─────────────────────────────────────────────── */
+
+.perf-tab-bar {
+    background: #fff;
+    border: 1px solid var(--perf-border);
+    border-radius: var(--perf-radius);
+    padding: 6px;
+    margin-bottom: 16px;
+    box-shadow: var(--perf-shadow);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+}
+.perf-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 14px;
+    border-radius: 6px;
+    color: var(--perf-muted);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all .15s;
+    position: relative;
+}
+.perf-tab:hover {
+    background: #f0f4f8;
+    color: var(--perf-text);
+    text-decoration: none;
+}
+.perf-tab.active {
+    background: var(--perf-blue);
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(33, 150, 243, 0.3);
+}
+.perf-tab.active i { color: #fff; }
+.perf-tab i { font-size: 16px; }
+.perf-tab-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 700;
+    letter-spacing: .3px;
+}
+.perf-tab-badge-danger  { background: var(--perf-red);    color: #fff; }
+.perf-tab-badge-warning { background: var(--perf-yellow); color: #5a4500; }
+.perf-tab-settings      { margin-left: auto; }
+
+/* ── Tab content layout ──────────────────────────────────── */
+
+.perf-tab-content { min-height: 200px; }
+.perf-layout-2col {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 16px;
+    align-items: flex-start;
+}
+@media (max-width: 992px) {
+    .perf-layout-2col { grid-template-columns: 1fr; }
+}
+
+.perf-tips {
+    background: #fff;
+    border: 1px solid var(--perf-border);
+    border-radius: var(--perf-radius);
+    box-shadow: var(--perf-shadow);
+    overflow: hidden;
+    position: sticky;
+    top: 60px;
+}
+.perf-tips-header {
+    padding: 12px 18px;
+    background: #fff8e1;
+    border-bottom: 1px solid var(--perf-border);
+    font-weight: 600;
+    font-size: 14px;
+}
+.perf-tips-header i { color: #ff9800; margin-right: 4px; }
+.perf-tips-body {
+    padding: 14px 18px;
+    font-size: 13px;
+    color: var(--perf-muted);
+}
+.perf-tips-body p { margin-bottom: 10px; }
+.perf-tips-body p:last-child { margin-bottom: 0; }
+.perf-tips-body code {
+    background: #eef2f5;
+    color: var(--perf-red);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11.5px;
+}
+.perf-tips-body strong { color: var(--perf-text); }
+
+/* ── Section panel inside tabs ───────────────────────────── */
+
+.perf-section {
+    background: #fff;
+    border: 1px solid var(--perf-border);
+    border-radius: var(--perf-radius);
+    box-shadow: var(--perf-shadow);
+    margin-bottom: 14px;
+    overflow: hidden;
+}
+.perf-section-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--perf-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #fafbfc;
+}
+.perf-section-header h5 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+.perf-section-header .perf-section-icon {
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: rgba(33,150,243,0.1);
+    color: var(--perf-blue);
+    line-height: 28px;
+    text-align: center;
+    margin-right: 8px;
+    font-size: 14px;
+    vertical-align: -6px;
+}
+.perf-section-body { padding: 16px 18px; }
+.perf-section-body p { font-size: 13px; color: var(--perf-muted); margin-bottom: 10px; }
+
+/* ── Pill toggle (used in Settings master toggles grid) ─── */
+
+.perf-toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px dashed #eef0f3;
+}
+.perf-toggle-row:last-child { border-bottom: 0; }
+.perf-toggle-row label { margin: 0; font-size: 13px; }
+
+/* ── Action grid ─────────────────────────────────────────── */
+
+.perf-action-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+}
+.perf-action .btn {
+    width: 100%;
+    text-align: left;
+    padding: 10px 14px;
+    font-weight: 500;
+}
+.perf-action .btn i { margin-right: 8px; }
+
+/* ── Buttons / chips (soft palette) ──────────────────────── */
+
+.btn-soft-primary { background: #e3f2fd; color: #1976d2; border: 0; }
+.btn-soft-success { background: #e8f5e9; color: #2e7d32; border: 0; }
+.btn-soft-warning { background: #fff8e1; color: #ef6c00; border: 0; }
+.btn-soft-danger  { background: #ffebee; color: #c62828; border: 0; }
+.btn-soft-info    { background: #e1f5fe; color: #0277bd; border: 0; }
+.btn-soft-primary:hover, .btn-soft-success:hover, .btn-soft-warning:hover,
+.btn-soft-danger:hover, .btn-soft-info:hover { filter: brightness(.95); }
+
+/* ── Severity badges (security audit) ────────────────────── */
+
+.perf-sev { font-size: 10px; padding: 2px 8px; border-radius: 10px; text-transform: lowercase; font-weight: 600; }
+.perf-sev-critical { background: #ffebee; color: #c62828; }
+.perf-sev-high     { background: #fff3e0; color: #ef6c00; }
+.perf-sev-medium   { background: #fff8e1; color: #b28704; }
+.perf-sev-low      { background: #e3f2fd; color: #1976d2; }
+
+/* ── Severity score circle (security) ────────────────────── */
+
+.perf-score-circle {
+    width: 110px;
+    height: 110px;
+    margin: 0 auto;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.perf-score-circle .perf-score-num {
+    font-size: 36px;
+    font-weight: 800;
+}
+
+/* ── Log viewer ──────────────────────────────────────────── */
+
+.perf-log-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 14px;
+}
+@media (max-width: 992px) {
+    .perf-log-layout { grid-template-columns: 1fr; }
+}
+.perf-log-sources {
+    background: #fff;
+    border: 1px solid var(--perf-border);
+    border-radius: var(--perf-radius);
+    box-shadow: var(--perf-shadow);
+    overflow: hidden;
+}
+.perf-log-cat {
+    padding: 8px 14px 4px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--perf-muted);
+    font-weight: 700;
+    background: #fafbfc;
+    border-top: 1px solid var(--perf-border);
+}
+.perf-log-cat:first-child { border-top: 0; }
+.perf-log-source {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    border-top: 1px solid #eef0f3;
+    cursor: pointer;
+    transition: background .15s;
+    gap: 10px;
+}
+.perf-log-source:hover { background: #f0f4f8; }
+.perf-log-source.active { background: #e3f2fd; border-left: 3px solid var(--perf-blue); padding-left: 11px; }
+.perf-log-source-icon { font-size: 18px; color: var(--perf-muted); }
+.perf-log-source-info { flex: 1; min-width: 0; }
+.perf-log-source-name { font-size: 13px; font-weight: 500; }
+.perf-log-source-size { font-size: 11px; color: var(--perf-muted); }
+.perf-log-source-disabled { opacity: .4; cursor: not-allowed; }
+
+.perf-log-viewer {
+    background: #1e1e1e;
+    color: #e0e0e0;
+    border-radius: var(--perf-radius);
+    padding: 14px;
+    font-family: 'Consolas','Monaco','Courier New',monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    max-height: 480px;
+    overflow: auto;
+    white-space: pre;
+}
+.perf-log-pre {
+    background: #1e1e1e;
+    color: #e0e0e0;
+    padding: 14px;
+    border-radius: 4px;
+    font-family: 'Consolas','Monaco','Courier New',monospace;
+    font-size: 12px;
+    max-height: 480px;
+    overflow: auto;
+    white-space: pre;
+    line-height: 1.45;
+    margin: 0;
+}
+
+/* ── Environment health checklist ────────────────────────── */
+
+.perf-health-list .perf-health-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #eef0f3;
+}
+.perf-health-list .perf-health-row:last-child { border-bottom: 0; }
+.perf-health-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 10px;
+    vertical-align: middle;
+}
+.perf-health-pass { background: var(--perf-green); box-shadow: 0 0 0 3px rgba(40,167,69,.15); }
+.perf-health-warn { background: var(--perf-yellow); box-shadow: 0 0 0 3px rgba(255,193,7,.15); }
+.perf-health-fail { background: var(--perf-red); box-shadow: 0 0 0 3px rgba(220,53,69,.15); }
+
+/* ── Emergency Rollback panel ────────────────────────────── */
+
+.perf-rollback {
+    background: #fff4f4;
+    border: 1px solid #f5c6cb;
+    border-radius: var(--perf-radius);
+    padding: 16px;
+    color: #721c24;
+}
+.perf-rollback h5 { color: #721c24; font-size: 14px; font-weight: 600; }
+
+/* ── CLI Commands panel ──────────────────────────────────── */
+
+.perf-cli {
+    background: #1e1e1e;
+    color: #e0e0e0;
+    border-radius: var(--perf-radius);
+    padding: 16px;
+    font-family: 'Consolas','Monaco','Courier New',monospace;
+    font-size: 12px;
+}
+.perf-cli h5 { color: #fff; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; margin-bottom: 10px; }
+.perf-cli code {
+    display: block;
+    background: #2d2d30;
+    color: #9cdcfe;
+    padding: 6px 10px;
+    border-radius: 4px;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+
+/* ── Master toggle bar (bottom) ──────────────────────────── */
+
+.perf-master-toggle-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #fff;
+    border-top: 1px solid var(--perf-border);
+    padding: 8px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 100;
+    box-shadow: 0 -2px 6px rgba(0,0,0,.04);
+    font-size: 13px;
+}
+
+/* ── Misc helpers ────────────────────────────────────────── */
+
+.perf-grade-A { color: var(--perf-green); }
+.perf-grade-B { color: #4caf50; }
+.perf-grade-C { color: var(--perf-yellow); }
+.perf-grade-D { color: #ef6c00; }
+.perf-grade-F { color: var(--perf-red); }
+
+.perf-pill {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #f0f4f8;
+    color: var(--perf-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .3px;
+}
+
+.perf-divider {
+    height: 1px;
+    background: var(--perf-border);
+    margin: 16px 0;
+}
+
+table.perf-table { width: 100%; margin: 0; }
+table.perf-table thead th {
+    background: #fafbfc;
+    border-bottom: 1px solid var(--perf-border);
+    padding: 10px 16px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: var(--perf-muted);
+    font-weight: 600;
+}
+table.perf-table tbody td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #eef0f3;
+    font-size: 13px;
+    vertical-align: middle;
+}
+table.perf-table tbody tr:last-child td { border-bottom: 0; }
+table.perf-table tbody tr:hover { background: #fafbfc; }

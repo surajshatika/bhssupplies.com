@@ -1,0 +1,95 @@
+@php
+    $product_url = route('product', $product->slug);
+    if(isset($product->auction_product) && $product->auction_product == 1) {
+        $product_url = route('auction-product', $product->slug);
+    }
+    $stockQty = 0;
+    foreach ($product->stocks as $_s) { $stockQty += $_s->qty; }
+@endphp
+
+<div class="pc-card">
+
+    {{-- Discount badge --}}
+    @if(discount_in_percentage($product) > 0)
+        <div class="pc-discount-badge">{{ discount_in_percentage($product) }}% OFF</div>
+    @endif
+    @if($product->wholesale_product)
+        <div class="pc-wholesale-badge">WHOLESALE</div>
+    @endif
+
+    {{-- Image --}}
+    <a href="{{ $product_url }}" class="pc-img-wrap">
+        <img class="pc-img lazyload"
+            src="{{ static_asset('assets/img/placeholder.jpg') }}"
+            data-src="{{ uploaded_asset($product->thumbnail_img) }}"
+            alt="{{ $product->getTranslation('name') }}"
+            onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder.jpg') }}';">
+    </a>
+
+    {{-- Quick action buttons (show on hover) --}}
+    <div class="pc-actions">
+        <button class="pc-action-btn" type="button"
+            onclick="addToWishList({{ $product->id }})"
+            title="{{ translate('Add to Wishlist') }}">
+            <i class="la la-heart-o"></i>
+        </button>
+        <button class="pc-action-btn" type="button"
+            onclick="addToCompare({{ $product->id }})"
+            title="{{ translate('Compare') }}">
+            <i class="las la-sync"></i>
+        </button>
+    </div>
+
+    {{-- Card Body --}}
+    <div class="pc-body">
+
+        {{-- Brand --}}
+        @if($product->brand)
+            <div class="pc-brand">{{ $product->brand->getTranslation('name') }}</div>
+        @endif
+
+        {{-- Product Name --}}
+        <h3 class="pc-name">
+            <a href="{{ $product_url }}" class="pc-name-link">{{ $product->getTranslation('name') }}</a>
+        </h3>
+
+        {{-- SKU --}}
+        @php $firstSku = $product->stocks->first()?->sku; @endphp
+        @if($firstSku)
+            <div class="pc-sku">SKU: {{ $firstSku }}</div>
+        @endif
+
+        {{-- Star Rating --}}
+        <div class="pc-rating">
+            {{ renderStarRating($product->rating) }}
+        </div>
+
+        {{-- Price --}}
+        <div class="pc-price-row">
+            @if(home_base_price($product) != home_discounted_base_price($product))
+                <del class="pc-price-orig">{{ home_base_price($product) }}</del>
+            @endif
+            <span class="pc-price-final">{{ home_discounted_base_price($product) }}</span>
+        </div>
+
+        {{-- Stock status --}}
+        <div class="pc-stock {{ $stockQty > 0 ? 'in' : 'out' }}">
+            <i class="las {{ $stockQty > 0 ? 'la-check-circle' : 'la-times-circle' }}"></i>
+            {{ $stockQty > 0 ? translate('In Stock') : translate('Out of Stock') }}
+        </div>
+
+        @if(addon_is_activated('club_point') && $product->earn_point > 0)
+            <div class="rounded px-2 mb-2 bg-soft-primary border-soft-primary border" style="font-size:11px;">
+                {{ translate('Club Point') }}: <span class="fw-700 float-right">{{ $product->earn_point }}</span>
+            </div>
+        @endif
+
+        {{-- Add to Cart button --}}
+        <button class="pc-cart-btn" type="button"
+            onclick="showAddToCartModal({{ $product->id }})">
+            <i class="las la-shopping-cart"></i>
+            {{ translate('Add to Cart') }}
+        </button>
+
+    </div>{{-- /pc-body --}}
+</div>{{-- /pc-card --}}

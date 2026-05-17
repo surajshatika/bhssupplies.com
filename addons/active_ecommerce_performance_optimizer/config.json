@@ -1,0 +1,237 @@
+{
+    "name"                  : "Performance Optimizer (Advanced)",
+    "unique_identifier"     : "performance_optimizer",
+    "version"               : "1.1",
+    "minimum_item_version"  : "8",
+    "addon_banner"          : "performance_optimizer_banner.png",
+    "directory" : [
+        {
+            "name": [
+                "app/Services/PerformanceOptimizer",
+                "app/Models/PerformanceOptimizer",
+                "app/Http/Middleware/PerformanceOptimizer",
+                "app/Jobs/PerformanceOptimizer",
+                "app/Console/Commands/PerformanceOptimizer",
+                "app/AddonAi/PerformanceOptimizer/Engine",
+                "app/AddonAi/PerformanceOptimizer/Provider",
+                "resources/views/backend/performance_optimizer",
+                "resources/views/backend/performance_optimizer/tabs",
+                "resources/views/backend/performance_optimizer/partials",
+                "public/assets/performance_optimizer",
+                "public/assets/performance_optimizer/css",
+                "public/assets/performance_optimizer/js",
+                "storage/app/performance-backup",
+                "storage/framework/page-cache"
+            ]
+        }
+    ],
+    "sql_file" : "1.0.sql",
+    "files" : [
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceOptimizerController.php",
+            "update_directory": "app/Http/Controllers/PerformanceOptimizerController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceImageController.php",
+            "update_directory": "app/Http/Controllers/PerformanceImageController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceCssJsController.php",
+            "update_directory": "app/Http/Controllers/PerformanceCssJsController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceCacheController.php",
+            "update_directory": "app/Http/Controllers/PerformanceCacheController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceDatabaseController.php",
+            "update_directory": "app/Http/Controllers/PerformanceDatabaseController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceFontController.php",
+            "update_directory": "app/Http/Controllers/PerformanceFontController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceVitalsController.php",
+            "update_directory": "app/Http/Controllers/PerformanceVitalsController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceSecurityController.php",
+            "update_directory": "app/Http/Controllers/PerformanceSecurityController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceLogController.php",
+            "update_directory": "app/Http/Controllers/PerformanceLogController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceMonitorController.php",
+            "update_directory": "app/Http/Controllers/PerformanceMonitorController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceScriptManagerController.php",
+            "update_directory": "app/Http/Controllers/PerformanceScriptManagerController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceCacheRulesController.php",
+            "update_directory": "app/Http/Controllers/PerformanceCacheRulesController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceEdgeCdnController.php",
+            "update_directory": "app/Http/Controllers/PerformanceEdgeCdnController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceSecurityPlusController.php",
+            "update_directory": "app/Http/Controllers/PerformanceSecurityPlusController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/controllers/PerformanceAiController.php",
+            "update_directory": "app/Http/Controllers/PerformanceAiController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/ImageOptimizerService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/ImageOptimizerService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/CssJsMinifierService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/CssJsMinifierService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/PageCacheService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/PageCacheService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/DatabaseCleanerService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/DatabaseCleanerService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/FontOptimizerService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/FontOptimizerService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/WebVitalsService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/WebVitalsService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/SecurityAuditService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/SecurityAuditService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/ScriptManagerService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/ScriptManagerService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/CloudflareService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/CloudflareService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/BunnyCdnService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/BunnyCdnService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/CloudFrontService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/CloudFrontService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Services/SlowQueryAnalyzerService.php",
+            "update_directory": "app/Services/PerformanceOptimizer/SlowQueryAnalyzerService.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Providers/PerformanceOptimizerEventServiceProvider.php",
+            "update_directory": "app/Providers/PerformanceOptimizerEventServiceProvider.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Models/OptimizationLog.php",
+            "update_directory": "app/Models/PerformanceOptimizer/OptimizationLog.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Models/WebVital.php",
+            "update_directory": "app/Models/PerformanceOptimizer/WebVital.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Models/ScriptRule.php",
+            "update_directory": "app/Models/PerformanceOptimizer/ScriptRule.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Models/CacheRule.php",
+            "update_directory": "app/Models/PerformanceOptimizer/CacheRule.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Models/SlowQuery.php",
+            "update_directory": "app/Models/PerformanceOptimizer/SlowQuery.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Models/AiRecommendation.php",
+            "update_directory": "app/Models/PerformanceOptimizer/AiRecommendation.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Models/AutoFixHistory.php",
+            "update_directory": "app/Models/PerformanceOptimizer/AutoFixHistory.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/AddonAi/Engine/RecommendationEngine.php",
+            "update_directory": "app/AddonAi/PerformanceOptimizer/Engine/RecommendationEngine.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/AddonAi/Engine/AutoFixEngine.php",
+            "update_directory": "app/AddonAi/PerformanceOptimizer/Engine/AutoFixEngine.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Commands/PerfRunAiAnalysisCommand.php",
+            "update_directory": "app/Console/Commands/PerformanceOptimizer/PerfRunAiAnalysisCommand.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Middleware/PageCacheMiddleware.php",
+            "update_directory": "app/Http/Middleware/PerformanceOptimizer/PageCacheMiddleware.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Middleware/PerformanceOutputMiddleware.php",
+            "update_directory": "app/Http/Middleware/PerformanceOptimizer/PerformanceOutputMiddleware.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Middleware/SecurityHardeningMiddleware.php",
+            "update_directory": "app/Http/Middleware/PerformanceOptimizer/SecurityHardeningMiddleware.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Middleware/AddonActiveMiddleware.php",
+            "update_directory": "app/Http/Middleware/PerformanceOptimizer/AddonActiveMiddleware.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Middleware/VitalsCollectMiddleware.php",
+            "update_directory": "app/Http/Middleware/PerformanceOptimizer/VitalsCollectMiddleware.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Middleware/BotProtectionMiddleware.php",
+            "update_directory": "app/Http/Middleware/PerformanceOptimizer/BotProtectionMiddleware.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Middleware/HotlinkProtectionMiddleware.php",
+            "update_directory": "app/Http/Middleware/PerformanceOptimizer/HotlinkProtectionMiddleware.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Jobs/ConvertImagesJob.php",
+            "update_directory": "app/Jobs/PerformanceOptimizer/ConvertImagesJob.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/Commands/PerfAutoCleanCommand.php",
+            "update_directory": "app/Console/Commands/PerformanceOptimizer/PerfAutoCleanCommand.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/routes/performance_optimizer.php",
+            "update_directory": "routes/performance_optimizer.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/assets/performance_optimizer_banner.png",
+            "update_directory": "public/performance_optimizer_banner.png"
+        }
+    ],
+    "folders" : [
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/views/backend/performance_optimizer",
+            "update_directory": "resources/views/backend/performance_optimizer"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_performance_optimizer/public/assets/performance_optimizer",
+            "update_directory": "public/assets/performance_optimizer"
+        }
+    ]
+}

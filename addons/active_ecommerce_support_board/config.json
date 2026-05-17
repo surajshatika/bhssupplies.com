@@ -1,0 +1,42 @@
+{
+    "name"                  : "Active eCommerce Chat & Support App",
+    "unique_identifier"     : "active_ecommerce_support_board",
+    "version"               : "1.0",
+    "minimum_item_version"  : "8",
+    "addon_banner"          : "support_board_banner.png",
+    "directory" : [
+        {
+            "name": [
+                "resources/views/frontend/support_board",
+                "resources/views/backend/support_board"
+            ]
+        }
+    ],
+    "sql_file" : "1.0.sql",
+    "files" : [
+        {
+            "root_directory"  : "addons/active_ecommerce_support_board/controllers/SupportBoardController.php",
+            "update_directory": "app/Http/Controllers/SupportBoardController.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_support_board/Utility/SupportBoardUtility.php",
+            "update_directory": "app/Utility/SupportBoardUtility.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_support_board/views/frontend/support_board/chat.blade.php",
+            "update_directory": "resources/views/frontend/support_board/chat.blade.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_support_board/views/frontend/support_board/tickets.blade.php",
+            "update_directory": "resources/views/frontend/support_board/tickets.blade.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_support_board/views/backend/support_board/settings.blade.php",
+            "update_directory": "resources/views/backend/support_board/settings.blade.php"
+        },
+        {
+            "root_directory"  : "addons/active_ecommerce_support_board/assets/support_board_banner.png",
+            "update_directory": "public/support_board_banner.png"
+        }
+    ]
+}

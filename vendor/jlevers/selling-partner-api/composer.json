@@ -1,0 +1,45 @@
+{
+    "name": "jlevers/selling-partner-api",
+    "version": "5.10.1",
+    "description": "PHP client for Amazon's Selling Partner API",
+    "keywords": [
+        "api",
+        "selling-partner-api",
+        "amazon",
+        "ecommerce",
+        "sp-api",
+        "sdk",
+        "rest",
+        "api"
+    ],
+    "license": "BSD-3-Clause",
+    "type": "library",
+    "authors": [
+        {
+            "name": "Jesse Evers",
+            "homepage": "https://jesseevers.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.3",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "guzzlehttp/guzzle": "^6.0|^7.0",
+        "phpoffice/phpspreadsheet": "^1.19"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^8.0 || ^9.0",
+        "friendsofphp/php-cs-fixer": "^3.4"
+    },
+    "autoload": {
+        "psr-4": { "SellingPartnerApi\\" : "lib/" }
+    },
+    "autoload-dev": {
+        "psr-4": { "SellingPartnerApi\\Tests\\" : "test/" }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit",
+        "lint": "vendor/bin/php-cs-fixer fix"
+    }
+}

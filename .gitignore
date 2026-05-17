@@ -1,5 +1,5 @@
 ## ───────────── Laravel core ─────────────
-/vendor/
+
 /node_modules/
 /bootstrap/compiled.php
 /bootstrap/cache/*.php

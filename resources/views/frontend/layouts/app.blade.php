@@ -53,6 +53,16 @@
     <link rel="icon" href="{{ $site_icon }}">
     <link rel="apple-touch-icon" href="{{ $site_icon }}">
 
+    {{-- Preload header logo so the browser starts fetching it before parsing the body --}}
+    @php
+        $__seoLogoUrl = ($_logo = get_setting('header_logo'))
+            ? uploaded_asset($_logo)
+            : static_asset('assets/img/logo.png');
+    @endphp
+    @if ($__seoLogoUrl)
+        <link rel="preload" as="image" href="{{ $__seoLogoUrl }}" fetchpriority="high">
+    @endif
+
     @yield('lcp_preload')
     @yield('preload_assets')
 

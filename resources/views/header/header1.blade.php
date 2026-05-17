@@ -149,10 +149,12 @@
                         @endphp
                         @if ($header_logo != null)
                             <img id="header-logo-preview" src="{{ uploaded_asset($header_logo) }}" alt="{{ env('APP_NAME') }} Logo"
-                                class="mw-100 h-55px h-md-70px" width="200" height="70">
+                                class="mw-100 h-55px h-md-70px" width="200" height="70"
+                                loading="eager" fetchpriority="high" decoding="async">
                         @else
                             <img id="header-logo-preview" src="{{ static_asset('assets/img/logo.png') }}" alt="{{ env('APP_NAME') }} Logo"
-                                class="mw-100 h-55px h-md-70px" width="200" height="70">
+                                class="mw-100 h-55px h-md-70px" width="200" height="70"
+                                loading="eager" fetchpriority="high" decoding="async">
                         @endif
                     </a>
                 </div>

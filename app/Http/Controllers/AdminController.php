@@ -348,8 +348,54 @@ class AdminController extends Controller
 
     function clearCache(Request $request)
     {
-        Artisan::call('optimize:clear');
-        flash(translate('Cache cleared successfully'))->success();
+        // Run each clear independently — a single failure (typically a
+        // permission issue on bootstrap/cache or storage/framework on shared
+        // hosting) used to crash the whole flow with a 500. Now we record
+        // each step's outcome and tell the admin exactly what succeeded.
+        $steps = [
+            'cache:clear'    => 'Application cache',
+            'config:clear'   => 'Config cache',
+            'route:clear'    => 'Route cache',
+            'view:clear'     => 'View cache',
+            'event:clear'    => 'Event cache',
+            'compiled:clear' => 'Compiled services',
+        ];
+
+        $ok = [];
+        $failed = [];
+
+        foreach ($steps as $command => $label) {
+            try {
+                \Illuminate\Support\Facades\Artisan::call($command);
+                $ok[] = $label;
+            } catch (\Throwable $e) {
+                $failed[$label] = $e->getMessage();
+                \Log::warning("clearCache step failed: {$command}", ['error' => $e->getMessage()]);
+            }
+        }
+
+        // Also try to nuke the on-disk compiled files directly in case the
+        // artisan commands could not delete them (read-only file edge case).
+        foreach ([
+            base_path('bootstrap/cache/config.php'),
+            base_path('bootstrap/cache/routes-v7.php'),
+            base_path('bootstrap/cache/services.php'),
+            base_path('bootstrap/cache/packages.php'),
+            base_path('bootstrap/cache/events.php'),
+        ] as $path) {
+            if (is_file($path)) {
+                @unlink($path);
+            }
+        }
+
+        if (empty($failed)) {
+            flash(translate('Cache cleared successfully'))->success();
+        } elseif (!empty($ok)) {
+            flash(translate('Cache partially cleared. Some steps failed — check storage/logs/laravel.log.'))->warning();
+        } else {
+            flash(translate('Cache could not be cleared — check file permissions on bootstrap/cache and storage/framework.'))->error();
+        }
+
         return back();
     }
 

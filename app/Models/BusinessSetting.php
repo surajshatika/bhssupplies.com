@@ -55,26 +55,35 @@ class BusinessSetting extends Model
 
     public function setValueAttribute($value): void
     {
-        if (!$this->shouldEncrypt($this->type ?? '', $value)) {
-            $this->attributes['value'] = $value;
-            return;
-        }
-
-        if (is_string($value) && Str::startsWith($value, self::ENC_PREFIX)) {
-            // Already encrypted (e.g. cache-driven re-save) — keep as is.
-            $this->attributes['value'] = $value;
-            return;
-        }
-
+        // Hard safety wrapper — under no circumstance should setting the value
+        // attribute on this model break the saving flow. Outermost catch logs
+        // and falls back to a plain assignment.
         try {
-            $this->attributes['value'] = self::ENC_PREFIX . Crypt::encryptString((string) $value);
+            if (!$this->shouldEncrypt($this->type ?? '', $value)) {
+                $this->attributes['value'] = $value;
+                return;
+            }
+
+            if (is_string($value) && Str::startsWith($value, self::ENC_PREFIX)) {
+                $this->attributes['value'] = $value;
+                return;
+            }
+
+            try {
+                $this->attributes['value'] = self::ENC_PREFIX . Crypt::encryptString((string) $value);
+            } catch (Throwable $e) {
+                logger()->warning('BusinessSetting encrypt failed; storing raw', [
+                    'type'  => $this->type ?? '?',
+                    'error' => $e->getMessage(),
+                ]);
+                $this->attributes['value'] = $value;
+            }
         } catch (Throwable $e) {
-            // If encryption fails for any reason, persist raw — never lose data.
-            logger()->warning('BusinessSetting encrypt failed; storing raw', [
+            logger()->warning('BusinessSetting mutator outer fault — storing raw', [
                 'type'  => $this->type ?? '?',
                 'error' => $e->getMessage(),
             ]);
-            $this->attributes['value'] = $value;
+            $this->attributes['value'] = is_scalar($value) ? (string) $value : (is_array($value) ? json_encode($value) : '');
         }
     }
 

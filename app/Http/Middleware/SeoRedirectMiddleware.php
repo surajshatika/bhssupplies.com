@@ -29,31 +29,40 @@ class SeoRedirectMiddleware
 
     public function handle(Request $request, Closure $next): Response
     {
-        if (!$this->shouldEvaluate($request)) {
-            return $next($request);
-        }
-
-        $map = $this->loadMap();
-        if (empty($map)) {
-            return $next($request);
-        }
-
-        $path = '/' . ltrim($request->path(), '/');
-        $candidates = [
-            $path,
-            rtrim($path, '/') . '/',
-            $request->fullUrl(),
-            $request->url(),
-        ];
-
-        foreach ($candidates as $key) {
-            if (!isset($map[$key])) {
-                continue;
+        // Outer safety net — under no circumstance should this middleware
+        // break the request pipeline. Any unexpected failure is logged and
+        // the request continues unmodified.
+        try {
+            if (!$this->shouldEvaluate($request)) {
+                return $next($request);
             }
 
-            $rule = $map[$key];
-            $this->recordHit($rule['id'] ?? null);
-            return redirect()->away($rule['target'], $rule['status']);
+            $map = $this->loadMap();
+            if (empty($map)) {
+                return $next($request);
+            }
+
+            $path = '/' . ltrim($request->path(), '/');
+            $candidates = [
+                $path,
+                rtrim($path, '/') . '/',
+                $request->fullUrl(),
+                $request->url(),
+            ];
+
+            foreach ($candidates as $key) {
+                if (!isset($map[$key])) {
+                    continue;
+                }
+
+                $rule = $map[$key];
+                $this->recordHit($rule['id'] ?? null);
+                return redirect()->away($rule['target'], $rule['status']);
+            }
+        } catch (Throwable $e) {
+            try {
+                logger()->warning('SeoRedirectMiddleware bypassed due to error', ['error' => $e->getMessage()]);
+            } catch (Throwable $ignored) {}
         }
 
         return $next($request);

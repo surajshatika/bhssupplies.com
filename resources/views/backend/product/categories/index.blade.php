@@ -197,14 +197,21 @@
                 return;
             }
             $.ajax({
-                url: "{{ route('categories.destroy', ':id') }}".replace(':id', categoryId),
+                url: "{{ route('categories.admin.destroy', ':id') }}".replace(':id', categoryId),
                 type: 'GET',
                 success: function(response) {
                     if (response == 1) {
                         AIZ.plugins.notify('success', '{{ translate('Selected item deleted successfully') }}');
                         hideBulkActionModal();
                         getCategories(currentTab);
+                    } else {
+                        AIZ.plugins.notify('danger', '{{ translate('Something went wrong') }}');
+                        hideBulkActionModal();
                     }
+                },
+                error: function() {
+                    AIZ.plugins.notify('danger', '{{ translate('Something went wrong') }}');
+                    hideBulkActionModal();
                 }
             });
         }

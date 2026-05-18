@@ -123,7 +123,7 @@
 
 <header
     class="@if (get_setting('header_stikcy') == 'on') sticky-top @endif z-1020 middle-background-color-visibility stikcy-header-visibility"
-    style="background-color: {{ get_setting('middle_header_bg_color') ?: '#000000' }}">
+    style="background-color: {{ get_setting('middle_header_bg_color') ?: '#fafdfd' }}">
     <!-- Search Bar -->
     <div class="position-relative logo-bar-area border-bottom border-md-nonea z-1025">
         <div class="container">

@@ -143,17 +143,17 @@
                 </button>
                 <!-- Header Logo -->
                 <div class="col-auto pl-0 pr-3 d-flex align-items-center">
-                    <a class="d-block py-20px mr-3 ml-0" href="{{ route('home') }}">
+                    <a class="d-block py-10px mr-3 ml-0" href="{{ route('home') }}">
                         @php
                             $header_logo = get_setting('header_logo');
                         @endphp
                         @if ($header_logo != null)
                             <img id="header-logo-preview" src="{{ uploaded_asset($header_logo) }}" alt="{{ env('APP_NAME') }} Logo"
-                                class="mw-100 h-55px h-md-70px" width="200" height="70"
+                                class="mw-100 h-55px h-md-100px" width="230" height="100"
                                 loading="eager" fetchpriority="high" decoding="async">
                         @else
                             <img id="header-logo-preview" src="{{ static_asset('assets/img/logo.png') }}" alt="{{ env('APP_NAME') }} Logo"
-                                class="mw-100 h-55px h-md-70px" width="200" height="70"
+                                class="mw-100 h-55px h-md-100px" width="230" height="100"
                                 loading="eager" fetchpriority="high" decoding="async">
                         @endif
                     </a>

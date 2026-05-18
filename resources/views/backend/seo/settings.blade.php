@@ -1,17 +1,33 @@
 @extends('backend.layouts.app')
 
 @section('content')
+@include('backend.partials.modern_module_styles')
 @php
     $providers = ['openai' => 'OpenAI (ChatGPT)', 'claude' => 'Claude (Anthropic)', 'gemini' => 'Gemini (Google)', 'grok' => 'Grok (xAI)'];
 @endphp
-<div class="aiz-titlebar mt-2 mb-4">
-    <div class="row align-items-center">
-        <div class="col-md-6">
-            <h1 class="h3"><i class="las la-sliders-h mr-2"></i>{{ translate('AI SEO Global Settings') }}</h1>
+
+<div class="mm-hero mm-hero--seo">
+    <div class="mm-hero-body d-flex flex-wrap align-items-center justify-content-between">
+        <div class="d-flex align-items-center">
+            <div class="mm-hero-icon mr-3">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </div>
+            <div>
+                <h2>{{ translate('AI SEO Global Settings') }}</h2>
+                <p>{{ translate('Configure AI providers, API keys, webmaster verifications, and automation') }}</p>
+                <div class="mt-2 d-flex flex-wrap" style="gap:.4rem;">
+                    <span class="mm-chip"><i class="las la-robot"></i> {{ count($providers) }} AI {{ translate('providers') }}</span>
+                    <span class="mm-chip"><i class="las la-key"></i> {{ translate('API Keys') }}</span>
+                    <span class="mm-chip"><i class="las la-shield-alt"></i> {{ translate('Webmaster Tools') }}</span>
+                </div>
+            </div>
         </div>
-        <div class="col-md-6 text-md-right">
-            <a href="{{ route('admin.seo-suite.index') }}" class="btn btn-soft-secondary mr-2">
-                <i class="las la-arrow-left mr-1"></i>{{ translate('Dashboard') }}
+        <div class="d-flex flex-wrap mt-3 mt-md-0" style="gap:.5rem;">
+            <a href="{{ route('admin.seo-suite.index') }}" class="mm-btn mm-btn-light">
+                <i class="las la-arrow-left"></i> {{ translate('Dashboard') }}
+            </a>
+            <a href="{{ route('admin.seo-suite.ai_assistant') }}" class="mm-btn mm-btn-ghost">
+                <i class="las la-robot"></i> {{ translate('AI Assistant') }}
             </a>
         </div>
     </div>

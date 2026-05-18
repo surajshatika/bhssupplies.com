@@ -103,7 +103,7 @@ class FlashDealController extends Controller
      */
     public function show($id)
     {
-        //
+        return redirect()->route('flash_deals.edit', ['id' => $id, 'lang' => env('DEFAULT_LANGUAGE')]);
     }
 
     /**

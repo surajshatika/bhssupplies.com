@@ -160,7 +160,7 @@
                 </div>
                 <!-- Search Icon for small device -->
                 <div class="d-lg-none ml-auto mr-0">
-                    <a class="p-2 d-block text-white" href="javascript:void(0);" data-toggle="class-toggle"
+                    <a class="p-2 d-block text-black" href="javascript:void(0);" data-toggle="class-toggle"
                         data-target=".front-header-search">
                         <i class="las la-search la-flip-horizontal la-2x"></i>
                     </a>
@@ -389,7 +389,7 @@
                 <div class="d-none d-xl-block ml-auto mr-0">
                     @if (get_setting('helpline_number'))
                         <a href="tel:{{ get_setting('helpline_number') }}"
-                            class="d-inline-flex align-items-center text-white fs-13 mr-4 text-decoration-none"
+                            class="d-inline-flex align-items-center text-black fs-13 mr-4 text-decoration-none"
                             style="padding-top: 20px;">
                             <i class="las la-phone-volume mr-1" style="font-size:1.1rem;"></i>
                             <span>{{ translate('Help line') }} {{ get_setting('helpline_number') }}</span>
@@ -399,7 +399,7 @@
                         <span class="d-flex align-items-center nav-user-info py-20px @if (isAdmin()) ml-5 @endif"
                             id="nav-user-info">
                             <!-- Image -->
-                            <span class="size-40px rounded-circle overflow-hidden border border-transparent nav-user-img">
+                            <span class="size-40px rounded-circle overflow-hidden border border-transparent nav-user-img" style="color:#000 !important;">
                                 @if ($user->avatar_original != null)
                                     <img src="{{ uploaded_asset(Auth::user()->avatar_original) }}" class="img-fit h-100" alt="{{ translate('avatar') }}"
                                         onerror="this.onerror=null;this.src='{{ static_asset('assets/img/avatar-place.png') }}';">
@@ -426,10 +426,10 @@
                                 </svg>
                             </span>
                             <a href="{{ route('user.login') }}"
-                                class="opacity-60 hov-opacity-100 fs-12 d-inline-block border-right border-soft-light border-width-2 pr-2 ml-3 middle-text-color-visibility" style="color: {{ $middleHeaderTextColor }}">{{ translate('Login') }}</a>
+                                class="opacity-60 hov-opacity-100 fs-12 d-inline-block border-right border-soft-light border-width-2 pr-2 ml-3 middle-text-color-visibility" style="color:#000 !important">{{ translate('Login') }}</a>
                             <a href="{{ route('user.registration') }}"
                                 {{-- <a href="{{ route('user.registration') }}" --}}
-                                class="opacity-60 hov-opacity-100 fs-12 d-inline-block py-2 pl-2 middle-text-color-visibility" style="color: {{ $middleHeaderTextColor }}">{{ translate('Registration') }}</a>
+                                class="opacity-60 hov-opacity-100 fs-12 d-inline-block py-2 pl-2 middle-text-color-visibility" style="color:#000 !important">{{ translate('Registration') }}</a>
                         </span>
                     @endauth
                 </div>

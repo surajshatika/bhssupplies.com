@@ -410,14 +410,14 @@
                                 @endif
                             </span>
                             <!-- Name -->
-                            <h4 class="h5 fs-14 fw-700 ml-2 mb-0 middle-text-color-visibility" style="color: {{ $middleHeaderTextColor }}">{{ $user->name }}</h4>
+                            <h4 class="h5 fs-14 fw-700 ml-2 mb-0 middle-text-color-visibility" style="color: #000 !important;">{{ $user->name }}</h4>
                         </span>
                     @else
                         <!--Login & Registration -->
                         <span class="d-flex align-items-center nav-user-info ml-3">
                             <!-- Image -->
                             <span
-                                class="size-40px rounded-circle overflow-hidden border d-flex align-items-center justify-content-center nav-user-img middle-text-color-visibility" style="color: {{ $middleHeaderTextColor }}">
+                                class="size-40px rounded-circle overflow-hidden border d-flex align-items-center justify-content-center nav-user-img middle-text-color-visibility" style="color: #000 !important;">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="19.902" height="20.012"
                                     viewBox="0 0 19.902 20.012">
                                     <path id="fe2df171891038b33e9624c27e96e367"

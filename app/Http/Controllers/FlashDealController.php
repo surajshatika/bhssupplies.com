@@ -74,12 +74,14 @@ class FlashDealController extends Controller
                 $flash_deal_product->product_id = $product;
                 $flash_deal_product->save();
 
-                $root_product = Product::findOrFail($product);
-                $root_product->discount = $request['discount_'.$product];
-                $root_product->discount_type = $request['discount_type_'.$product];
-                $root_product->discount_start_date = strtotime($date_var[0]);
-                $root_product->discount_end_date   = strtotime( $date_var[1]);
-                $root_product->save();
+                $root_product = Product::find($product);
+                if ($root_product) {
+                    $root_product->discount = $request['discount_'.$product];
+                    $root_product->discount_type = $request['discount_type_'.$product];
+                    $root_product->discount_start_date = strtotime($date_var[0]);
+                    $root_product->discount_end_date   = strtotime( $date_var[1]);
+                    $root_product->save();
+                }
             }
 
             $flash_deal_translation = FlashDealTranslation::firstOrNew(['lang' => env('DEFAULT_LANGUAGE'), 'flash_deal_id' => $flash_deal->id]);
@@ -148,13 +150,14 @@ class FlashDealController extends Controller
 
         $flash_deal->banner = $request->banner;
         foreach ($flash_deal->flash_deal_products as $key => $flash_deal_product) {
-            $prev_product = Product::findOrFail($flash_deal_product->product_id);
-            $prev_product->discount = 0.00;
-            $prev_product->discount_type = 'amount';
-            $prev_product->discount_start_date = null;
-            $prev_product->discount_end_date   = null;
-            $prev_product->save();
-
+            $prev_product = Product::find($flash_deal_product->product_id);
+            if ($prev_product) {
+                $prev_product->discount = 0.00;
+                $prev_product->discount_type = 'amount';
+                $prev_product->discount_start_date = null;
+                $prev_product->discount_end_date   = null;
+                $prev_product->save();
+            }
             $flash_deal_product->delete();
         }
         if($flash_deal->save()){
@@ -164,12 +167,14 @@ class FlashDealController extends Controller
                 $flash_deal_product->product_id = $product;
                 $flash_deal_product->save();
 
-                $root_product = Product::findOrFail($product);
-                $root_product->discount = $request['discount_'.$product];
-                $root_product->discount_type = $request['discount_type_'.$product];
-                $root_product->discount_start_date = strtotime($date_var[0]);
-                $root_product->discount_end_date   = strtotime( $date_var[1]);
-                $root_product->save();
+                $root_product = Product::find($product);
+                if ($root_product) {
+                    $root_product->discount = $request['discount_'.$product];
+                    $root_product->discount_type = $request['discount_type_'.$product];
+                    $root_product->discount_start_date = strtotime($date_var[0]);
+                    $root_product->discount_end_date   = strtotime( $date_var[1]);
+                    $root_product->save();
+                }
             }
 
             $sub_category_translation = FlashDealTranslation::firstOrNew(['lang' => $request->lang, 'flash_deal_id' => $flash_deal->id]);
@@ -196,13 +201,14 @@ class FlashDealController extends Controller
         $flash_deal = FlashDeal::findOrFail($id);
 
         foreach ($flash_deal->flash_deal_products as $key => $flash_deal_product) {
-            $root_product = Product::findOrFail($flash_deal_product->product_id);
-            $root_product->discount = 0.00;
-            $root_product->discount_type = 'amount';
-            $root_product->discount_start_date = null;
-            $root_product->discount_end_date   = null;
-            $root_product->save();
-
+            $root_product = Product::find($flash_deal_product->product_id);
+            if ($root_product) {
+                $root_product->discount = 0.00;
+                $root_product->discount_type = 'amount';
+                $root_product->discount_start_date = null;
+                $root_product->discount_end_date   = null;
+                $root_product->save();
+            }
             $flash_deal_product->delete();
         }
 

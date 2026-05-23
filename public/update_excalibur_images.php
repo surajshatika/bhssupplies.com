@@ -2,8 +2,18 @@
 set_time_limit(0);
 ini_set('memory_limit', '512M');
 
-$pdo = new PDO('mysql:host=localhost;dbname=bhssupplies1', 'root', '');
+// Read credentials from .env
+$envPath = __DIR__ . '/../.env';
+$env = [];
+foreach (file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+    if (str_starts_with(trim($line), '#') || !str_contains($line, '=')) continue;
+    [$k, $v] = explode('=', $line, 2);
+    $env[trim($k)] = trim($v, " \t\n\r\0\x0B\"'");
+}
+$dsn = 'mysql:host=' . ($env['DB_HOST'] ?? 'localhost') . ';dbname=' . ($env['DB_DATABASE'] ?? 'bhssupplies1') . ';port=' . ($env['DB_PORT'] ?? '3306');
+$pdo = new PDO($dsn, $env['DB_USERNAME'] ?? 'root', $env['DB_PASSWORD'] ?? '');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+echo "Connected to DB: " . ($env['DB_DATABASE'] ?? 'bhssupplies1') . "\n";
 
 $uploadDir = __DIR__ . '/uploads/all/';
 $userId = 9;

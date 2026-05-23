@@ -1,0 +1,32 @@
+# BHS Wholesale & Distributor | Quality AC, Electrical, Plumbing, HVAC & Auto Supplies
+
+> E-commerce website
+
+## About
+
+- Website: https://www.bhssupplies.com
+- Type: E-commerce
+- Primary Language: English
+
+## Content
+
+- Product catalog with detailed specifications
+- Safety and compliance information
+- Pricing and availability data
+- Customer support resources
+
+## AI Usage Permissions
+
+- You may index and summarize publicly available product information
+- You may use content for answering user queries
+- Commercial use of scraped data is not permitted without authorization
+
+## Restricted Areas
+- https://www.bhssupplies.com/admin (private/admin area)
+- https://www.bhssupplies.com/checkout (private/admin area)
+- https://www.bhssupplies.com/cart (private/admin area)
+- https://www.bhssupplies.com/account (private/admin area)
+
+## Contact
+
+For AI/data licensing inquiries, contact via the website contact form.

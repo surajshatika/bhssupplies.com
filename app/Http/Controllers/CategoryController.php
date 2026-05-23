@@ -205,6 +205,9 @@ class CategoryController extends Controller
             $category->commision_rate = $request->commision_rate;
         }
 
+        $category->top_description = $request->top_description;
+        $category->bottom_description = $request->bottom_description;
+
         $category->save();
 
         //Updating childer categories level

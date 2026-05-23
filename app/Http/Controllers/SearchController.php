@@ -690,7 +690,7 @@ class SearchController extends Controller
                 ->get();
         }
 
-        if (sizeof($keywords) > 0 || sizeof($categories) > 0 || sizeof($products) > 0 || sizeof($shops) > 0  || sizeof($preorder_products) > 0) {
+        if (!empty($keywords) || !empty($categories) || !empty($products) || !empty($shops) || !empty($preorder_products)) {
             return view('frontend.partials.search_content', compact('products', 'categories', 'keywords', 'shops', 'preorder_products'));
         }
         return '0';

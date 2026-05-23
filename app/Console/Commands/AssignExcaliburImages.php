@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 
 class AssignExcaliburImages extends Command
 {
-    protected $signature   = 'excalibur:images';
+    protected $signature   = 'excalibur:images {--force : Re-download even if image already set} {--publish : Publish all Excalibur products after update}';
     protected $description = 'Download and assign images to Excalibur products';
 
     public function handle()
@@ -27,25 +27,47 @@ class AssignExcaliburImages extends Command
             return 1;
         }
 
-        $products = DB::table('products')
+        $query = DB::table('products')
             ->join('product_categories', 'products.id', '=', 'product_categories.product_id')
             ->whereIn('product_categories.category_id', $catIds)
-            ->whereNull('products.thumbnail_img')
-            ->select('products.id', 'products.name', 'products.slug')
-            ->distinct()
-            ->get();
+            ->select('products.id', 'products.name', 'products.slug', 'products.thumbnail_img')
+            ->distinct();
 
-        $this->info("Found {$products->count()} products without images.");
+        if (!$this->option('force')) {
+            $query->whereNull('products.thumbnail_img');
+        }
+
+        $products = $query->get();
+
+        $this->info("Found {$products->count()} products to process.");
+
+        // --publish: bulk publish all Excalibur products
+        if ($this->option('publish')) {
+            $updated = DB::table('products')
+                ->join('product_categories', 'products.id', '=', 'product_categories.product_id')
+                ->whereIn('product_categories.category_id', $catIds)
+                ->update(['products.published' => 1]);
+            $this->info("Published {$updated} Excalibur products.");
+        }
 
         $adminUserId = DB::table('users')->where('user_type', 'admin')->value('id') ?? 1;
         $uploadDir   = public_path('uploads/all/');
         $done = 0;
 
         foreach ($products as $product) {
+            // Skip if file already exists on disk
+            if ($product->thumbnail_img) {
+                $existing = DB::table('uploads')->where('id', $product->thumbnail_img)->value('file_name');
+                if ($existing && file_exists(public_path($existing))) {
+                    $this->line("  Skip (file exists): {$product->name}");
+                    continue;
+                }
+            }
+
             $slug     = $product->slug ?? str($product->name)->slug();
             $imageUrl = "https://excaliburwater.com/wp-content/uploads/search/{$slug}.jpg";
 
-            $this->line("Searching image for: {$product->name}");
+            $this->line("Downloading image for: {$product->name}");
 
             $imgData = $this->downloadImage($imageUrl);
 

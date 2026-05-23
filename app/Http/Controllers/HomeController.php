@@ -765,14 +765,15 @@ class HomeController extends Controller
         $sku= $product_stock->sku ?? 'N/A';
 
         return array(
-            'price' => single_price($price * $request->quantity),
-            'quantity' => $quantity,
-            'digital' => $product->digital,
-            'variation' => $str,
-            'max_limit' => $max_limit,
-            'in_stock' => $in_stock,
-            'sku'      => $sku,
-            'image' => $image
+            'price'      => single_price($price * $request->quantity),
+            'unit_price' => single_price($price),
+            'quantity'   => $quantity,
+            'digital'    => $product->digital,
+            'variation'  => $str,
+            'max_limit'  => $max_limit,
+            'in_stock'   => $in_stock,
+            'sku'        => $sku,
+            'image'      => $image
         );
     }
 

@@ -1040,6 +1040,10 @@
 
                         }
 
+                        // Update main price display with the selected variant's unit price
+                        if (data.unit_price) {
+                            $('#chosen_price_display').html(data.unit_price);
+                        }
                         $('#option-choice-form #chosen_price_div').removeClass('d-none');
                         $('#option-choice-form #chosen_price_div #chosen_price').html(data.price);
                         $('#variant_sku_section #variant_sku').html(data.sku);

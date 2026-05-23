@@ -47,8 +47,7 @@ storage/oauth-public.key
 !/storage/app/public/.gitignore
 /storage/app/livewire-tmp/
 
-## ───────────── Public uploads (NEVER commit user content) ─────────────
-/public/uploads/
+## ───────────── Public uploads ─────────────
 /public/uploads.zip
 /public/storage
 /public/all

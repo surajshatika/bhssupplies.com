@@ -39,6 +39,7 @@ class ProductsImport implements ToCollection, WithHeadingRow, WithValidation, To
 
         if ($canImport) {
             foreach ($rows as $row) {
+                if (empty($row['name'])) continue;
                 $approved = 1;
                 if ($user->user_type == 'seller' && get_setting('product_approve_by_admin') == 1) {
                     $approved = 0;

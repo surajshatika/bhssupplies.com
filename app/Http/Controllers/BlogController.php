@@ -206,6 +206,7 @@ class BlogController extends Controller
     public function blog_details($slug)
     {
         $blog = Blog::where('slug', $slug)->first();
+        if (!$blog) abort(404);
         $recent_blogs = Blog::where('status', 1)->orderBy('created_at', 'desc')->limit(9)->get();
         return view("frontend.blog.details", compact('blog', 'recent_blogs'));
     }

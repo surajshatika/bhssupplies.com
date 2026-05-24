@@ -359,7 +359,6 @@ class AdminController extends Controller
             'route:clear'    => 'Route cache',
             'view:clear'     => 'View cache',
             'event:clear'    => 'Event cache',
-            'compiled:clear' => 'Compiled services',
         ];
 
         $ok = [];

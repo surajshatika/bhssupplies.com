@@ -1682,9 +1682,14 @@ if (!function_exists('calculateCommissionAffilationClubPoint')) {
 if (!function_exists('addon_is_activated')) {
     function addon_is_activated($identifier, $default = null)
     {
-        $addons = Cache::remember('addons', 86400, function () {
-            return Addon::all();
-        });
+        try {
+            $addons = Cache::remember('addons', 86400, function () {
+                return Addon::all();
+            });
+        } catch (\Throwable $e) {
+            \Log::error('addon_is_activated cache failure, falling back to DB: ' . $e->getMessage());
+            $addons = Addon::all();
+        }
 
         $activation = $addons->where('unique_identifier', $identifier)->where('activated', 1)->first();
         return $activation == null ? false : true;

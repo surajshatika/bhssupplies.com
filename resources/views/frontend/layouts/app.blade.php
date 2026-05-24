@@ -90,51 +90,20 @@
     <link rel="preload" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap"></noscript>
 
-    <!-- CSS Files — preloaded then applied to eliminate render-blocking -->
+    <!-- CSS — critical files load synchronously (instant render), non-critical async -->
     @php $_cv = get_setting('current_version'); @endphp
-    <link rel="preload" href="{{ static_asset('assets/css/vendors.css?v=') }}{{ $_cv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/vendors.css?v=') }}{{ $_cv }}"></noscript>
+    <link rel="stylesheet" href="{{ static_asset('assets/css/vendors.css?v=') }}{{ $_cv }}">
     @if ($rtl == 1)
-        <link rel="preload" href="{{ static_asset('assets/css/bootstrap-rtl.min.css') }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
-        <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/bootstrap-rtl.min.css') }}"></noscript>
+        <link rel="stylesheet" href="{{ static_asset('assets/css/bootstrap-rtl.min.css') }}">
     @endif
-    <link rel="preload" href="{{ static_asset('assets/css/aiz-core.css?v=') }}{{ $_cv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/aiz-core.css?v=') }}{{ $_cv }}"></noscript>
+    <link rel="stylesheet" href="{{ static_asset('assets/css/aiz-core.css?v=') }}{{ $_cv }}">
+    {{-- Non-critical overrides load async — no layout impact --}}
     <link rel="preload" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_cv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_cv }}"></noscript>
     @if(get_setting('homepage_select') == 'thecore')
     <link rel="preload" href="{{ static_asset('assets/css/thecore.css') }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/thecore.css') }}"></noscript>
     @endif
-
-    {{-- Anti-FOUC: hide the main wrapper until async CSS files have all applied.
-         The inline script below listens for every preloaded stylesheet's load event
-         and reveals the wrapper once all are ready — no visible unstyled flash. --}}
-    <style>
-        .aiz-main-wrapper{visibility:hidden}
-    </style>
-    <script>
-    (function(){
-        var links=document.querySelectorAll('link[as="style"]');
-        if(!links.length){return;}
-        var total=links.length,done=0;
-        function reveal(){
-            if(++done<total)return;
-            var w=document.querySelector('.aiz-main-wrapper');
-            if(w)w.style.visibility='';
-        }
-        links.forEach(function(l){
-            if(l.sheet){reveal();}
-            else{l.addEventListener('load',reveal,{once:true});
-                 l.addEventListener('error',reveal,{once:true});}
-        });
-        // Failsafe: show after 3s even if a CSS file never fires load
-        setTimeout(function(){
-            var w=document.querySelector('.aiz-main-wrapper');
-            if(w)w.style.visibility='';
-        },3000);
-    })();
-    </script>
 
     <style>
         :root{

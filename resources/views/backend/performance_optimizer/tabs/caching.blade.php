@@ -1,3 +1,71 @@
+{{-- ── One-click combined purge banner ────────────────────────────────────── --}}
+<div class="alert d-flex align-items-center justify-content-between flex-wrap mb-3 py-2 px-3"
+     style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);border:none;border-radius:10px;gap:10px">
+    <div class="text-white">
+        <strong><i class="las la-fire mr-1"></i>{{ translate('Purge All Caches') }}</strong>
+        <span class="d-block small" style="opacity:.75;font-size:11px">
+            {{ translate('Clears Page Cache + LiteSpeed Cache + Cloudflare CDN in one click') }}
+        </span>
+    </div>
+    <form action="{{ route('performance_optimizer.cache.purge_everything') }}" method="POST"
+          onsubmit="return confirm('{{ translate('Purge ALL caches? (Page Cache + LiteSpeed + Cloudflare)') }}')">
+        @csrf
+        <button class="btn btn-danger btn-sm font-weight-bold">
+            <i class="las la-bomb mr-1"></i>{{ translate('Purge Everything') }}
+        </button>
+    </form>
+</div>
+
+{{-- ── Active driver status card ────────────────────────────────────────────── --}}
+@php
+    $_activeDriver = get_setting('perf_page_cache_driver', 'file');
+    $_cacheOn      = (int) get_setting('perf_page_cache_status', 0) === 1;
+    $_driverLabels = ['file' => 'File Cache', 'redis' => 'Redis', 'litespeed' => 'LiteSpeed Cache (LSCache)', 'memcached' => 'Memcached'];
+    $_driverIcons  = ['file' => 'la-hdd', 'redis' => 'la-database', 'litespeed' => 'la-server', 'memcached' => 'la-memory'];
+@endphp
+<div class="d-flex flex-wrap align-items-stretch mb-3" style="gap:12px">
+    {{-- Page cache active driver --}}
+    <div class="flex-fill p-3 rounded" style="border:2px solid {{ $_cacheOn ? '#28a745' : '#dee2e6' }};background:#fff;min-width:220px">
+        <div class="d-flex align-items-center" style="gap:10px">
+            <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:{{ $_cacheOn ? 'rgba(40,167,69,.12)' : '#f8f9fa' }};font-size:18px;color:{{ $_cacheOn ? '#28a745' : '#aaa' }}">
+                <i class="las {{ $_driverIcons[$_activeDriver] ?? 'la-bolt' }}"></i>
+            </span>
+            <div>
+                <div class="font-weight-bold" style="font-size:13px">{{ translate('Page Cache Driver') }}</div>
+                <div style="font-size:15px;font-weight:700;color:{{ $_cacheOn ? '#28a745' : '#6c757d' }}">
+                    {{ $_driverLabels[$_activeDriver] ?? strtoupper($_activeDriver) }}
+                </div>
+            </div>
+            <span class="badge ml-auto {{ $_cacheOn ? 'badge-success' : 'badge-secondary' }}">
+                {{ $_cacheOn ? translate('ON') : translate('OFF') }}
+            </span>
+        </div>
+        @if(!$_cacheOn)
+        <small class="text-danger d-block mt-1">{{ translate('Page cache is disabled — toggle ON to activate') }}</small>
+        @endif
+    </div>
+    {{-- OPcache independent status --}}
+    <div class="flex-fill p-3 rounded" style="border:2px solid {{ (isset($opcacheStats) && $opcacheStats['enabled']) ? '#6610f2' : '#dee2e6' }};background:#fff;min-width:220px">
+        <div class="d-flex align-items-center" style="gap:10px">
+            <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(102,16,242,.1);font-size:18px;color:#6610f2">
+                <i class="las la-microchip"></i>
+            </span>
+            <div>
+                <div class="font-weight-bold" style="font-size:13px">{{ translate('PHP OPcache') }}</div>
+                <div style="font-size:12px;color:#6c757d">{{ translate('Bytecode cache — independent') }}</div>
+            </div>
+            @if(isset($opcacheStats) && $opcacheStats['enabled'])
+                <span class="badge badge-light ml-auto" style="color:#6610f2;border:1px solid #6610f2">{{ $opcacheStats['hit_rate'] }}% {{ translate('Hit Rate') }}</span>
+            @else
+                <span class="badge badge-secondary ml-auto">{{ translate('Inactive') }}</span>
+            @endif
+        </div>
+        <small class="text-muted d-block mt-1" style="font-size:10px">
+            <i class="las la-info-circle"></i> {{ translate('Works alongside any page cache driver — no conflict') }}
+        </small>
+    </div>
+</div>
+
 <div class="perf-layout-2col">
     <div>
         <div class="perf-section">
@@ -61,10 +129,12 @@
         <div class="perf-section" id="lsc-section">
             <div class="perf-section-header">
                 <h5><span class="perf-section-icon" style="background:rgba(0,170,80,.1);color:#00aa50"><i class="las la-server"></i></span>{{ translate('LiteSpeed Cache (LSCache)') }}</h5>
-                @if(isset($lscInfo) && $lscInfo['litespeed_detected'])
-                    <span class="badge badge-success px-2">{{ translate('LiteSpeed Detected') }}</span>
+                @if(get_setting('perf_page_cache_driver') === 'litespeed')
+                    <span class="badge badge-success px-2"><i class="las la-check-circle"></i> {{ translate('Active Driver') }}</span>
+                @elseif(isset($lscInfo) && $lscInfo['litespeed_detected'])
+                    <span class="badge badge-info px-2">{{ translate('Available — not selected') }}</span>
                 @else
-                    <span class="badge badge-secondary px-2">{{ translate('Not on LiteSpeed') }}</span>
+                    <span class="badge badge-secondary px-2">{{ translate('Server not detected') }}</span>
                 @endif
             </div>
             <div class="perf-section-body">
@@ -97,19 +167,39 @@
             </div>
         </div>
 
+        {{-- ── Divider between Page Cache and independent caches ──────────────── --}}
+        <div class="d-flex align-items-center my-2" style="gap:8px">
+            <hr class="flex-fill m-0">
+            <small class="text-muted px-2 text-nowrap" style="font-size:10px;letter-spacing:.5px;text-transform:uppercase">
+                {{ translate('PHP-Level Cache (independent — works with any page cache driver)') }}
+            </small>
+            <hr class="flex-fill m-0">
+        </div>
+
         {{-- ── OPcache ─────────────────────────────────────────────────────── --}}
         <div class="perf-section" id="opcache-section">
             <div class="perf-section-header">
-                <h5><span class="perf-section-icon" style="background:rgba(102,16,242,.1);color:#6610f2"><i class="las la-microchip"></i></span>{{ translate('PHP OPcache') }}</h5>
+                <h5>
+                    <span class="perf-section-icon" style="background:rgba(102,16,242,.1);color:#6610f2"><i class="las la-microchip"></i></span>
+                    {{ translate('PHP OPcache') }}
+                    <small class="text-muted font-weight-normal ml-1" style="font-size:11px">({{ translate('Bytecode Cache') }})</small>
+                </h5>
                 @if(isset($opcacheStats) && $opcacheStats['enabled'])
-                    <span class="badge badge-success px-2">{{ translate('Active') }}</span>
+                    <span class="badge px-2" style="background:rgba(102,16,242,.12);color:#6610f2;border:1px solid #6610f2">
+                        <i class="las la-check-circle"></i> {{ translate('Active · Independent') }}
+                    </span>
                 @elseif(isset($opcacheStats) && $opcacheStats['available'])
-                    <span class="badge badge-warning px-2">{{ translate('Disabled') }}</span>
+                    <span class="badge badge-warning px-2">{{ translate('Installed but disabled') }}</span>
                 @else
                     <span class="badge badge-danger px-2">{{ translate('Not Available') }}</span>
                 @endif
             </div>
             <div class="perf-section-body">
+                <div class="alert py-2 mb-3 small" style="background:rgba(102,16,242,.06);border:1px solid rgba(102,16,242,.2);color:#4a0e9e">
+                    <i class="las la-info-circle mr-1"></i>
+                    <strong>{{ translate('OPcache ≠ Page Cache.') }}</strong>
+                    {{ translate('OPcache compiles PHP scripts to bytecode so PHP runs faster. It works alongside File, Redis, LiteSpeed, or any page cache driver — enabling both is recommended.') }}
+                </div>
                 @if(isset($opcacheStats) && $opcacheStats['enabled'])
                     <div class="row mb-3">
                         <div class="col-4">

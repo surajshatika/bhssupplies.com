@@ -107,6 +107,35 @@
     <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/thecore.css') }}"></noscript>
     @endif
 
+    {{-- Anti-FOUC: hide the main wrapper until async CSS files have all applied.
+         The inline script below listens for every preloaded stylesheet's load event
+         and reveals the wrapper once all are ready — no visible unstyled flash. --}}
+    <style>
+        .aiz-main-wrapper{visibility:hidden}
+    </style>
+    <script>
+    (function(){
+        var links=document.querySelectorAll('link[as="style"]');
+        if(!links.length){return;}
+        var total=links.length,done=0;
+        function reveal(){
+            if(++done<total)return;
+            var w=document.querySelector('.aiz-main-wrapper');
+            if(w)w.style.visibility='';
+        }
+        links.forEach(function(l){
+            if(l.sheet){reveal();}
+            else{l.addEventListener('load',reveal,{once:true});
+                 l.addEventListener('error',reveal,{once:true});}
+        });
+        // Failsafe: show after 3s even if a CSS file never fires load
+        setTimeout(function(){
+            var w=document.querySelector('.aiz-main-wrapper');
+            if(w)w.style.visibility='';
+        },3000);
+    })();
+    </script>
+
     <style>
         :root{
             --blue: #3490f3;

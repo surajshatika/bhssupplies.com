@@ -66,6 +66,8 @@ Route::group([
         Route::post('/performance-optimizer/caching/warm',   'warm')->name('performance_optimizer.cache.warm');
         Route::post('/performance-optimizer/caching/laravel-clear', 'clearLaravel')->name('performance_optimizer.cache.laravel_clear');
         Route::post('/performance-optimizer/caching/laravel-optimize', 'optimize')->name('performance_optimizer.cache.optimize');
+        // Combined purge (LiteSpeed + Cloudflare + file/Redis in one click)
+        Route::post('/performance-optimizer/caching/purge-all',           'purgeEverything')->name('performance_optimizer.cache.purge_everything');
         // LiteSpeed Cache
         Route::post('/performance-optimizer/caching/purge-litespeed',     'purgeLiteSpeed')->name('performance_optimizer.cache.purge_litespeed');
         Route::post('/performance-optimizer/caching/purge-litespeed-tag', 'purgeLiteSpeedTag')->name('performance_optimizer.cache.purge_litespeed_tag');

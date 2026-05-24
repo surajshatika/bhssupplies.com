@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\PerformanceOptimizer\CloudflareService;
 use App\Services\PerformanceOptimizer\LiteSpeedCacheService;
 use App\Services\PerformanceOptimizer\OPcacheService;
 use App\Services\PerformanceOptimizer\PageCacheService;
@@ -87,6 +88,51 @@ class PerformanceCacheController extends Controller
         } catch (Exception $e) {
             flash(translate('Optimization failed') . ': ' . $e->getMessage())->error();
         }
+        return back();
+    }
+
+    // ── Combined purge ────────────────────────────────────────────────────────
+
+    /**
+     * Purge everything in one click:
+     *  1. File / Redis page cache
+     *  2. LiteSpeed Cache (server-level)
+     *  3. Cloudflare CDN (if configured)
+     */
+    public function purgeEverything()
+    {
+        if ($r = $this->demoBlock()) return $r;
+
+        $lines   = [];
+        $driver  = (string) get_setting('perf_page_cache_driver', 'file');
+
+        // 1. File / Redis page cache
+        if (in_array($driver, ['file', 'redis'], true)) {
+            $n = $this->service->clearAll();
+            $lines[] = translate('Page cache cleared') . ": {$n} " . translate('pages');
+        }
+
+        // 2. LiteSpeed Cache — always attempt when driver=litespeed, harmless otherwise
+        if ($driver === 'litespeed') {
+            $this->lsc->purgeAll();
+            $lines[] = translate('LiteSpeed cache purge sent');
+        }
+
+        // 3. Cloudflare — only if zone + token are configured
+        $cfZone  = trim((string) get_setting('perf_cloudflare_zone_id', ''));
+        $cfToken = trim((string) get_setting('perf_cloudflare_api_token', ''));
+        if ($cfZone !== '' && $cfToken !== '') {
+            try {
+                $result = app(CloudflareService::class)->purgeAll();
+                $lines[] = $result['success'] ?? true
+                    ? translate('Cloudflare cache purged')
+                    : translate('Cloudflare purge failed');
+            } catch (Exception $e) {
+                $lines[] = translate('Cloudflare purge error') . ': ' . $e->getMessage();
+            }
+        }
+
+        flash(implode(' · ', $lines) . '.')-> success();
         return back();
     }
 

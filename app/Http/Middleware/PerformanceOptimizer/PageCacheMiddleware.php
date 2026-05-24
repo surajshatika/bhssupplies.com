@@ -29,11 +29,18 @@ class PageCacheMiddleware
             $response = $next($request);
             if ($this->isCacheable($response) && $this->cache->shouldCache($request)) {
                 $ttlMinutes = $this->cache->ttlMinutesFor($request);
-                $response->headers->set('X-LiteSpeed-Cache-Control', "public,max-age=" . ($ttlMinutes * 60));
+                $ttlSeconds = $ttlMinutes * 60;
+                // LSCache header — tells LiteSpeed server to cache this page
+                $response->headers->set('X-LiteSpeed-Cache-Control', "public,max-age={$ttlSeconds}");
                 $response->headers->set('X-LiteSpeed-Vary', 'value=cookie[currency_code],value=cookie[locale_code]');
+                // Standard Cache-Control — picked up by Cloudflare CDN (and any other reverse proxy)
+                // s-maxage targets shared caches (CDN); max-age=0 forces browser revalidation
+                $response->headers->set('Cache-Control', "public, max-age=0, s-maxage={$ttlSeconds}, stale-while-revalidate=60");
+                $response->headers->set('Vary', 'Accept-Encoding');
                 $response->headers->set('X-Performance-Cache', 'LSC-PASS');
             } else {
                 $response->headers->set('X-LiteSpeed-Cache-Control', 'no-cache');
+                $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate');
                 $response->headers->set('X-Performance-Cache', 'LSC-BYPASS');
             }
             return $response;

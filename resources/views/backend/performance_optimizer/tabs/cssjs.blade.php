@@ -69,6 +69,24 @@
 
         <div class="perf-section">
             <div class="perf-section-header">
+                <h5><span class="perf-section-icon" style="background:rgba(0,188,212,.1);color:#0097a7"><i class="las la-compress-arrows-alt"></i></span>{{ translate('Minify HTML Output') }}</h5>
+                <label class="aiz-switch aiz-switch-success mb-0">
+                    <input type="checkbox" onchange="perfToggle(this, 'perf_html_minify_status')"
+                           @if(get_setting('perf_html_minify_status') == 1) checked @endif>
+                    <span class="slider round"></span>
+                </label>
+            </div>
+            <div class="perf-section-body">
+                <p>{{ translate('Strips HTML comments and collapses whitespace from every page response. Typically saves 10–20% on HTML transfer size. Safe:') }} <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, <code>&lt;pre&gt;</code> {{ translate('and') }} <code>&lt;textarea&gt;</code> {{ translate('blocks are never touched.') }}</p>
+                <div class="alert alert-warning py-2 mb-0" style="font-size:12px">
+                    <i class="las la-exclamation-triangle"></i>
+                    {{ translate('Enable after confirming the site renders correctly. Disable if inline scripts depend on whitespace-sensitive parsing.') }}
+                </div>
+            </div>
+        </div>
+
+        <div class="perf-section">
+            <div class="perf-section-header">
                 <h5><span class="perf-section-icon" style="background:rgba(40,167,69,.1);color:var(--perf-green)"><i class="las la-eye"></i></span>{{ translate('Critical CSS (Above-the-Fold)') }}</h5>
             </div>
             <div class="perf-section-body">

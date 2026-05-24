@@ -1,5 +1,23 @@
 @extends('frontend.layouts.app')
 
+@section('lcp_preload')
+@php
+    $_lcp_lang    = get_system_language()->code;
+    $_lcp_raw     = get_setting('home_slider_images', null, $_lcp_lang);
+    $_lcp_url     = null;
+    if ($_lcp_raw) {
+        $_lcp_decoded = json_decode($_lcp_raw, true);
+        $_lcp_sliders = get_slider_images($_lcp_decoded);
+        if (!empty($_lcp_sliders)) {
+            $_lcp_url = my_asset($_lcp_sliders[0]->file_name);
+        }
+    }
+@endphp
+@if($_lcp_url)
+<link rel="preload" as="image" href="{{ $_lcp_url }}" fetchpriority="high">
+@endif
+@endsection
+
 @section('content')
 <style>
     @media (max-width: 767px) {
@@ -32,6 +50,7 @@
                                 <img class="img-fluid rounded-75 border border-light h-100"
                                     src="{{ $slider ? my_asset($slider->file_name) : static_asset('assets/img/placeholder.jpg') }}"
                                     alt="{{ env('APP_NAME') }} promo"
+                                    @if($key === 0) fetchpriority="high" loading="eager" @else loading="lazy" @endif
                                     onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder-rect.jpg') }}';">
                             </div>
                         </a>

@@ -264,19 +264,19 @@
                     <h6 class="bhs-footer-heading mt-2">{{ translate('Follow Us') }}</h6>
                     <div class="d-flex flex-wrap" style="gap:10px; margin-bottom:24px;">
                         @if (!empty(get_setting('facebook_link')))
-                            <a href="{{ get_setting('facebook_link') }}" target="_blank" class="bhs-social-icon"><i class="lab la-facebook-f"></i></a>
+                            <a href="{{ get_setting('facebook_link') }}" target="_blank" rel="noopener noreferrer" class="bhs-social-icon"><i class="lab la-facebook-f"></i></a>
                         @endif
                         @if (!empty(get_setting('instagram_link')))
-                            <a href="{{ get_setting('instagram_link') }}" target="_blank" class="bhs-social-icon"><i class="lab la-instagram"></i></a>
+                            <a href="{{ get_setting('instagram_link') }}" target="_blank" rel="noopener noreferrer" class="bhs-social-icon"><i class="lab la-instagram"></i></a>
                         @endif
                         @if (!empty(get_setting('twitter_link')))
-                            <a href="{{ get_setting('twitter_link') }}" target="_blank" class="bhs-social-icon"><i class="lab la-twitter"></i></a>
+                            <a href="{{ get_setting('twitter_link') }}" target="_blank" rel="noopener noreferrer" class="bhs-social-icon"><i class="lab la-twitter"></i></a>
                         @endif
                         @if (!empty(get_setting('youtube_link')))
-                            <a href="{{ get_setting('youtube_link') }}" target="_blank" class="bhs-social-icon"><i class="lab la-youtube"></i></a>
+                            <a href="{{ get_setting('youtube_link') }}" target="_blank" rel="noopener noreferrer" class="bhs-social-icon"><i class="lab la-youtube"></i></a>
                         @endif
                         @if (!empty(get_setting('linkedin_link')))
-                            <a href="{{ get_setting('linkedin_link') }}" target="_blank" class="bhs-social-icon"><i class="lab la-linkedin-in"></i></a>
+                            <a href="{{ get_setting('linkedin_link') }}" target="_blank" rel="noopener noreferrer" class="bhs-social-icon"><i class="lab la-linkedin-in"></i></a>
                         @endif
                     </div>
                 @endif
@@ -286,13 +286,13 @@
                     <h6 class="bhs-footer-heading">{{ translate('Mobile Apps') }}</h6>
                     <div class="d-flex flex-wrap" style="gap:10px;">
                         @if(get_setting('play_store_link'))
-                        <a href="{{ get_setting('play_store_link') }}" target="_blank" class="bhs-app-badge">
+                        <a href="{{ get_setting('play_store_link') }}" target="_blank" rel="noopener noreferrer" class="bhs-app-badge">
                             <i class="lab la-google-play"></i>
                             <div><span class="bhs-app-badge-text-small">Get it on</span><span class="bhs-app-badge-text-big">Google Play</span></div>
                         </a>
                         @endif
                         @if(get_setting('app_store_link'))
-                        <a href="{{ get_setting('app_store_link') }}" target="_blank" class="bhs-app-badge">
+                        <a href="{{ get_setting('app_store_link') }}" target="_blank" rel="noopener noreferrer" class="bhs-app-badge">
                             <i class="lab la-apple"></i>
                             <div><span class="bhs-app-badge-text-small">Download on</span><span class="bhs-app-badge-text-big">App Store</span></div>
                         </a>
@@ -437,7 +437,7 @@
                         @endguest
                         @if(get_setting('seller_app_link'))
                             <li class="mb-2 pb-2">
-                                <a class="fs-13 text-soft-light text-sm-secondary animate-underline-white" target="_blank" href="{{ get_setting('seller_app_link')}}">
+                                <a class="fs-13 text-soft-light text-sm-secondary animate-underline-white" target="_blank" rel="noopener noreferrer" href="{{ get_setting('seller_app_link')}}">
                                     {{ translate('Download Seller App') }}
                                 </a>
                             </li>
@@ -466,7 +466,7 @@
                         @endguest
                         @if(get_setting('delivery_boy_app_link'))
                             <li class="mb-2 pb-2">
-                                <a class="fs-13 text-soft-light text-sm-secondary animate-underline-white" target="_blank" href="{{ get_setting('delivery_boy_app_link')}}">
+                                <a class="fs-13 text-soft-light text-sm-secondary animate-underline-white" target="_blank" rel="noopener noreferrer" href="{{ get_setting('delivery_boy_app_link')}}">
                                     {{ translate('Download Delivery Boy App') }}
                                 </a>
                             </li>

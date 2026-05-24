@@ -66,6 +66,12 @@ Route::group([
         Route::post('/performance-optimizer/caching/warm',   'warm')->name('performance_optimizer.cache.warm');
         Route::post('/performance-optimizer/caching/laravel-clear', 'clearLaravel')->name('performance_optimizer.cache.laravel_clear');
         Route::post('/performance-optimizer/caching/laravel-optimize', 'optimize')->name('performance_optimizer.cache.optimize');
+        // LiteSpeed Cache
+        Route::post('/performance-optimizer/caching/purge-litespeed',     'purgeLiteSpeed')->name('performance_optimizer.cache.purge_litespeed');
+        Route::post('/performance-optimizer/caching/purge-litespeed-tag', 'purgeLiteSpeedTag')->name('performance_optimizer.cache.purge_litespeed_tag');
+        // OPcache
+        Route::post('/performance-optimizer/caching/flush-opcache',  'flushOpcache')->name('performance_optimizer.cache.flush_opcache');
+        Route::get('/performance-optimizer/caching/opcache-stats',   'opcacheStats')->name('performance_optimizer.cache.opcache_stats');
     });
 
     // Database

@@ -86,28 +86,19 @@
 
         <div class="perf-section">
             <div class="perf-section-header">
-                <h5><span class="perf-section-icon" style="background:rgba(255,193,7,.15);color:#b8860b"><i class="las la-star"></i></span>{{ translate('Prioritize LCP Image (Above the Fold)') }}</h5>
+                <h5><span class="perf-section-icon" style="background:rgba(255,193,7,.15);color:#b8860b"><i class="las la-star"></i></span>{{ translate('Auto-Preload LCP Hero Image') }}</h5>
+                <label class="aiz-switch aiz-switch-success mb-0">
+                    <input type="checkbox" onchange="perfToggle(this, 'perf_lcp_preload_status')"
+                           @if(get_setting('perf_lcp_preload_status') == 1) checked @endif>
+                    <span class="slider round"></span>
+                </label>
             </div>
             <div class="perf-section-body">
-                <p>{{ translate('Preload the largest above-fold image with') }} <code>fetchpriority="high"</code> {{ translate('to improve Largest Contentful Paint.') }}</p>
-                <form action="{{ route('performance_optimizer.settings.update') }}" method="POST">
-                    @csrf
-                    <div class="d-flex align-items-center mb-3">
-                        <label class="aiz-switch aiz-switch-success mb-0 mr-2">
-                            <input type="checkbox" name="perf_lcp_priority_status" value="1" @if(get_setting('perf_lcp_priority_status') == 1) checked @endif>
-                            <span class="slider round"></span>
-                        </label>
-                        <span>{{ translate('Enable LCP Image Prioritization') }}</span>
-                    </div>
-                    <div class="form-group mb-2">
-                        <label class="small text-muted">{{ translate('LCP Image URL (above-fold hero image)') }}</label>
-                        <input type="text" name="perf_lcp_image_url" class="form-control form-control-sm"
-                               placeholder="https://yourdomain.com/uploads/all/hero.jpg"
-                               value="{{ get_setting('perf_lcp_image_url') }}">
-                        <small class="text-muted">{{ translate('Leave blank to auto-detect from homepage HTML.') }}</small>
-                    </div>
-                    <button class="btn btn-soft-primary btn-sm">{{ translate('Save') }}</button>
-                </form>
+                <p>{{ translate('Automatically detects the first visible hero image on every page and injects') }} <code>&lt;link rel="preload" fetchpriority="high"&gt;</code> {{ translate('into') }} <code>&lt;head&gt;</code>. {{ translate('The same image gets') }} <code>loading="eager"</code> {{ translate('so the browser fetches it immediately. Directly improves LCP score.') }}</p>
+                <div class="alert alert-info py-2 mb-0" style="font-size:12px">
+                    <i class="las la-info-circle"></i>
+                    {{ translate('Auto-detection scans') }} <code>&lt;body&gt;</code> {{ translate('for the first') }} <code>&lt;img src&gt;</code> {{ translate('that is not a tracking pixel, data URI, or already lazy-loaded. No configuration needed.') }}
+                </div>
             </div>
         </div>
 

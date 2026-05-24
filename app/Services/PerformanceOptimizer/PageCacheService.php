@@ -12,6 +12,51 @@ use Illuminate\Support\Facades\Log;
 
 class PageCacheService
 {
+    /**
+     * Paths that are ALWAYS bypassed regardless of any admin cache settings.
+     * These pages carry user-specific state and must never be served from static cache.
+     * Add full path prefix (no leading slash). Exact match OR prefix + "/" is checked.
+     */
+    private const NEVER_CACHE_PREFIXES = [
+        // Transactional
+        'cart',
+        'checkout',
+        'order-confirmed',
+        // Authentication
+        'users/login',
+        'users/registration',
+        'seller/login',
+        'deliveryboy/login',
+        'social-login',
+        'account-deletion',
+        // Authenticated user area
+        'dashboard',
+        'profile',
+        'purchase_history',
+        'digital-purchase-history',
+        'digital-products',
+        'wallet',
+        'wallet_recharge_success',
+        'addresses',
+        'wishlists',
+        'all-notifications',
+        'notification',
+        'non-linkable-notification-read',
+        'invoice',
+        'support_ticket',
+        'track-your-order',
+        'compare',
+        're-order',
+        // Payment gateway callbacks
+        'paypal',
+        'stripe',
+        'mercadopago',
+        'cyber-source',
+        'myfatoorah',
+        // Admin area (belt-and-braces)
+        'admin',
+    ];
+
     protected string $cacheDir;
     protected string $driver;
 
@@ -34,8 +79,15 @@ class PageCacheService
         // Don't cache for authenticated users
         if (auth()->check())                                       return false;
 
-        // Path excludes (supports prefix match + simple wildcard via fnmatch)
+        // Hard-coded bypass — user-specific / transactional pages are never cached.
         $path = ltrim($request->path(), '/');
+        foreach (self::NEVER_CACHE_PREFIXES as $prefix) {
+            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
+                return false;
+            }
+        }
+
+        // Admin-configured path excludes (supports prefix match + simple wildcard via fnmatch)
         foreach ($this->excludedPaths() as $ex) {
             if ($ex === '') continue;
             if (str_starts_with($path, $ex) || fnmatch($ex, $path)) return false;
@@ -204,7 +256,7 @@ class PageCacheService
     public function store(string $url, string $html, ?Request $request = null): bool
     {
         try {
-            $html .= "\n<!-- Cached by Performance Optimizer @ " . date('Y-m-d H:i:s') . " -->";
+            $html .= "\n<!-- PerfCache: {$url} @ " . date('Y-m-d H:i:s') . " -->";
             $ttlMin = $request ? $this->ttlMinutesFor($request) : (int) get_setting('perf_page_cache_ttl_minutes', 720);
             if ($this->driver === 'redis') {
                 Cache::store('redis')->put($this->key($url, $request), $html, max(1, $ttlMin) * 60);
@@ -310,6 +362,50 @@ class PageCacheService
             'meta' => ['warmed' => $warmed, 'failed' => $failed, 'total_urls' => count($urls)],
         ]);
         return ['warmed' => $warmed, 'failed' => $failed, 'total' => count($urls)];
+    }
+
+    /**
+     * List recently cached pages (file driver only, up to $limit).
+     * Each entry: {url, size_bytes, cached_at}
+     */
+    public function getPagesList(int $limit = 50): array
+    {
+        if ($this->driver !== 'file') return [];
+        if (!is_dir($this->cacheDir)) return [];
+
+        $files = glob($this->cacheDir . '/*.html') ?: [];
+        if (empty($files)) return [];
+
+        // Sort newest first by modification time
+        usort($files, fn($a, $b) => (@filemtime($b) ?: 0) - (@filemtime($a) ?: 0));
+        $files = array_slice($files, 0, $limit);
+
+        $pages = [];
+        foreach ($files as $f) {
+            $size  = @filesize($f) ?: 0;
+            $mtime = @filemtime($f) ?: 0;
+            $url   = null;
+
+            // Extract URL from last line: <!-- PerfCache: URL @ DATETIME -->
+            // Older entries may use: <!-- Cached by Performance Optimizer @ DATETIME -->
+            $fp = @fopen($f, 'r');
+            if ($fp) {
+                @fseek($fp, max(0, $size - 350));
+                $tail = (string) @fread($fp, 350);
+                @fclose($fp);
+                if (preg_match('/<!--\s*PerfCache:\s*(https?:\/\/[^\s]+)\s*@/', $tail, $m)) {
+                    $url = $m[1];
+                }
+            }
+
+            $pages[] = [
+                'url'        => $url,
+                'size_bytes' => $size,
+                'cached_at'  => $mtime ? date('Y-m-d H:i:s', $mtime) : null,
+            ];
+        }
+
+        return $pages;
     }
 
     protected function humanSize(int $bytes): string

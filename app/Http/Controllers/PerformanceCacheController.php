@@ -64,15 +64,40 @@ class PerformanceCacheController extends Controller
     public function clearLaravel()
     {
         if ($r = $this->demoBlock()) return $r;
-        try {
-            Artisan::call('cache:clear');
-            Artisan::call('config:clear');
-            Artisan::call('view:clear');
-            Artisan::call('route:clear');
-            Cache::forget('business_settings');
+
+        $ok     = [];
+        $failed = [];
+
+        foreach ([
+            'cache:clear'  => 'Application cache',
+            'config:clear' => 'Config cache',
+            'view:clear'   => 'View cache',
+            'route:clear'  => 'Route cache',
+        ] as $cmd => $label) {
+            try {
+                Artisan::call($cmd);
+                $ok[] = $label;
+            } catch (\Throwable $e) {
+                $failed[$label] = $e->getMessage();
+            }
+        }
+
+        // Direct file delete as fallback for permission-restricted hosting
+        foreach ([
+            base_path('bootstrap/cache/config.php'),
+            base_path('bootstrap/cache/routes-v7.php'),
+            base_path('bootstrap/cache/services.php'),
+            base_path('bootstrap/cache/packages.php'),
+        ] as $f) {
+            if (is_file($f)) @unlink($f);
+        }
+
+        try { Cache::forget('business_settings'); } catch (\Throwable $e) {}
+
+        if (empty($failed)) {
             flash(translate('Laravel cache cleared (cache + config + view + route).'))->success();
-        } catch (Exception $e) {
-            flash(translate('Cache clear failed') . ': ' . $e->getMessage())->error();
+        } else {
+            flash(translate('Partially cleared. Failed') . ': ' . implode(', ', array_keys($failed)))->warning();
         }
         return back();
     }

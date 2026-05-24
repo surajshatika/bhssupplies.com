@@ -27,7 +27,7 @@
     }
 @endphp
 
-<link rel="canonical" href="{{ $__seo['canonical'] }}">
+{{-- Canonical is rendered by the parent layout via @yield('canonical') --}}
 
 @if(!empty($__seo['robots']))
 <meta name="robots" content="{{ $__seo['robots'] }}">

@@ -20,6 +20,8 @@ use Illuminate\Http\Request;
  *  - perf_js_delay_status        → injects user-interaction-triggered delay-JS bootstrap
  *  - perf_image_serve_webp_auto  → rewrites <img src> from .jpg/.png to .webp when sibling exists
  *  - perf_vitals_collect_status  → injects the Web Vitals tracker before </body>
+ *  - perf_lcp_preload_status     → auto-detects LCP hero image and preloads it (fetchpriority="high")
+ *  - perf_html_minify_status     → strips HTML comments and collapses inter-tag whitespace
  *
  * Runs only when:
  *  - perf_status == 1
@@ -48,11 +50,15 @@ class PerformanceOutputMiddleware
         $html = (string) $response->getContent();
         if ($html === '') return $response;
 
-        $html = $this->injectHead($html, $request);
-        $html = $this->processImages($html);
+        // Detect LCP candidate BEFORE processImages() adds loading="lazy" to everything
+        $lcpSrc = $this->detectLcpCandidateSrc($html);
+
+        $html = $this->injectHead($html, $request, $lcpSrc);
+        $html = $this->processImages($html, $lcpSrc);
         $html = $this->processScripts($html);
         $html = $this->processScriptManager($html, $request);
         $html = $this->injectBodyEnd($html);
+        $html = $this->minifyHtml($html);
 
         $response->setContent($html);
         return $response;
@@ -77,9 +83,14 @@ class PerformanceOutputMiddleware
 
     // ── <head> injections ────────────────────────────────────────────
 
-    protected function injectHead(string $html, Request $request): string
+    protected function injectHead(string $html, Request $request, ?string $lcpSrc = null): string
     {
         $injects = [];
+
+        // LCP hero image preload — inject before anything else so browser discovers it first
+        if ($lcpSrc !== null) {
+            $injects[] = '<link rel="preload" as="image" href="' . htmlspecialchars($lcpSrc, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '" fetchpriority="high">';
+        }
 
         // Critical CSS (inlined)
         if ($cc = trim((string) get_setting('perf_critical_css', ''))) {
@@ -109,7 +120,7 @@ class PerformanceOutputMiddleware
 
     // ── <img> processing ─────────────────────────────────────────────
 
-    protected function processImages(string $html): string
+    protected function processImages(string $html, ?string $lcpSrc = null): string
     {
         $lazy   = (int) get_setting('perf_image_lazyload', 1) === 1;
         $serveWebp = (int) get_setting('perf_image_serve_webp_auto', 0) === 1;
@@ -119,17 +130,25 @@ class PerformanceOutputMiddleware
 
         $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
 
-        return preg_replace_callback('/<img\b([^>]*)>/i', function ($m) use ($lazy, $serveWebp, $imageCdn, $cdnUrl, $appHost) {
+        return preg_replace_callback('/<img\b([^>]*)>/i', function ($m) use ($lazy, $serveWebp, $imageCdn, $cdnUrl, $appHost, $lcpSrc) {
             $attrs = $m[1];
 
             // Skip if user explicitly opted out via data-no-perf
             if (preg_match('/\bdata-no-perf\b/i', $attrs)) return $m[0];
 
-            // Lazyload
-            if ($lazy && !preg_match('/\bloading\s*=/i', $attrs)) {
-                $attrs .= ' loading="lazy"';
+            // Detect whether this is the LCP hero image
+            $isLcp = $lcpSrc !== null
+                && preg_match('/\bsrc\s*=\s*(["\'])([^"\']+)\1/i', $attrs, $lcpCheck)
+                && $lcpCheck[2] === $lcpSrc;
+
+            // Lazyload — LCP image must be eager + high priority, never lazy
+            if (!preg_match('/\bloading\s*=/i', $attrs)) {
+                $attrs .= $isLcp ? ' loading="eager"' : ($lazy ? ' loading="lazy"' : '');
             }
-            if ($lazy && !preg_match('/\bdecoding\s*=/i', $attrs)) {
+            if ($isLcp && !preg_match('/\bfetchpriority\s*=/i', $attrs)) {
+                $attrs .= ' fetchpriority="high"';
+            }
+            if (!$isLcp && $lazy && !preg_match('/\bdecoding\s*=/i', $attrs)) {
                 $attrs .= ' decoding="async"';
             }
 
@@ -267,5 +286,95 @@ class PerformanceOutputMiddleware
             return preg_replace('/<\/body>/i', $block . '</body>', $html, 1);
         }
         return $html . $block;
+    }
+
+    // ── LCP Auto-Preload ─────────────────────────────────────────────
+
+    /**
+     * Scans the HTML body for the first meaningful <img> and returns its src.
+     * Used to inject a <link rel="preload" fetchpriority="high"> before any
+     * other render-blocking resources, directly improving LCP score.
+     *
+     * Returns null when the feature is disabled or no candidate is found.
+     */
+    protected function detectLcpCandidateSrc(string $html): ?string
+    {
+        if ((int) get_setting('perf_lcp_preload_status', 0) !== 1) return null;
+
+        // Only scan the <body> to avoid picking up hidden/icon images in <head>
+        $bodyOffset = stripos($html, '<body');
+        $bodyHtml   = $bodyOffset !== false ? substr($html, $bodyOffset) : $html;
+
+        if (!preg_match_all('/<img\b([^>]*)>/i', $bodyHtml, $matches)) return null;
+
+        foreach ($matches[1] as $attrs) {
+            // Must have a plain src (not srcset-only)
+            if (!preg_match('/\bsrc\s*=\s*(["\'])([^"\']+)\1/i', $attrs, $sm)) continue;
+            $src = $sm[2];
+
+            // Skip data URIs, external tracking pixels, empty src
+            if ($src === '' || str_starts_with($src, 'data:')) continue;
+            if (preg_match('/\b(pixel|1x1|track|beacon|spacer)\b/i', $src)) continue;
+
+            // Skip images with explicit width/height of 1 (tracking pixels in HTML)
+            if (preg_match('/\b(?:width|height)\s*=\s*["\']?1["\']?/i', $attrs)) continue;
+
+            // Skip images the developer already marked as lazy
+            if (preg_match('/\bloading\s*=\s*["\']?lazy["\']?/i', $attrs)) continue;
+
+            // Skip opt-out marker
+            if (preg_match('/\bdata-no-perf\b/i', $attrs)) continue;
+
+            return $src;
+        }
+
+        return null;
+    }
+
+    // ── HTML Minification ────────────────────────────────────────────
+
+    /**
+     * Strips HTML comments and collapses inter-tag whitespace.
+     * <pre>, <script>, <style>, and <textarea> content is preserved verbatim.
+     * Controlled by perf_html_minify_status (default 0 = disabled).
+     */
+    protected function minifyHtml(string $html): string
+    {
+        if ((int) get_setting('perf_html_minify_status', 0) !== 1) return $html;
+
+        // Pull out blocks whose content must never be touched
+        $placeholders = [];
+        $idx          = 0;
+
+        $html = preg_replace_callback(
+            '/<(pre|script|style|textarea)\b[^>]*>.*?<\/\1>/is',
+            function (array $m) use (&$placeholders, &$idx): string {
+                $token               = "\x02PERFOPT{$idx}\x03";
+                $placeholders[$token] = $m[0];
+                $idx++;
+                return $token;
+            },
+            $html
+        ) ?? $html;
+
+        // Remove HTML comments — keep IE conditionals (<!--[if) and noindex markers
+        $html = preg_replace('/<!--(?!\[if|noindex\b).*?-->/s', '', $html) ?? $html;
+
+        // Collapse whitespace runs between tags
+        $html = preg_replace('/>\s{2,}</s', '> <', $html) ?? $html;
+
+        // Trim leading/trailing whitespace on lines (safe because block content is placeholdered)
+        $html = preg_replace('/^[ \t]+/m', '', $html) ?? $html;
+        $html = preg_replace('/[ \t]+$/m', '', $html) ?? $html;
+
+        // Collapse multiple blank lines into one
+        $html = preg_replace('/\n{3,}/', "\n\n", $html) ?? $html;
+
+        // Restore preserved blocks
+        foreach ($placeholders as $token => $block) {
+            $html = str_replace($token, $block, $html);
+        }
+
+        return $html;
     }
 }

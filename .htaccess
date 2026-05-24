@@ -20,6 +20,12 @@ SetEnv PHPRC /home/customer/www/bhssupplies.com/public_html/php.ini
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
+    # Serve AVIF instead of JPG/PNG when browser supports it and .avif file exists
+    RewriteCond %{HTTP_ACCEPT} image/avif
+    RewriteCond %{REQUEST_FILENAME} \.(jpe?g|png)$
+    RewriteCond %{REQUEST_FILENAME}\.avif -f
+    RewriteRule ^(.+)\.(jpe?g|png)$ $1.avif [T=image/avif,L]
+
     # Serve WebP instead of JPG/PNG when browser supports it and .webp file exists
     RewriteCond %{HTTP_ACCEPT} image/webp
     RewriteCond %{REQUEST_FILENAME} \.(jpe?g|png)$
@@ -143,3 +149,25 @@ Options -Indexes
 
 ## ETags — disable for load-balanced environments (optional) ##
 # FileETag None
+
+## PHP OUTPUT BUFFER — helps reduce TTFB ##
+<IfModule mod_php.c>
+    php_value output_buffering 4096
+    php_flag zlib.output_compression Off
+</IfModule>
+
+## Vary: Accept-Encoding — tell CDNs/proxies to cache compressed versions separately ##
+<IfModule mod_headers.c>
+    <FilesMatch "\.(js|css|html|xml|json|svg|woff|woff2)$">
+        Header append Vary Accept-Encoding
+    </FilesMatch>
+    # Add AVIF to Vary for image negotiation
+    <FilesMatch "\.(jpg|jpeg|png)$">
+        Header append Vary Accept
+    </FilesMatch>
+</IfModule>
+
+## Add X-DNS-Prefetch-Control to allow browsers to prefetch DNS ##
+<IfModule mod_headers.c>
+    Header set X-DNS-Prefetch-Control "on"
+</IfModule>

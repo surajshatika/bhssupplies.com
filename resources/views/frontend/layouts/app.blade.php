@@ -29,7 +29,14 @@
         $_base_color  = get_setting('base_color', '#d43533');
         $_canonical   = url()->current();
     @endphp
-    <title>@yield('meta_title', $_page_title)</title>
+    @php
+        $_rendered_title = $__env->yieldContent('meta_title', $_page_title);
+        if (empty(trim($_rendered_title))) { $_rendered_title = $_page_title; }
+        if (mb_strlen($_rendered_title) > 60) {
+            $_rendered_title = rtrim(mb_substr($_rendered_title, 0, 57)) . '...';
+        }
+    @endphp
+    <title>{{ $_rendered_title }}</title>
 
     <meta name="robots" content="@yield('meta_robots', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1')">
     <meta name="description" content="@yield('meta_description', get_setting('meta_description'))">
@@ -66,6 +73,10 @@
     @yield('lcp_preload')
     @yield('preload_assets')
 
+    <!-- Preload critical scripts so the browser fetches them in parallel with HTML parsing -->
+    <link rel="preload" href="{{ static_asset('assets/js/vendors.js?v=') }}{{ get_setting('current_version') }}" as="script">
+    <link rel="preload" href="{{ static_asset('assets/js/aiz-core.min.js?v=') }}{{ get_setting('current_version') }}" as="script">
+
     <!-- DNS Prefetch for third-party origins -->
     <link rel="dns-prefetch" href="//www.googletagmanager.com">
     <link rel="dns-prefetch" href="//connect.facebook.net">
@@ -79,15 +90,21 @@
     <link rel="preload" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap"></noscript>
 
-    <!-- CSS Files -->
-    <link rel="stylesheet" href="{{ static_asset('assets/css/vendors.css?v=') }}{{ get_setting('current_version') }}">
+    <!-- CSS Files — preloaded then applied to eliminate render-blocking -->
+    @php $_cv = get_setting('current_version'); @endphp
+    <link rel="preload" href="{{ static_asset('assets/css/vendors.css?v=') }}{{ $_cv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/vendors.css?v=') }}{{ $_cv }}"></noscript>
     @if ($rtl == 1)
-        <link rel="stylesheet" href="{{ static_asset('assets/css/bootstrap-rtl.min.css') }}">
+        <link rel="preload" href="{{ static_asset('assets/css/bootstrap-rtl.min.css') }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
+        <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/bootstrap-rtl.min.css') }}"></noscript>
     @endif
-    <link rel="stylesheet" href="{{ static_asset('assets/css/aiz-core.css?v=') }}{{ get_setting('current_version') }}">
-    <link rel="stylesheet" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ get_setting('current_version') }}">
+    <link rel="preload" href="{{ static_asset('assets/css/aiz-core.css?v=') }}{{ $_cv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/aiz-core.css?v=') }}{{ $_cv }}"></noscript>
+    <link rel="preload" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_cv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_cv }}"></noscript>
     @if(get_setting('homepage_select') == 'thecore')
-    <link rel="stylesheet" href="{{ static_asset('assets/css/thecore.css') }}">
+    <link rel="preload" href="{{ static_asset('assets/css/thecore.css') }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/thecore.css') }}"></noscript>
     @endif
 
     <style>
@@ -586,7 +603,7 @@
         }
     </script>
     <script src="{{ static_asset('assets/js/vendors.js?v=') }}{{ get_setting('current_version') }}"></script>
-    <script src="{{ static_asset('assets/js/aiz-core.js?v=') }}{{ get_setting('current_version') }}"></script>
+    <script src="{{ static_asset('assets/js/aiz-core.min.js?v=') }}{{ get_setting('current_version') }}"></script>
 
     {{-- WhatsaApp Chat --}}
     @if (get_setting('whatsapp_chat') == 1)
@@ -1818,7 +1835,7 @@
             var s = t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             // Markdown links [text](url) — only allow safe relative or https URLs
             s = s.replace(/\[([^\]]{1,120})\]\(((https?:\/\/|\/)[^\s)]{1,400})\)/g,
-                '<a href="$2" target="_blank">$1</a>');
+                '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
             // **bold**
             s = s.replace(/\*\*([^*\n]{1,120})\*\*/g, '<strong>$1</strong>');
             // Bullet lines starting with - or * or •

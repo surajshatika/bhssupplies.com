@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\PerformanceOptimizer\LiteSpeedCacheService;
+use App\Services\PerformanceOptimizer\OPcacheService;
 use App\Services\PerformanceOptimizer\PageCacheService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Exception;
@@ -10,18 +13,25 @@ use Exception;
 class PerformanceCacheController extends Controller
 {
     protected PageCacheService $service;
+    protected LiteSpeedCacheService $lsc;
+    protected OPcacheService $opcache;
 
-    public function __construct(PageCacheService $service)
+    public function __construct(PageCacheService $service, LiteSpeedCacheService $lsc, OPcacheService $opcache)
     {
         $this->middleware(['auth', 'admin']);
-        $this->service = $service;
+        $this->service  = $service;
+        $this->lsc      = $lsc;
+        $this->opcache  = $opcache;
     }
 
     public function index()
     {
         return view('backend.performance_optimizer.index', [
-            'tab'   => 'caching',
-            'stats' => $this->service->getStats(),
+            'tab'          => 'caching',
+            'stats'        => $this->service->getStats(),
+            'cachedPages'  => $this->service->getPagesList(),
+            'opcacheStats' => $this->opcache->getStats(),
+            'lscInfo'      => $this->lsc->getStatusInfo(),
         ]);
     }
 
@@ -78,5 +88,55 @@ class PerformanceCacheController extends Controller
             flash(translate('Optimization failed') . ': ' . $e->getMessage())->error();
         }
         return back();
+    }
+
+    // ── LiteSpeed Cache ───────────────────────────────────────────────────────
+
+    public function purgeLiteSpeed()
+    {
+        if ($r = $this->demoBlock()) return $r;
+        $result = $this->lsc->purgeAll();
+        if ($result['success']) {
+            flash(translate('LiteSpeed cache purge request sent.'))->success();
+        } else {
+            flash($result['message'])->error();
+        }
+        return back();
+    }
+
+    public function purgeLiteSpeedTag(Request $request)
+    {
+        if ($r = $this->demoBlock()) return $r;
+        $tag = trim((string) $request->input('tag', ''));
+        if ($tag === '') {
+            flash(translate('Tag is required.'))->error();
+            return back();
+        }
+        $this->lsc->purgeByTag($tag);
+        flash(translate('LiteSpeed cache purge request sent for tag:') . ' ' . $tag)->success();
+        return back();
+    }
+
+    // ── OPcache ───────────────────────────────────────────────────────────────
+
+    public function flushOpcache()
+    {
+        if ($r = $this->demoBlock()) return $r;
+        if (!$this->opcache->isAvailable()) {
+            flash(translate('OPcache is not available on this server.'))->error();
+            return back();
+        }
+        $ok = $this->opcache->flush();
+        if ($ok) {
+            flash(translate('OPcache flushed successfully.'))->success();
+        } else {
+            flash(translate('OPcache flush failed. OPcache may not be enabled.'))->error();
+        }
+        return back();
+    }
+
+    public function opcacheStats()
+    {
+        return response()->json($this->opcache->getStats());
     }
 }

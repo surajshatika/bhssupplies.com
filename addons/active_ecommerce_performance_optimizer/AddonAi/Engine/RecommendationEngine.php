@@ -259,16 +259,24 @@ class RecommendationEngine
     {
         $count = 0;
         $checks = [
-            'perf_css_minify_status' => ['Enable CSS minification', 'CSS minification is OFF. Minifying typically shaves 20-30% off CSS payload.'],
-            'perf_js_minify_status'  => ['Enable JS minification',  'JS minification is OFF. Minifying typically shaves 25-35% off JS payload.'],
-            'perf_js_defer_status'   => ['Enable JS defer',         'JS defer is OFF. Adding defer to non-critical <script src=> tags eliminates render-blocking.'],
+            'perf_css_minify_status'   => ['Enable CSS minification',  'CSS minification is OFF. Minifying typically shaves 20-30% off CSS payload.'],
+            'perf_js_minify_status'    => ['Enable JS minification',   'JS minification is OFF. Minifying typically shaves 25-35% off JS payload.'],
+            'perf_js_defer_status'     => ['Enable JS defer',          'JS defer is OFF. Adding defer to non-critical <script src=> tags eliminates render-blocking.'],
+            'perf_lcp_preload_status'  => ['Enable LCP image auto-preload', 'LCP hero image preload is OFF. Auto-detecting and preloading the hero image with fetchpriority="high" is a direct fix for high LCP scores.'],
+            'perf_html_minify_status'  => ['Enable HTML minification', 'HTML output is not minified. Stripping comments and whitespace from HTML typically saves 10-20% on transfer size.'],
         ];
         foreach ($checks as $key => $info) {
             if ((int) get_setting($key, 0) === 1) continue;
             [$title, $body] = $info;
             if ($this->exists('css', $title)) continue;
+            $cat = match(true) {
+                str_contains($key, 'css')  => 'css',
+                str_contains($key, 'lcp')  => 'image',
+                str_contains($key, 'html') => 'html',
+                default                    => 'js',
+            };
             AiRecommendation::create([
-                'category'         => str_contains($key, 'css') ? 'css' : 'js',
+                'category'         => $cat,
                 'severity'         => 'medium',
                 'title'            => $title,
                 'body'             => $body,

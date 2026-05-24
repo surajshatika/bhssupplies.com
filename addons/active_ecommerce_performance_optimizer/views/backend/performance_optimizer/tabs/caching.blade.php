@@ -31,8 +31,10 @@
                         <div class="col-md-4 mb-2">
                             <label class="small">{{ translate('Cache driver') }}</label>
                             <select name="perf_page_cache_driver" class="form-control form-control-sm">
-                                <option value="file"  @if(get_setting('perf_page_cache_driver') == 'file') selected @endif>file</option>
-                                <option value="redis" @if(get_setting('perf_page_cache_driver') == 'redis') selected @endif>redis</option>
+                                <option value="file"       @if(get_setting('perf_page_cache_driver','file') == 'file') selected @endif>{{ translate('File (default)') }}</option>
+                                <option value="redis"      @if(get_setting('perf_page_cache_driver') == 'redis') selected @endif>Redis</option>
+                                <option value="litespeed"  @if(get_setting('perf_page_cache_driver') == 'litespeed') selected @endif>⚡ LiteSpeed Cache (LSCache)</option>
+                                <option value="memcached"  @if(get_setting('perf_page_cache_driver') == 'memcached') selected @endif>Memcached</option>
                             </select>
                         </div>
                         <div class="col-md-4 mb-2">

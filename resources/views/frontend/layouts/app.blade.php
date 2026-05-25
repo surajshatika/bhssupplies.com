@@ -83,6 +83,10 @@
     <link rel="dns-prefetch" href="//fonts.googleapis.com">
     <link rel="dns-prefetch" href="//fonts.gstatic.com">
     <link rel="dns-prefetch" href="//scripts.clarity.ms">
+    <link rel="dns-prefetch" href="//static.getbutton.io">
+    <link rel="dns-prefetch" href="//analytics.tiktok.com">
+    <link rel="dns-prefetch" href="//s.pinimg.com">
+    <link rel="dns-prefetch" href="//sc-static.net">
 
     <!-- Google Fonts — async load, 4 weights only -->
     <link rel="preconnect" href="https://fonts.googleapis.com">

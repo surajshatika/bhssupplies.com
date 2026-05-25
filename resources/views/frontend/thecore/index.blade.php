@@ -521,6 +521,19 @@ $homeBanner2SmallImages = get_setting('home_banner2_sm_images', null, $lang);
 
 <!-- New Products -->
 <div id="section_newest">
+    {{-- Skeleton shown until AJAX replaces this content --}}
+    <div class="container py-3 skel-newest-placeholder">
+        <div class="skel-product-row">
+            @for ($i = 0; $i < 6; $i++)
+            <div class="skel-product-card">
+                <div class="skel-box skel-img"></div>
+                <span class="skel-line skel-name"></span>
+                <span class="skel-line skel-name2"></span>
+                <span class="skel-line skel-price"></span>
+            </div>
+            @endfor
+        </div>
+    </div>
 </div>
 <div class="text-center d-none" id="view-more-container">
     <button type="button" class="btn btn-lg py-19px w-20 bg-light fs-12 fs-md-16 my-32px" id="view-more-btn">

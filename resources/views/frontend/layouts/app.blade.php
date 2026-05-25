@@ -67,7 +67,7 @@
             : static_asset('assets/img/logo.png');
     @endphp
     @if ($__seoLogoUrl)
-        <link rel="preload" as="image" href="{{ $__seoLogoUrl }}" fetchpriority="high">
+        <link rel="preload" as="image" href="{{ $__seoLogoUrl }}">
     @endif
 
     @yield('lcp_preload')
@@ -235,13 +235,16 @@
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "HVACBusiness",
+      "@type": ["HVACBusiness", "Store"],
       "name": "BHS Supplies",
       "image": "{{ uploaded_asset(get_setting('site_icon')) }}",
-      "@id": "{{ url('/') }}",
+      "@id": "{{ url('/') }}#localbusiness",
       "url": "{{ url('/') }}",
       "telephone": "+1 (647) 456-2244",
       "email": "support@bhssupplies.com",
+      "priceRange": "$$",
+      "paymentAccepted": "Cash, Credit Card, Debit Card",
+      "currenciesAccepted": "CAD",
       "address": {
         "@type": "PostalAddress",
         "streetAddress": "7040 Torbram Rd #8",
@@ -255,24 +258,129 @@
         "latitude": 43.7046894,
         "longitude": -79.6631853
       },
-      "openingHoursSpecification": {
-        "@type": "OpeningHoursSpecification",
-        "dayOfWeek": [
-          "Monday",
-          "Tuesday",
-          "Wednesday",
-          "Thursday",
-          "Friday"
-        ],
-        "opens": "07:30",
-        "closes": "17:00"
+      "openingHoursSpecification": [
+        {
+          "@type": "OpeningHoursSpecification",
+          "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],
+          "opens": "10:00",
+          "closes": "18:00"
+        },
+        {
+          "@type": "OpeningHoursSpecification",
+          "dayOfWeek": "Sunday",
+          "opens": "10:00",
+          "closes": "14:00"
+        }
+      ],
+      "areaServed": [
+        "Mississauga", "Brampton", "Toronto", "Etobicoke", "Vaughan",
+        "Oakville", "Scarborough", "North York", "Markham", "Richmond Hill",
+        "Greater Toronto Area", "Peel Region", "York Region"
+      ],
+      "knowsAbout": [
+        "HVAC supplies", "Sheet metal duct fittings", "Flexible ductwork",
+        "PEX pipe", "Brass fittings", "Copper fittings", "Push-fit connectors",
+        "Gas valves", "Black iron pipe", "CSST flexible gas pipe",
+        "Refrigerants R-410A R-32 R-454B", "Air filters", "Thermostats",
+        "Plumbing wholesale", "HVAC contractor supplies", "Hardware fasteners"
+      ],
+      "hasOfferCatalog": {
+        "@type": "OfferCatalog",
+        "name": "Wholesale HVAC, Plumbing & Hardware Supplies",
+        "itemListElement": [
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Sheet Metal Duct Fittings"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Flexible Duct R4.2 R6 R8"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "PEX Pipe All Sizes"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Brass Fittings"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Copper Fittings"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Gas Valves and Black Iron Pipe"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "CSST Flexible Gas Piping"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Refrigerants R-410A R-32 R-454B"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Air Filters All Sizes"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Thermostats and Controls"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Water Heater Parts"}},
+          {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Hardware Fasteners and Hangers"}}
+        ]
       },
       "sameAs": [
         "{{ get_setting('facebook_link') }}",
         "{{ get_setting('instagram_link') }}",
         "{{ get_setting('twitter_link') }}"
-      ],
-      "areaServed": ["Mississauga", "Toronto", "Brampton", "Greater Toronto Area"]
+      ]
+    }
+    </script>
+
+    <!-- FAQPage Schema — targets Google "People Also Ask" rich results -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Do you sell HVAC and plumbing supplies wholesale in Mississauga?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes — BHS Supplies is a wholesale supplier for licensed contractors and tradespeople across Mississauga and the GTA. We stock sheet metal duct fittings, flexible ducts, PEX pipe, brass and copper fittings, gas valves, refrigerants, air filters, thermostats, and 2,000+ SKUs. Walk-in same-day pickup at 7040 Torbram Rd #8, Mississauga. Shop online at bhssupplies.com or call (647) 456-2244."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What are your hours? Are you open on weekends?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "BHS Supplies is open Monday to Saturday 10am–6pm and Sunday 10am–2pm. Same-day walk-in pickup is available for all in-stock items. Call ahead for large contractor orders: (647) 456-2244."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What sheet metal duct fittings do you carry?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "We stock a full range of round and rectangular sheet metal duct fittings including elbows, tees, reducers, takeoffs, flexible duct (R4.2, R6, R8 insulation ratings), duct tape, and mastic sealant. Same-day pickup in Mississauga at our 7040 Torbram Rd location."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I order online and pick up in store?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes — order at bhssupplies.com and pick up same-day at our Mississauga location. We also accept phone orders at (647) 456-2244. Walk-in customers are always welcome during business hours, 7 days a week."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do you serve contractors in Brampton, Toronto, and Vaughan?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Absolutely. BHS Supplies serves licensed HVAC technicians, plumbers, and contractors throughout Mississauga, Brampton, Toronto, Etobicoke, Vaughan, Oakville, Scarborough, and all of the Greater Toronto Area."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What refrigerants do you carry?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "We stock R-410A, R-32, R-454B, and other refrigerant lines at wholesale contractor pricing. Call ahead for large cylinder orders: (647) 456-2244."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do you carry gas supplies like black iron pipe and CSST?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes — BHS Supplies stocks gas valves, black iron pipe in all schedules and sizes, CSST flexible gas line, ball valves, gas cocks, and all corresponding fittings. Fully stocked for licensed gas contractors in Mississauga and the GTA."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do you offer trade accounts or wholesale contractor pricing?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes — BHS Supplies offers trade accounts for licensed HVAC technicians, plumbers, and contractors with volume pricing and no minimum order. Call (647) 456-2244 or email support@bhssupplies.com to set up your trade account."
+          }
+        }
+      ]
     }
     </script>
 
@@ -603,21 +711,31 @@
     <script src="{{ static_asset('assets/js/vendors.js?v=') }}{{ get_setting('current_version') }}"></script>
     <script src="{{ static_asset('assets/js/aiz-core.min.js?v=') }}{{ get_setting('current_version') }}"></script>
 
-    {{-- WhatsaApp Chat --}}
+    {{-- WhatsApp Chat — deferred until user interaction or 3 s to avoid TBT penalty --}}
     @if (get_setting('whatsapp_chat') == 1)
-        <script type="text/javascript">
-            (function () {
-                var options = {
-                    whatsapp: "{{ env('WHATSAPP_NUMBER') }}",
-                    call_to_action: "{{ translate('Message us') }}",
-                    position: "right", // Position may be 'right' or 'left'
-                };
-                var proto = document.location.protocol, host = "getbutton.io", url = proto + "//static." + host;
-                var s = document.createElement('script'); s.type = 'text/javascript'; s.async = true; s.src = url + '/widget-send-button/js/init.js';
-                s.onload = function () { WhWidgetSendButton.init(host, proto, options); };
-                var x = document.getElementsByTagName('script')[0]; x.parentNode.insertBefore(s, x);
-            })();
-        </script>
+    <script>
+    (function () {
+        var _loaded = false;
+        function _loadWA() {
+            if (_loaded) return; _loaded = true;
+            var options = {
+                whatsapp: "{{ env('WHATSAPP_NUMBER') }}",
+                call_to_action: "{{ translate('Message us') }}",
+                position: "right",
+            };
+            var proto = document.location.protocol, host = "getbutton.io", url = proto + "//static." + host;
+            var s = document.createElement('script'); s.type = 'text/javascript'; s.async = true;
+            s.src = url + '/widget-send-button/js/init.js';
+            s.onload = function () { WhWidgetSendButton.init(host, proto, options); };
+            (document.getElementsByTagName('script')[0]).parentNode.insertBefore(s, document.getElementsByTagName('script')[0]);
+        }
+        // Load after 3 s idle or on first user gesture — whichever is sooner
+        setTimeout(_loadWA, 3000);
+        ['scroll','mousemove','touchstart','keydown','click'].forEach(function(e) {
+            document.addEventListener(e, _loadWA, {once: true, passive: true});
+        });
+    })();
+    </script>
     @endif
 
     <style>
@@ -706,62 +824,31 @@
 
     <script>
         @if (Route::currentRouteName() == 'home' || Route::currentRouteName() == '/')
-
-            $.post('{{ route('home.section.featured') }}', {
-                _token: '{{ csrf_token() }}'
-            }, function(data) {
-                $('#section_featured').html(data);
+        // Guard: only fire each AJAX call when its target container actually exists in
+        // the current theme. Eliminates 4-5 wasted server round-trips on thecore theme.
+        function _homeSection(route, selector, extra) {
+            if (!$(selector).length) return;
+            $.post(route, {_token: '{{ csrf_token() }}'}, function(data) {
+                $(selector).html(data);
                 AIZ.plugins.slickCarousel();
+                if (extra) extra();
             });
+        }
 
-            $.post('{{ route('home.section.todays_deal') }}', {
-                _token: '{{ csrf_token() }}'
-            }, function(data) {
-                $('#todays_deal').html(data);
-                AIZ.plugins.slickCarousel();
-            });
+        _homeSection('{{ route('home.section.featured') }}',        '#section_featured');
+        _homeSection('{{ route('home.section.todays_deal') }}',     '#todays_deal');
+        _homeSection('{{ route('home.section.best_selling') }}',    '#section_best_selling');
+        _homeSection('{{ route('home.section.newest_products') }}', '#section_newest', function() {
+            @if (get_setting('homepage_select') == 'thecore')
+            toggleViewMoreButton();
+            @endif
+        });
+        _homeSection('{{ route('home.section.auction_products') }}', '#auction_products');
+        _homeSection('{{ route('home.section.home_categories') }}',  '#section_home_categories');
 
-            $.post('{{ route('home.section.best_selling') }}', {
-                _token: '{{ csrf_token() }}'
-            }, function(data) {
-                $('#section_best_selling').html(data);
-                AIZ.plugins.slickCarousel();
-            });
-
-            $.post('{{ route('home.section.newest_products') }}', {
-                _token: '{{ csrf_token() }}'
-            }, function(data) {
-                $('#section_newest').html(data);
-                AIZ.plugins.slickCarousel();
-                @if (get_setting('homepage_select') == 'thecore')
-                 toggleViewMoreButton();
-                @endif
-            });
-
-            $.post('{{ route('home.section.auction_products') }}', {
-                _token: '{{ csrf_token() }}'
-            }, function(data) {
-                $('#auction_products').html(data);
-                AIZ.plugins.slickCarousel();
-            });
-
-            var isPreorderEnabled = @json(addon_is_activated('preorder'));
-
-            if (isPreorderEnabled) {
-                $.post('{{ route('home.section.preorder_products') }}', {
-                    _token: '{{ csrf_token() }}'
-                }, function(data) {
-                    $('#section_featured_preorder_products').html(data);
-                    AIZ.plugins.slickCarousel();
-                });
-            }
-
-            $.post('{{ route('home.section.home_categories') }}', {
-                _token: '{{ csrf_token() }}'
-            }, function(data) {
-                $('#section_home_categories').html(data);
-                AIZ.plugins.slickCarousel();
-            });
+        if (@json(addon_is_activated('preorder'))) {
+            _homeSection('{{ route('home.section.preorder_products') }}', '#section_featured_preorder_products');
+        }
 
         @endif
 

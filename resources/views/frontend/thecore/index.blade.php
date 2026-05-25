@@ -12,7 +12,15 @@
             $_lcp_url = my_asset($_lcp_sliders[0]->file_name);
         }
     }
+    // Flash deal banner is often the largest image in the viewport — preload it too
+    $_lcp_flash   = cache()->remember('featured_flash_deal', 1800, fn() => get_featured_flash_deal());
+    $_lcp_flash_url = ($_lcp_flash && $_lcp_flash->banner) ? uploaded_asset($_lcp_flash->banner) : null;
 @endphp
+{{-- Preload the flash deal banner first (largest above-fold image on desktop) --}}
+@if($_lcp_flash_url)
+<link rel="preload" as="image" href="{{ $_lcp_flash_url }}" fetchpriority="high">
+@endif
+{{-- Preload first slider image (LCP on mobile) --}}
 @if($_lcp_url)
 <link rel="preload" as="image" href="{{ $_lcp_url }}" fetchpriority="high">
 @endif
@@ -64,7 +72,7 @@
             <div class="col-lg-7 col-md-5 pl-4 col-12">
                 <div class="row">
                     @php
-                    $flash_deal = get_featured_flash_deal();
+                    $flash_deal = cache()->remember('featured_flash_deal', 1800, fn() => get_featured_flash_deal());
                     @endphp
                     @if ($flash_deal != null)
                     <div class="col-lg-5 col-12 pl-2 pl-md-3 pl-xl-4">
@@ -86,10 +94,15 @@
                                 
 
                                 <div class="flash-deals-baner h-md-200px h-lg-220px h-xl-300px h-xxl-316px">
-                                    <a href="{{ route('flash-deal-details', $flash_deal->slug) }}" class="d-block h-100 position-relative">
-                                        <div class="h-100 w-100 w-xl-auto rounded-75"
-                                            style="background-image: url('{{ uploaded_asset($flash_deal->banner) }}'); background-size: cover; background-position: center center;">
-                                            </div>
+                                    <a href="{{ route('flash-deal-details', $flash_deal->slug) }}" class="d-block h-100 position-relative overflow-hidden rounded-75">
+                                        {{-- <img> instead of CSS background-image so browser preload scanner discovers it early (LCP fix) --}}
+                                        <img src="{{ uploaded_asset($flash_deal->banner) }}"
+                                             alt="{{ translate('Flash Sale') }}"
+                                             loading="eager"
+                                             fetchpriority="high"
+                                             class="position-absolute rounded-75"
+                                             style="top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:center center"
+                                             onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder-rect.jpg') }}';">
 
                                         <div class="position-absolute bottom-0 w-100 py-3 d-none d-md-block">
                                             <div class="d-flex justify-content-center">
@@ -214,7 +227,7 @@
         <div class="d-sm-flex">
             <!-- Best Selling -->
             @php
-             $best_selling_products = get_best_selling_products(20);
+             $best_selling_products = cache()->remember('home_best_selling_20', 1800, fn() => get_best_selling_products(20));
             @endphp
             @if (count($best_selling_products) > 0)
             <div class="px-0 px-sm-4 w-100 overflow-hidden rounded-75 best-salling-section pt-32px pb-26px mb-4 mb-sm-0" style="background-color: {{ get_setting('best_selling_section_bg_color', '#E7EFEC') }}">
@@ -270,7 +283,7 @@
             <!-- Todays Deal -->
             @endif
             @php
-             $todays_deal_products = get_todays_deal_products(20);
+             $todays_deal_products = cache()->remember('home_todays_deal_20', 1800, fn() => get_todays_deal_products(20));
             @endphp
             @if (count($todays_deal_products) > 0)
             <div class="px-0 mt-sm-0 ml-sm-4 w-100  w-md-50 w-lg-35 overflow-hidden border border-2 border-dark rounded-75 todays-deal pt-32px pb-26px" style="background-color: {{ get_setting('todays_deal_bg_color', '#ffffff') }}">

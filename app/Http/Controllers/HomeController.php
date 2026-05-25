@@ -78,8 +78,13 @@ class HomeController extends Controller
 
     public function load_todays_deal_section()
     {
-        $todays_deal_products = filter_products(Product::where('todays_deal', '1'))->orderBy('id', 'desc')->get();
-        return view('frontend.' . get_setting('homepage_select') . '.partials.todays_deal', compact('todays_deal_products'));
+        $theme = get_setting('homepage_select');
+        $lang  = app()->getLocale();
+        $html  = Cache::remember("section_todays_deal_{$theme}_{$lang}", 1800, function () use ($theme) {
+            $todays_deal_products = filter_products(Product::where('todays_deal', '1'))->orderBy('id', 'desc')->get();
+            return view("frontend.{$theme}.partials.todays_deal", compact('todays_deal_products'))->render();
+        });
+        return response($html)->header('Content-Type', 'text/html');
     }
 
     public function load_newest_product_section(Request $request)
@@ -105,12 +110,22 @@ class HomeController extends Controller
 
     public function load_featured_section()
     {
-        return view('frontend.' . get_setting('homepage_select') . '.partials.featured_products_section');
+        $theme = get_setting('homepage_select');
+        $lang  = app()->getLocale();
+        $html  = Cache::remember("section_featured_{$theme}_{$lang}", 1800, function () use ($theme) {
+            return view("frontend.{$theme}.partials.featured_products_section")->render();
+        });
+        return response($html)->header('Content-Type', 'text/html');
     }
 
     public function load_best_selling_section()
     {
-        return view('frontend.' . get_setting('homepage_select') . '.partials.best_selling_section');
+        $theme = get_setting('homepage_select');
+        $lang  = app()->getLocale();
+        $html  = Cache::remember("section_best_selling_{$theme}_{$lang}", 1800, function () use ($theme) {
+            return view("frontend.{$theme}.partials.best_selling_section")->render();
+        });
+        return response($html)->header('Content-Type', 'text/html');
     }
 
     public function load_auction_products_section()
@@ -124,7 +139,12 @@ class HomeController extends Controller
 
     public function load_home_categories_section()
     {
-        return view('frontend.' . get_setting('homepage_select') . '.partials.home_categories_section');
+        $theme = get_setting('homepage_select');
+        $lang  = app()->getLocale();
+        $html  = Cache::remember("section_home_categories_{$theme}_{$lang}", 1800, function () use ($theme) {
+            return view("frontend.{$theme}.partials.home_categories_section")->render();
+        });
+        return response($html)->header('Content-Type', 'text/html');
     }
 
     public function load_best_sellers_section()

@@ -4,6 +4,8 @@
 @section('meta_description', 'BHS Supplies serves Toronto HVAC contractors & plumbers with wholesale sheet metal duct fittings, PEX pipe, brass fittings, gas valves, refrigerants & more. Same-day pickup in Mississauga. Call (647) 456-2244.')
 @section('meta_keywords', 'HVAC supplies Toronto, sheet metal duct fittings Toronto, PEX pipe wholesale Toronto, brass fittings Toronto contractor, gas valve supplier Toronto GTA, refrigerant Toronto, plumbing supplies wholesale Toronto')
 
+@section('canonical'){{ route('locations.toronto') }}@endsection
+
 @section('structured_data')
 <script type="application/ld+json">
 {
@@ -13,6 +15,34 @@
     {"@type": "ListItem", "position": 1, "name": "Home", "item": "{{ url('/') }}"},
     {"@type": "ListItem", "position": 2, "name": "HVAC Supplies Toronto", "item": "{{ route('locations.toronto') }}"}
   ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Service",
+  "@id": "{{ route('locations.toronto') }}#service",
+  "name": "Wholesale HVAC & Plumbing Supplies — Toronto",
+  "description": "BHS Supplies provides wholesale HVAC equipment, plumbing supplies, and hardware for licensed contractors in Toronto. Same-day pickup from Mississauga warehouse. Open 7 days.",
+  "url": "{{ route('locations.toronto') }}",
+  "serviceType": "Wholesale HVAC & Plumbing Supply",
+  "areaServed": {
+    "@type": "City",
+    "name": "Toronto",
+    "addressCountry": "CA"
+  },
+  "provider": {
+    "@type": "HVACBusiness",
+    "@id": "{{ url('/') }}#localbusiness",
+    "name": "BHS Supplies",
+    "telephone": "+1-647-456-2244"
+  },
+  "hoursAvailable": {
+    "@type": "OpeningHoursSpecification",
+    "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],
+    "opens": "10:00",
+    "closes": "18:00"
+  }
 }
 </script>
 @endsection
@@ -120,6 +150,17 @@
                         <li class="mb-1"><a href="{{ route('locations.north-york') }}" class="text-primary">HVAC Supplies North York</a></li>
                         <li class="mb-1"><a href="{{ route('locations.scarborough') }}" class="text-primary">HVAC Supplies Scarborough</a></li>
                         <li><a href="{{ route('home') }}" class="text-primary">All Products — BHS Supplies</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm mt-3">
+                <div class="card-body p-3">
+                    <h3 class="h6 fw-700 text-dark mb-2">Contractor Resources</h3>
+                    <ul class="list-unstyled fs-14 mb-0">
+                        <li class="mb-2"><a href="{{ route('trade-account') }}" class="text-primary fw-600"><i class="las la-id-card mr-1"></i> Set Up Trade Account</a></li>
+                        <li class="mb-2"><a href="{{ url('/blogs') }}" class="text-primary"><i class="las la-book mr-1"></i> Contractor Guides & Tips</a></li>
+                        <li><a href="{{ route('review') }}" class="text-primary"><i class="las la-star mr-1"></i> Leave Us a Review</a></li>
                     </ul>
                 </div>
             </div>

@@ -58,6 +58,41 @@
       "itemListElement": @json($breadcrumbItems)
     }
     </script>
+
+    {{-- CollectionPage + ItemList Schema --}}
+    @php
+        $_clPageTitle = $meta_title ?: 'HVAC & Plumbing Supplies — BHS Supplies';
+        $_clPageDesc  = $meta_description ?: 'Wholesale HVAC, plumbing, and hardware supplies for contractors across Mississauga and GTA.';
+        $_clItems     = [];
+        $_clPos       = 1;
+        foreach (($products ?? collect())->take(12) as $_clProd) {
+            $_clImg = uploaded_asset($_clProd->thumbnail_img);
+            $_clItems[] = [
+                '@type'    => 'ListItem',
+                'position' => $_clPos++,
+                'url'      => route('product', $_clProd->slug),
+                'name'     => $_clProd->getTranslation('name'),
+                'image'    => $_clImg,
+            ];
+        }
+    @endphp
+    @if(!empty($_clItems))
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      "name": "{{ addslashes($_clPageTitle) }}",
+      "description": "{{ addslashes($_clPageDesc) }}",
+      "url": "{{ url()->current() }}",
+      "mainEntity": {
+        "@type": "ItemList",
+        "name": "{{ addslashes($_clPageTitle) }}",
+        "numberOfItems": {{ count($_clItems) }},
+        "itemListElement": @json($_clItems)
+      }
+    }
+    </script>
+    @endif
 @endsection
 
 @section('content')

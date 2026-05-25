@@ -4,6 +4,8 @@
 @section('meta_description', 'BHS Supplies serves Brampton HVAC contractors & plumbers with wholesale sheet metal duct fittings, PEX pipe, brass fittings, CSST, gas valves & refrigerants. Same-day pickup. Call (647) 456-2244.')
 @section('meta_keywords', 'HVAC supplies Brampton, sheet metal duct fittings Brampton, PEX pipe wholesale Brampton, brass fittings Brampton contractor, gas valve CSST Brampton, plumbing supplies wholesale Brampton GTA, HVAC contractor supply Brampton')
 
+@section('canonical'){{ route('locations.brampton') }}@endsection
+
 @section('structured_data')
 <script type="application/ld+json">
 {
@@ -13,6 +15,34 @@
     {"@type": "ListItem", "position": 1, "name": "Home", "item": "{{ url('/') }}"},
     {"@type": "ListItem", "position": 2, "name": "HVAC Supplies Brampton", "item": "{{ route('locations.brampton') }}"}
   ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Service",
+  "@id": "{{ route('locations.brampton') }}#service",
+  "name": "Wholesale HVAC & Plumbing Supplies — Brampton",
+  "description": "BHS Supplies provides wholesale HVAC equipment, sheet metal duct fittings, PEX pipe, gas valves, and plumbing supplies for licensed contractors in Brampton. Located 10 minutes away via Highway 410.",
+  "url": "{{ route('locations.brampton') }}",
+  "serviceType": "Wholesale HVAC & Plumbing Supply",
+  "areaServed": {
+    "@type": "City",
+    "name": "Brampton",
+    "addressCountry": "CA"
+  },
+  "provider": {
+    "@type": "HVACBusiness",
+    "@id": "{{ url('/') }}#localbusiness",
+    "name": "BHS Supplies",
+    "telephone": "+1-647-456-2244"
+  },
+  "hoursAvailable": {
+    "@type": "OpeningHoursSpecification",
+    "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],
+    "opens": "10:00",
+    "closes": "18:00"
+  }
 }
 </script>
 @endsection
@@ -125,6 +155,17 @@
                         <li class="mb-1"><a href="{{ route('locations.oakville') }}" class="text-primary">HVAC Supplies Oakville</a></li>
                         <li class="mb-1"><a href="{{ route('locations.burlington') }}" class="text-primary">HVAC Supplies Burlington</a></li>
                         <li><a href="{{ route('home') }}" class="text-primary">All Products — BHS Supplies</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm mt-3">
+                <div class="card-body p-3">
+                    <h3 class="h6 fw-700 text-dark mb-2">Contractor Resources</h3>
+                    <ul class="list-unstyled fs-14 mb-0">
+                        <li class="mb-2"><a href="{{ route('trade-account') }}" class="text-primary fw-600"><i class="las la-id-card mr-1"></i> Set Up Trade Account</a></li>
+                        <li class="mb-2"><a href="{{ url('/blogs') }}" class="text-primary"><i class="las la-book mr-1"></i> Contractor Guides & Tips</a></li>
+                        <li><a href="{{ route('review') }}" class="text-primary"><i class="las la-star mr-1"></i> Leave Us a Review</a></li>
                     </ul>
                 </div>
             </div>

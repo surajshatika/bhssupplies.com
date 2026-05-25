@@ -302,6 +302,70 @@
           {"@type": "Offer", "itemOffered": {"@type": "Product", "name": "Hardware Fasteners and Hangers"}}
         ]
       },
+      "hasMap": "https://maps.google.com/?q=7040+Torbram+Rd+%238,+Mississauga,+ON+L4T+3Z4",
+      "serviceArea": {
+        "@type": "GeoCircle",
+        "geoMidpoint": {
+          "@type": "GeoCoordinates",
+          "latitude": 43.7046894,
+          "longitude": -79.6631853
+        },
+        "geoRadius": "50000"
+      },
+      "sameAs": [
+        "{{ get_setting('facebook_link') }}",
+        "{{ get_setting('instagram_link') }}",
+        "{{ get_setting('twitter_link') }}"
+      ]
+    }
+    </script>
+
+    <!-- Organization Schema — E-E-A-T authority signal -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "@id": "{{ url('/') }}#organization",
+      "name": "BHS Supplies",
+      "url": "{{ url('/') }}",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "{{ uploaded_asset(get_setting('site_icon')) }}",
+        "width": 512,
+        "height": 512
+      },
+      "contactPoint": [
+        {
+          "@type": "ContactPoint",
+          "telephone": "+1-647-456-2244",
+          "contactType": "customer service",
+          "areaServed": "CA",
+          "availableLanguage": "English",
+          "hoursAvailable": {
+            "@type": "OpeningHoursSpecification",
+            "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],
+            "opens": "10:00",
+            "closes": "18:00"
+          }
+        },
+        {
+          "@type": "ContactPoint",
+          "telephone": "+1-647-456-2244",
+          "contactType": "sales",
+          "areaServed": "CA",
+          "availableLanguage": "English"
+        }
+      ],
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "7040 Torbram Rd #8",
+        "addressLocality": "Mississauga",
+        "addressRegion": "ON",
+        "postalCode": "L4T 3Z4",
+        "addressCountry": "CA"
+      },
+      "email": "support@bhssupplies.com",
+      "telephone": "+1-647-456-2244",
       "sameAs": [
         "{{ get_setting('facebook_link') }}",
         "{{ get_setting('instagram_link') }}",

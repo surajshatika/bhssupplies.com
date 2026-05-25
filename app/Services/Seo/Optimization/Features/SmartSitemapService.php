@@ -267,10 +267,16 @@ class SmartSitemapService extends AbstractSeoService
 
     protected function buildSitemapIndex(string $base): string
     {
+        // Always use APP_URL for public sitemaps so index works in production
+        $publicBase = rtrim(env('APP_URL', $base), '/');
         $sitemaps = [
-            ['loc' => $base . '/sitemap.xml',         'desc' => 'Main Sitemap'],
-            ['loc' => $base . '/video-sitemap.xml',   'desc' => 'Video Sitemap'],
-            ['loc' => $base . '/news-sitemap.xml',    'desc' => 'Blog/News Sitemap'],
+            ['loc' => $publicBase . '/sitemap.xml',              'desc' => 'Main Sitemap'],
+            ['loc' => $publicBase . '/sitemap-static.xml',       'desc' => 'Static Pages Sitemap'],
+            ['loc' => $publicBase . '/sitemap-products.xml',     'desc' => 'Products Sitemap'],
+            ['loc' => $publicBase . '/sitemap-categories.xml',   'desc' => 'Categories Sitemap'],
+            ['loc' => $publicBase . '/sitemap-blogs.xml',        'desc' => 'Blog Posts Sitemap'],
+            ['loc' => $publicBase . '/sitemap-blog_categories.xml', 'desc' => 'Blog Categories Sitemap'],
+            ['loc' => $publicBase . '/news-sitemap.xml',         'desc' => 'Blog/News Sitemap'],
         ];
 
         $lines = [

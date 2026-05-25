@@ -231,6 +231,17 @@
                 </div>
             </div>
 
+            <div class="card border-0 shadow-sm mt-3">
+                <div class="card-body p-3">
+                    <h3 class="h6 fw-700 text-dark mb-2">Contractor Resources</h3>
+                    <ul class="list-unstyled fs-14 mb-0">
+                        <li class="mb-2"><a href="{{ route('trade-account') }}" class="text-primary fw-600"><i class="las la-id-card mr-1"></i> Set Up Trade Account</a></li>
+                        <li class="mb-2"><a href="{{ url('/blogs') }}" class="text-primary"><i class="las la-book mr-1"></i> Contractor Guides & Tips</a></li>
+                        <li><a href="{{ route('review') }}" class="text-primary"><i class="las la-star mr-1"></i> Leave Us a Review</a></li>
+                    </ul>
+                </div>
+            </div>
+
         </div>
     </div>
 </div>

@@ -55,7 +55,15 @@
     "@id": "{{ route('blog.details', $blog->slug) }}"
   },
   "keywords": "{{ $blog->meta_keywords }}",
-  "articleSection": "{{ $blog->category?->category_name ?? 'HVAC & Plumbing Tips' }}"
+  "articleSection": "{{ $blog->category?->category_name ?? 'HVAC & Plumbing Tips' }}",
+  "articleBody": "{{ addslashes(strip_tags($blog->description ?? '')) }}",
+  "wordCount": {{ max(1, str_word_count(strip_tags($blog->description ?? ''))) }},
+  "inLanguage": "en-CA",
+  "isPartOf": {
+    "@type": "Blog",
+    "@id": "{{ url('/blogs') }}#blog",
+    "name": "BHS Supplies — HVAC & Plumbing Contractor Guides"
+  }
 }
 </script>
 

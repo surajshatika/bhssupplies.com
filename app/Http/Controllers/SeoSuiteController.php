@@ -402,6 +402,9 @@ class SeoSuiteController extends Controller
             }
         }
 
+        // Flush the 24-hour business_settings cache so get_setting() reads fresh DB values
+        Cache::forget('business_settings');
+
         flash(translate('Webmaster verification codes saved'))->success();
         return redirect()->route('admin.seo-suite.webmaster');
     }

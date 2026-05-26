@@ -16,6 +16,7 @@ class AiSeoBoardController extends Controller
     {
     }
 
+    
     public function index(Request $request)
     {
         $type    = $request->input('type', 'product');

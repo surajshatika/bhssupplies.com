@@ -269,29 +269,36 @@ class SmartSitemapService extends AbstractSeoService
     {
         // Always use APP_URL for public sitemaps so index works in production
         $publicBase = rtrim(env('APP_URL', $base), '/');
-        $sitemaps = [
-            ['loc' => $publicBase . '/sitemap.xml',                  'desc' => 'Main Sitemap'],
-            ['loc' => $publicBase . '/sitemap-static.xml',           'desc' => 'Static Pages Sitemap'],
-            ['loc' => $publicBase . '/sitemap-products.xml',         'desc' => 'Products Sitemap'],
-            ['loc' => $publicBase . '/sitemap-categories.xml',       'desc' => 'Categories Sitemap'],
-            ['loc' => $publicBase . '/sitemap-subcategories.xml',    'desc' => 'Sub-Categories Sitemap'],
-            ['loc' => $publicBase . '/sitemap-subsubcategories.xml', 'desc' => 'Sub-Sub-Categories Sitemap'],
-            ['loc' => $publicBase . '/sitemap-blogs.xml',            'desc' => 'Blog Posts Sitemap'],
-            ['loc' => $publicBase . '/sitemap-blog_categories.xml',  'desc' => 'Blog Categories Sitemap'],
-            ['loc' => $publicBase . '/sitemap-pages.xml',            'desc' => 'CMS Pages Sitemap'],
-            ['loc' => $publicBase . '/sitemap-brands.xml',           'desc' => 'Brands Sitemap'],
+
+        $candidates = [
+            'sitemap.xml',
+            'sitemap-static.xml',
+            'sitemap-products.xml',
+            'sitemap-categories.xml',
+            'sitemap-subcategories.xml',
+            'sitemap-subsubcategories.xml',
+            'sitemap-blogs.xml',
+            'sitemap-blog_categories.xml',
+            'sitemap-pages.xml',
+            'sitemap-brands.xml',
         ];
 
         $lines = [
             '<?xml version="1.0" encoding="UTF-8"?>',
             '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
         ];
-        foreach ($sitemaps as $sm) {
-            $lines[] = '  <sitemap>';
-            $lines[] = '    <loc>' . htmlspecialchars($sm['loc']) . '</loc>';
-            $lines[] = '    <lastmod>' . now()->toAtomString() . '</lastmod>';
-            $lines[] = '  </sitemap>';
+
+        foreach ($candidates as $file) {
+            // Only include sitemap in index if the file actually exists on disk
+            $path = ($file === 'sitemap.xml') ? base_path($file) : public_path($file);
+            if (file_exists($path)) {
+                $lines[] = '  <sitemap>';
+                $lines[] = '    <loc>' . htmlspecialchars($publicBase . '/' . $file) . '</loc>';
+                $lines[] = '    <lastmod>' . now()->toAtomString() . '</lastmod>';
+                $lines[] = '  </sitemap>';
+            }
         }
+
         $lines[] = '</sitemapindex>';
         return implode("\n", $lines);
     }

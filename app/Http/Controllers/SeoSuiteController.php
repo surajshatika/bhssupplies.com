@@ -391,6 +391,13 @@ class SeoSuiteController extends Controller
 
         foreach ($pairs as $type => $value) {
             if ($value !== null) {
+                // Strip full <meta> tag if user pasted it — save only the content value
+                $value = trim($value);
+                if (str_contains($value, 'content=')) {
+                    if (preg_match('/content=["\']([^"\']+)["\']/', $value, $m)) {
+                        $value = trim($m[1]);
+                    }
+                }
                 $this->saveSetting($type, $value);
             }
         }

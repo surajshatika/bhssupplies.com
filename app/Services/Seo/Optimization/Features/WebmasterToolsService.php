@@ -6,14 +6,26 @@ use App\Services\Seo\Support\AbstractSeoService;
 
 class WebmasterToolsService extends AbstractSeoService
 {
+    protected function extractContentValue(string $value): string
+    {
+        $value = trim($value);
+        // If user pasted a full <meta ... content="VALUE" ...> tag, extract just the content value
+        if (str_contains($value, '<meta') || str_contains($value, 'content=')) {
+            if (preg_match('/content=["\']([^"\']+)["\']/', $value, $m)) {
+                return trim($m[1]);
+            }
+        }
+        return $value;
+    }
+
     public function handle(array $payload): array
     {
         $verifications = [
-            'google'    => $payload['google_verification'] ?? get_setting('seo_google_verification'),
-            'bing'      => $payload['bing_verification'] ?? get_setting('seo_bing_verification'),
-            'yandex'    => $payload['yandex_verification'] ?? get_setting('seo_yandex_verification'),
-            'pinterest' => $payload['pinterest_verification'] ?? get_setting('seo_pinterest_verification'),
-            'baidu'     => $payload['baidu_verification'] ?? get_setting('seo_baidu_verification'),
+            'google'    => $this->extractContentValue($payload['google_verification'] ?? get_setting('seo_google_verification') ?? ''),
+            'bing'      => $this->extractContentValue($payload['bing_verification'] ?? get_setting('seo_bing_verification') ?? ''),
+            'yandex'    => $this->extractContentValue($payload['yandex_verification'] ?? get_setting('seo_yandex_verification') ?? ''),
+            'pinterest' => $this->extractContentValue($payload['pinterest_verification'] ?? get_setting('seo_pinterest_verification') ?? ''),
+            'baidu'     => $this->extractContentValue($payload['baidu_verification'] ?? get_setting('seo_baidu_verification') ?? ''),
         ];
 
         $metaTags   = $this->buildVerificationMetaTags($verifications);

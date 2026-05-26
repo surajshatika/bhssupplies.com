@@ -138,7 +138,7 @@ laravel.log
 ## ───────────── Site-verification & DNS proof files ─────────────
 # (each verification file identifies who owns the domain — keep private)
 google*.html
-BingSiteAuth.xml
+# BingSiteAuth.xml — tracked so it deploys via git
 y_key_*.html
 yandex_*.html
 

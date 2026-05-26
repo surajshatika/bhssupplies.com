@@ -678,6 +678,26 @@ $homeBanner2SmallImages = get_setting('home_banner2_sm_images', null, $lang);
                 BHS Supplies is a fully stocked <strong>HVAC accessories supplier in Mississauga</strong>. We carry <strong>refrigerants including R-410A, R-32, and R-454B</strong>, <strong>air filters in all sizes (1", 2", 4" including HEPA)</strong>, programmable and smart <strong>thermostats and controls</strong>, exhaust fans, HRV accessories, and indoor air quality equipment. We also stock <strong>refrigerant recovery machines, vacuum pumps, manifold gauges</strong>, and all HVAC service tools for licensed HVAC technicians across the GTA.
             </p>
 
+            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">AC Supplies — ACR Tubing, Capacitors, Disconnect Boxes & More</h2>
+            <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
+                BHS Supplies carries a full line of <strong>AC supplies</strong> used daily by air conditioning technicians across the GTA. In stock: <strong>ACR tubing (all sizes)</strong>, <strong>disconnect boxes</strong>, <strong>AC run and start capacitors</strong>, <strong>Armaflex pipe insulation</strong>, <strong>Liquidtite conduit and connectors</strong>, <strong>AC brackets and mounting hardware</strong>, and a complete range of <strong>bolts and fasteners</strong> for outdoor unit installations. Same-day pickup from our Mississauga warehouse — no special order wait times.
+            </p>
+
+            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Knipex Hand Tools — Plumbing, HVAC & Industrial Tools</h2>
+            <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
+                BHS Supplies is an authorized stocking dealer for <strong>Knipex hand tools</strong> — the premium German tool brand trusted by professionals worldwide. We stock the full Knipex range for <strong>plumbing, HVAC, industrial, electrical, and automotive</strong> applications: pump pliers (Cobra and Alligator series), needle-nose pliers, wire cutters, diagonal cutters, and specialty HVAC tools. <strong>Knipex tools are available for same-day pickup</strong> — browse the collection at <a href="{{ url('/category/knipex') }}" class="text-primary">bhssupplies.com/category/knipex</a>.
+            </p>
+
+            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Unilite Professional Lighting Tools</h2>
+            <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
+                BHS Supplies stocks <strong>Unilite professional lighting tools</strong> for contractors working in dark or confined spaces. Our Unilite range includes <strong>inspection lights, work lights, LED headlamps, and safety lighting</strong> — all built to industrial standards for trade professionals. Perfect for HVAC technicians, plumbers, and electricians who need reliable, hands-free lighting on every job. View the full range at <a href="{{ url('/category/unilite-tools') }}" class="text-primary">bhssupplies.com/category/unilite-tools</a>.
+            </p>
+
+            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Excalibur Water Systems — Water Softeners, RO & UV Treatment</h2>
+            <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
+                BHS Supplies is a dealer for <strong>Excalibur Water Systems</strong> — Canada's trusted brand for residential and commercial water treatment. We stock <strong>water softeners, reverse osmosis (RO) drinking water systems, UV disinfection systems</strong>, and replacement filters and media. Plumbers and water treatment contractors across Mississauga, Brampton, and the GTA rely on BHS for Excalibur equipment and parts, available for same-day pickup.
+            </p>
+
             <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Hardware, Fasteners & Safety Supplies</h2>
             <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
                 Beyond HVAC and plumbing, BHS is a complete <strong>hardware and fastener supplier</strong> for trade professionals. We stock screws, bolts, nuts, washers in bulk packs, <strong>HVAC-specific hangers, brackets, clamps, and strapping</strong>, drill bits, hole saws, step bits, and a full range of <strong>safety and PPE equipment</strong> including gloves, masks, and goggles. One stop — HVAC, plumbing, hardware, and safety — all at <strong>wholesale contractor pricing</strong>.

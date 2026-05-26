@@ -391,9 +391,19 @@ class SeoSuiteController extends Controller
 
         foreach ($pairs as $type => $value) {
             if ($value !== null) {
+                // Strip full <meta> tag if user pasted it — save only the content value
+                $value = trim($value);
+                if (str_contains($value, 'content=')) {
+                    if (preg_match('/content=["\']([^"\']+)["\']/', $value, $m)) {
+                        $value = trim($m[1]);
+                    }
+                }
                 $this->saveSetting($type, $value);
             }
         }
+
+        // Flush the 24-hour business_settings cache so get_setting() reads fresh DB values
+        Cache::forget('business_settings');
 
         flash(translate('Webmaster verification codes saved'))->success();
         return redirect()->route('admin.seo-suite.webmaster');

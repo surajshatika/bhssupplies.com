@@ -12,7 +12,15 @@
             $_lcp_url = my_asset($_lcp_sliders[0]->file_name);
         }
     }
+    // Flash deal banner is often the largest image in the viewport — preload it too
+    $_lcp_flash   = cache()->remember('featured_flash_deal', 1800, fn() => get_featured_flash_deal());
+    $_lcp_flash_url = ($_lcp_flash && $_lcp_flash->banner) ? uploaded_asset($_lcp_flash->banner) : null;
 @endphp
+{{-- Preload the flash deal banner first (largest above-fold image on desktop) --}}
+@if($_lcp_flash_url)
+<link rel="preload" as="image" href="{{ $_lcp_flash_url }}" fetchpriority="high">
+@endif
+{{-- Preload first slider image (LCP on mobile) --}}
 @if($_lcp_url)
 <link rel="preload" as="image" href="{{ $_lcp_url }}" fetchpriority="high">
 @endif
@@ -64,7 +72,7 @@
             <div class="col-lg-7 col-md-5 pl-4 col-12">
                 <div class="row">
                     @php
-                    $flash_deal = get_featured_flash_deal();
+                    $flash_deal = cache()->remember('featured_flash_deal', 1800, fn() => get_featured_flash_deal());
                     @endphp
                     @if ($flash_deal != null)
                     <div class="col-lg-5 col-12 pl-2 pl-md-3 pl-xl-4">
@@ -86,10 +94,15 @@
                                 
 
                                 <div class="flash-deals-baner h-md-200px h-lg-220px h-xl-300px h-xxl-316px">
-                                    <a href="{{ route('flash-deal-details', $flash_deal->slug) }}" class="d-block h-100 position-relative">
-                                        <div class="h-100 w-100 w-xl-auto rounded-75"
-                                            style="background-image: url('{{ uploaded_asset($flash_deal->banner) }}'); background-size: cover; background-position: center center;">
-                                            </div>
+                                    <a href="{{ route('flash-deal-details', $flash_deal->slug) }}" class="d-block h-100 position-relative overflow-hidden rounded-75">
+                                        {{-- <img> instead of CSS background-image so browser preload scanner discovers it early (LCP fix) --}}
+                                        <img src="{{ uploaded_asset($flash_deal->banner) }}"
+                                             alt="{{ translate('Flash Sale') }}"
+                                             loading="eager"
+                                             fetchpriority="high"
+                                             class="position-absolute rounded-75"
+                                             style="top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:center center"
+                                             onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder-rect.jpg') }}';">
 
                                         <div class="position-absolute bottom-0 w-100 py-3 d-none d-md-block">
                                             <div class="d-flex justify-content-center">
@@ -214,7 +227,7 @@
         <div class="d-sm-flex">
             <!-- Best Selling -->
             @php
-             $best_selling_products = get_best_selling_products(20);
+             $best_selling_products = cache()->remember('home_best_selling_20', 1800, fn() => get_best_selling_products(20));
             @endphp
             @if (count($best_selling_products) > 0)
             <div class="px-0 px-sm-4 w-100 overflow-hidden rounded-75 best-salling-section pt-32px pb-26px mb-4 mb-sm-0" style="background-color: {{ get_setting('best_selling_section_bg_color', '#E7EFEC') }}">
@@ -270,7 +283,7 @@
             <!-- Todays Deal -->
             @endif
             @php
-             $todays_deal_products = get_todays_deal_products(20);
+             $todays_deal_products = cache()->remember('home_todays_deal_20', 1800, fn() => get_todays_deal_products(20));
             @endphp
             @if (count($todays_deal_products) > 0)
             <div class="px-0 mt-sm-0 ml-sm-4 w-100  w-md-50 w-lg-35 overflow-hidden border border-2 border-dark rounded-75 todays-deal pt-32px pb-26px" style="background-color: {{ get_setting('todays_deal_bg_color', '#ffffff') }}">
@@ -508,6 +521,19 @@ $homeBanner2SmallImages = get_setting('home_banner2_sm_images', null, $lang);
 
 <!-- New Products -->
 <div id="section_newest">
+    {{-- Skeleton shown until AJAX replaces this content --}}
+    <div class="container py-3 skel-newest-placeholder">
+        <div class="skel-product-row">
+            @for ($i = 0; $i < 6; $i++)
+            <div class="skel-product-card">
+                <div class="skel-box skel-img"></div>
+                <span class="skel-line skel-name"></span>
+                <span class="skel-line skel-name2"></span>
+                <span class="skel-line skel-price"></span>
+            </div>
+            @endfor
+        </div>
+    </div>
 </div>
 <div class="text-center d-none" id="view-more-container">
     <button type="button" class="btn btn-lg py-19px w-20 bg-light fs-12 fs-md-16 my-32px" id="view-more-btn">
@@ -516,26 +542,157 @@ $homeBanner2SmallImages = get_setting('home_banner2_sm_images', null, $lang);
     </button>
 </div>
 
+<!-- Service Areas Grid — internal linking hub for local SEO -->
+<section class="mt-4 mb-0">
+    <div class="container">
+        <div class="bg-white p-4 rounded border" style="box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h2 class="h5 fw-700 text-dark mb-0">Serving HVAC & Plumbing Contractors Across the GTA</h2>
+                <a href="{{ route('trade-account') }}" class="btn btn-sm btn-primary fw-600 d-none d-md-inline-block">Set Up Trade Account</a>
+            </div>
+            <p class="fs-14 text-gray mb-3">Same-day pickup from our Mississauga warehouse — 7040 Torbram Rd #8. Open 7 days a week.</p>
+            <div class="row no-gutters">
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('locations.mississauga') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-map-marker text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">Mississauga</span>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('locations.brampton') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-map-marker text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">Brampton</span>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('locations.toronto') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-map-marker text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">Toronto</span>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('locations.etobicoke') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-map-marker text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">Etobicoke</span>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('locations.vaughan') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-map-marker text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">Vaughan</span>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('locations.oakville') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-map-marker text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">Oakville</span>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('locations.scarborough') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-map-marker text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">Scarborough</span>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('locations.markham') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-map-marker text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">Markham</span>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('locations.north-york') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-map-marker text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">North York</span>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('locations.burlington') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-map-marker text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">Burlington</span>
+                    </a>
+                </div>
+                <div class="col-6 col-sm-4 col-lg-3 mb-2 pr-2">
+                    <a href="{{ route('trade-account') }}" class="d-flex align-items-center p-2 border rounded has-transition hov-bg-soft-primary text-dark text-decoration-none">
+                        <i class="las la-id-card text-primary mr-2 fs-16"></i>
+                        <span class="fs-14 fw-600">Trade Account</span>
+                    </a>
+                </div>
+            </div>
+            {{-- Blog links row --}}
+            <div class="border-top pt-3 mt-1">
+                <p class="fs-13 fw-700 text-gray mb-2 text-uppercase" style="letter-spacing:0.5px;">Contractor Guides</p>
+                <div class="row">
+                    <div class="col-sm-6 col-lg-3 mb-1">
+                        <a href="{{ route('blog.details', 'sheet-metal-duct-fittings-supplier-mississauga') }}" class="fs-13 text-primary">Sheet Metal Duct Fittings</a>
+                    </div>
+                    <div class="col-sm-6 col-lg-3 mb-1">
+                        <a href="{{ route('blog.details', 'where-to-buy-pex-pipe-wholesale-mississauga') }}" class="fs-13 text-primary">PEX Pipe Wholesale</a>
+                    </div>
+                    <div class="col-sm-6 col-lg-3 mb-1">
+                        <a href="{{ route('blog.details', 'brass-fittings-wholesale-mississauga-contractor-pricing') }}" class="fs-13 text-primary">Brass Fittings Wholesale</a>
+                    </div>
+                    <div class="col-sm-6 col-lg-3 mb-1">
+                        <a href="{{ route('blog.details', 'gas-valve-black-iron-pipe-supplier-mississauga') }}" class="fs-13 text-primary">Gas Valve & Black Iron Pipe</a>
+                    </div>
+                    <div class="col-sm-6 col-lg-3 mb-1">
+                        <a href="{{ route('blog.details', 'refrigerant-supplier-mississauga-r410a-r32-r454b') }}" class="fs-13 text-primary">Refrigerant Supplier</a>
+                    </div>
+                    <div class="col-sm-6 col-lg-3 mb-1">
+                        <a href="{{ route('blog.details', 'plumbing-rough-in-supplies-mississauga-same-day-pickup') }}" class="fs-13 text-primary">Plumbing Rough-In Supplies</a>
+                    </div>
+                    <div class="col-sm-6 col-lg-3 mb-1">
+                        <a href="{{ route('blog.details', 'best-hvac-supply-store-mississauga-contractors') }}" class="fs-13 text-primary">Best HVAC Store Mississauga</a>
+                    </div>
+                    <div class="col-sm-6 col-lg-3 mb-1">
+                        <a href="{{ route('blog') }}" class="fs-13 text-primary fw-600">All Articles →</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
 <!-- SEO Content Section -->
 <section class="mt-4 mb-4">
     <div class="container">
         <div class="bg-white p-4 p-lg-5 rounded border" style="box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
-            <h1 class="h3 fw-700 mb-3 text-dark">BHS Supplies: Your Premier HVAC Supplies & Plumbing Store in Mississauga</h1>
+
+            <h1 class="h3 fw-700 mb-3 text-dark">BHS Supplies — Wholesale HVAC, Plumbing & Hardware Supplier in Mississauga</h1>
             <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
-                Welcome to <strong>BHS Supplies</strong>, the leading provider of professional-grade <strong>HVAC supplies in Mississauga</strong>. Whether you are a licensed HVAC contractor, an experienced plumber, or an electrician, we offer a comprehensive inventory of high-quality tools and equipment to help you get the job done right. We understand that in the trades, time is money, which is why we stock top-tier brands and maintain an extensive selection of <strong>air conditioning tools in Canada</strong> ready for immediate pickup or fast nationwide delivery. Our commitment is to ensure you never have to put a project on hold due to missing parts.
+                <strong>BHS Supplies</strong> is Mississauga's go-to <strong>wholesale HVAC equipment supplier</strong> for licensed contractors, plumbers, and tradespeople across the GTA. Located at <strong>7040 Torbram Rd #8, Mississauga, ON</strong>, we stock 2,000+ SKUs of <strong>HVAC supplies, plumbing parts, and hardware</strong> — all available for same-day walk-in pickup. No minimum order. Trade accounts available. Open <strong>7 days a week</strong> including Sundays.
             </p>
-            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Comprehensive Heating, Cooling & Plumbing Supplies</h2>
+
+            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Sheet Metal Duct Fittings & Flexible Duct — Fully Stocked</h2>
             <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
-                Finding a reliable <strong>HVAC supply store near me</strong> shouldn't be a hassle. At BHS Supplies, we pride ourselves on being the ultimate one-stop shop for <strong>heating and cooling supplies</strong> across the Greater Toronto Area. Our extensive catalog includes everything from specialized refrigeration gauges, vacuum pumps, and refrigerant recovery machines to everyday essential installation materials like copper tubing, fittings, insulation, and sheet metal. We also carry a robust, professional-grade line of <strong>plumbing and HVAC supplies</strong>, ensuring you always have immediate access to the high-quality valves, PVC/ABS pipes, soldering equipment, and sealants required for both demanding residential builds and large-scale commercial projects.
+                We carry a complete range of <strong>sheet metal duct fittings</strong> — round and rectangular elbows, tees, reducers, takeoffs, end caps, and transitions — alongside <strong>flexible duct in R4.2, R6, and R8 insulation ratings</strong>. Whether you need duct board, <strong>HVAC tape, mastic sealant</strong>, or insulated flexible duct for a residential installation or a large commercial project, our Mississauga warehouse has it ready for same-day pickup. We are a preferred <strong>sheet metal duct fittings supplier</strong> for HVAC contractors across Mississauga, Brampton, and the Greater Toronto Area.
             </p>
-            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Wholesale HVAC Supplies for Contractors</h2>
+
+            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">PEX Pipe, Brass Fittings & Plumbing Supplies — Wholesale Prices</h2>
             <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
-                Are you looking to strategically <strong>buy HVAC tools online in Canada</strong>? BHS Supplies offers an intuitive, streamlined online shopping experience paired with highly competitive <strong>wholesale HVAC supplies</strong> pricing. Our platform is designed specifically with the busy contractor in mind. Simply browse our curated selection of premium hand tools—including industry-favorite Knipex pliers, Wera screwdrivers, and precision test instruments—and place your order with ease. We understand the margins in the trade business; our dedicated B2B portal allows registered contractors and trade professionals to access exclusive trade discounts, bulk pricing, and specialized <strong>HVAC tools supplier</strong> inventory tailored to your specific business needs.
+                Our plumbing inventory is built for working contractors. We stock <strong>PEX pipe (A and B types, all sizes, oxygen barrier and standard)</strong>, <strong>brass fittings</strong> (elbows, tees, couplings, ball valves), <strong>copper fittings</strong>, <strong>push-fit connectors</strong> (SharkBite compatible), <strong>gas valves</strong>, <strong>black iron pipe</strong> in all schedules, <strong>CSST flexible gas piping</strong>, and <strong>water heater parts</strong>. Plumbers across Mississauga, Brampton, Toronto, and Etobicoke rely on BHS for <strong>wholesale plumbing supplies</strong> with no minimum order and same-day availability.
             </p>
-            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Serving Mississauga, Toronto, and Brampton</h2>
+
+            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Refrigerants, Air Filters & HVAC Accessories</h2>
+            <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
+                BHS Supplies is a fully stocked <strong>HVAC accessories supplier in Mississauga</strong>. We carry <strong>refrigerants including R-410A, R-32, and R-454B</strong>, <strong>air filters in all sizes (1", 2", 4" including HEPA)</strong>, programmable and smart <strong>thermostats and controls</strong>, exhaust fans, HRV accessories, and indoor air quality equipment. We also stock <strong>refrigerant recovery machines, vacuum pumps, manifold gauges</strong>, and all HVAC service tools for licensed HVAC technicians across the GTA.
+            </p>
+
+            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Hardware, Fasteners & Safety Supplies</h2>
+            <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
+                Beyond HVAC and plumbing, BHS is a complete <strong>hardware and fastener supplier</strong> for trade professionals. We stock screws, bolts, nuts, washers in bulk packs, <strong>HVAC-specific hangers, brackets, clamps, and strapping</strong>, drill bits, hole saws, step bits, and a full range of <strong>safety and PPE equipment</strong> including gloves, masks, and goggles. One stop — HVAC, plumbing, hardware, and safety — all at <strong>wholesale contractor pricing</strong>.
+            </p>
+
+            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Trade Accounts — Wholesale Pricing for Licensed Contractors</h2>
+            <p class="fs-15 text-dark mb-3" style="line-height: 1.8;">
+                Licensed HVAC technicians, plumbers, and contractors can set up a <strong>BHS trade account</strong> for volume pricing, priority stock access, and no minimum order requirements. Our <strong>B2B contractor portal at bhssupplies.com</strong> lets you browse inventory, place orders, and arrange same-day pickup — saving you time on every job. Call <strong>(647) 456-2244</strong> or email <strong>support@bhssupplies.com</strong> to register your trade account today.
+            </p>
+
+            <h2 class="h4 fw-600 mt-4 mb-2 text-dark">Serving GTA Contractors — Mississauga, Brampton, Toronto & Beyond</h2>
             <p class="fs-15 text-dark mb-0" style="line-height: 1.8;">
-                Conveniently located at <strong>7040 Torbram Rd #8 in Mississauga, ON</strong>, our physical storefront is perfectly situated to rapidly serve trade professionals across <strong>Mississauga, Toronto, and Brampton</strong>. If you are constantly searching for "<strong>plumbing & HVAC supplies near me</strong>," look no further than BHS. Our highly knowledgeable staff brings years of hands-on industry experience and is always ready to assist you in selecting the exact right parts for complex multi-zone installations, emergency furnace repairs, or routine seasonal maintenance. Experience the BHS Supplies difference today: exceptional customer service, premium commercial-grade products, and the unwavering reliability you need to keep your projects running smoothly, on time, and strictly on budget.
+                Conveniently located at <strong>7040 Torbram Rd #8, Mississauga, ON L4T 3Z4</strong>, BHS Supplies is the closest <strong>wholesale HVAC and plumbing supply store</strong> for contractors working across Mississauga, Brampton, Toronto, Etobicoke, Vaughan, Oakville, and all of the Greater Toronto Area. We are open <strong>Monday–Saturday 10am–6pm and Sunday 10am–2pm</strong>. Walk in, call ahead, or order online — we have the parts you need, when you need them. <strong>Call: (647) 456-2244 | Shop: bhssupplies.com</strong>
             </p>
+
         </div>
     </div>
 </section>

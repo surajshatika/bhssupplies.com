@@ -217,11 +217,20 @@
                     @endif
                 </ul>
 
-                <h6 class="bhs-footer-heading mt-4">{{ translate('Locations') }}</h6>
+                <h6 class="bhs-footer-heading mt-4">{{ translate('Serving the GTA') }}</h6>
                 <ul class="list-unstyled mb-0">
-                    <li class="mb-3"><a href="{{ route('locations.mississauga') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Mississauga</a></li>
-                    <li class="mb-3"><a href="{{ route('locations.toronto') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Toronto</a></li>
-                    <li class="mb-3"><a href="{{ route('locations.brampton') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Brampton</a></li>
+                    <li class="mb-2"><a href="{{ route('locations.mississauga') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Mississauga</a></li>
+                    <li class="mb-2"><a href="{{ route('locations.brampton') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Brampton</a></li>
+                    <li class="mb-2"><a href="{{ route('locations.toronto') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Toronto</a></li>
+                    <li class="mb-2"><a href="{{ route('locations.etobicoke') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Etobicoke</a></li>
+                    <li class="mb-2"><a href="{{ route('locations.vaughan') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Vaughan</a></li>
+                    <li class="mb-2"><a href="{{ route('locations.oakville') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Oakville</a></li>
+                    <li class="mb-2"><a href="{{ route('locations.scarborough') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Scarborough</a></li>
+                    <li class="mb-2"><a href="{{ route('locations.markham') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Markham</a></li>
+                    <li class="mb-2"><a href="{{ route('locations.north-york') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> North York</a></li>
+                    <li class="mb-2"><a href="{{ route('locations.burlington') }}" class="bhs-footer-link"><i class="las la-map-marker"></i> Burlington</a></li>
+                    <li class="mb-2"><a href="{{ route('trade-account') }}" class="bhs-footer-link"><i class="las la-id-card"></i> Trade Account</a></li>
+                    <li class="mb-2"><a href="{{ route('review') }}" class="bhs-footer-link"><i class="las la-star"></i> Leave a Review</a></li>
                 </ul>
             </div>
 

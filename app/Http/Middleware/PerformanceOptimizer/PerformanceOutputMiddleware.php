@@ -69,6 +69,11 @@ class PerformanceOutputMiddleware
         if ((int) get_setting('perf_status', 1) !== 1) return false;
         if (!method_exists($response, 'getStatusCode') || $response->getStatusCode() !== 200) return false;
 
+        // Skip AJAX / XHR / JSON requests — they return HTML fragments, not full pages.
+        // Injecting scripts/preloads into partials causes duplicate loading (e.g. tracker 3×).
+        if ($request->ajax() || $request->expectsJson()) return false;
+        if ($request->headers->has('X-Requested-With')) return false;
+
         $ct = (string) $response->headers->get('Content-Type', '');
         if (stripos($ct, 'text/html') === false) return false;
 
@@ -78,6 +83,11 @@ class PerformanceOutputMiddleware
         foreach ($skipPrefixes as $p) {
             if (str_starts_with($path, $p)) return false;
         }
+
+        // Skip HTML fragments — only process full documents
+        $body = (string) $response->getContent();
+        if (stripos($body, '<html') === false) return false;
+
         return true;
     }
 

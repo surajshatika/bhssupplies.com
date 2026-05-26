@@ -210,6 +210,18 @@ class SmartSitemapService extends AbstractSeoService
             ['path' => '/blog',       'priority' => '0.7', 'changefreq' => 'daily'],
             ['path' => '/brands',     'priority' => '0.6', 'changefreq' => 'weekly'],
             ['path' => '/categories', 'priority' => '0.8', 'changefreq' => 'weekly'],
+            // Local SEO landing pages
+            ['path' => '/hvac-supplies-mississauga',   'priority' => '0.9', 'changefreq' => 'monthly'],
+            ['path' => '/hvac-supplies-brampton',      'priority' => '0.9', 'changefreq' => 'monthly'],
+            ['path' => '/hvac-supplies-toronto',       'priority' => '0.9', 'changefreq' => 'monthly'],
+            ['path' => '/hvac-supplies-etobicoke',     'priority' => '0.8', 'changefreq' => 'monthly'],
+            ['path' => '/hvac-supplies-vaughan',       'priority' => '0.8', 'changefreq' => 'monthly'],
+            ['path' => '/hvac-supplies-oakville',      'priority' => '0.8', 'changefreq' => 'monthly'],
+            ['path' => '/hvac-supplies-scarborough',   'priority' => '0.8', 'changefreq' => 'monthly'],
+            ['path' => '/hvac-supplies-markham',       'priority' => '0.8', 'changefreq' => 'monthly'],
+            ['path' => '/hvac-supplies-north-york',    'priority' => '0.8', 'changefreq' => 'monthly'],
+            ['path' => '/hvac-supplies-burlington',    'priority' => '0.8', 'changefreq' => 'monthly'],
+            ['path' => '/contractor-trade-account',    'priority' => '0.9', 'changefreq' => 'monthly'],
         ] as $static) {
             $groups['static'][] = [
                 'loc'        => $base . $static['path'],
@@ -255,10 +267,16 @@ class SmartSitemapService extends AbstractSeoService
 
     protected function buildSitemapIndex(string $base): string
     {
+        // Always use APP_URL for public sitemaps so index works in production
+        $publicBase = rtrim(env('APP_URL', $base), '/');
         $sitemaps = [
-            ['loc' => $base . '/sitemap.xml',         'desc' => 'Main Sitemap'],
-            ['loc' => $base . '/video-sitemap.xml',   'desc' => 'Video Sitemap'],
-            ['loc' => $base . '/news-sitemap.xml',    'desc' => 'Blog/News Sitemap'],
+            ['loc' => $publicBase . '/sitemap.xml',              'desc' => 'Main Sitemap'],
+            ['loc' => $publicBase . '/sitemap-static.xml',       'desc' => 'Static Pages Sitemap'],
+            ['loc' => $publicBase . '/sitemap-products.xml',     'desc' => 'Products Sitemap'],
+            ['loc' => $publicBase . '/sitemap-categories.xml',   'desc' => 'Categories Sitemap'],
+            ['loc' => $publicBase . '/sitemap-blogs.xml',        'desc' => 'Blog Posts Sitemap'],
+            ['loc' => $publicBase . '/sitemap-blog_categories.xml', 'desc' => 'Blog Categories Sitemap'],
+            ['loc' => $publicBase . '/news-sitemap.xml',         'desc' => 'Blog/News Sitemap'],
         ];
 
         $lines = [

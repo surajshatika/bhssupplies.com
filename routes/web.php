@@ -544,6 +544,42 @@ Route::get('/hvac-supplies-brampton', function() {
     return view('frontend.locations.brampton');
 })->name('locations.brampton');
 
+Route::get('/hvac-supplies-vaughan', function() {
+    return view('frontend.locations.vaughan');
+})->name('locations.vaughan');
+
+Route::get('/hvac-supplies-etobicoke', function() {
+    return view('frontend.locations.etobicoke');
+})->name('locations.etobicoke');
+
+Route::get('/hvac-supplies-oakville', function() {
+    return view('frontend.locations.oakville');
+})->name('locations.oakville');
+
+Route::get('/hvac-supplies-scarborough', function() {
+    return view('frontend.locations.scarborough');
+})->name('locations.scarborough');
+
+Route::get('/contractor-trade-account', function() {
+    return view('frontend.locations.trade-account');
+})->name('trade-account');
+
+Route::get('/review', function() {
+    return view('frontend.review');
+})->name('review');
+
+Route::get('/hvac-supplies-markham', function() {
+    return view('frontend.locations.markham');
+})->name('locations.markham');
+
+Route::get('/hvac-supplies-north-york', function() {
+    return view('frontend.locations.north-york');
+})->name('locations.north-york');
+
+Route::get('/hvac-supplies-burlington', function() {
+    return view('frontend.locations.burlington');
+})->name('locations.burlington');
+
 Route::controller(PageController::class)->group(function () {
     //mobile app balnk page for webview
     Route::get('/mobile-page/{slug}', 'mobile_custom_page')->name('mobile.custom-pages');

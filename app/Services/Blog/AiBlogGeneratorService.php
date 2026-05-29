@@ -15,6 +15,9 @@ use Illuminate\Support\Str;
 
 class AiBlogGeneratorService
 {
+    private const BLOG_BANNER_WIDTH = 1300;
+    private const BLOG_BANNER_HEIGHT = 650;
+
     private string $provider;
     private string $siteName;
     private string $siteUrl;
@@ -33,7 +36,12 @@ class AiBlogGeneratorService
      * Generate a complete blog post and save it to the database.
      *
      * @param array $options {
+     *   blog_title?: string,       // exact title to use
+     *   slug?: string,             // preferred slug, made unique
+     *   blog_category_id?: int,    // existing blog category
      *   category_name?: string,   // blog category name (creates if not exists)
+     *   banner_upload_id?: int,    // existing Upload ID for banner
+     *   meta_image_upload_id?: int,// existing Upload ID for meta image
      *   topic?: string,            // custom topic override
      *   use_product_category?: bool, // pull topic from product categories
      *   product_category_id?: int,
@@ -55,7 +63,7 @@ class AiBlogGeneratorService
         $category = $this->resolveCategory($options);
 
         // 2. Build topic
-        $topic    = (string)($options['topic'] ?? $this->buildTopicFromCategory($category, $options));
+        $topic    = (string)($options['blog_title'] ?? $options['topic'] ?? $this->buildTopicFromCategory($category, $options));
         $keywords = (string)($options['keywords'] ?? '');
         $tone     = (string)($options['tone'] ?? SocialAutomationSetting::get('ai_blog_tone', 'professional'));
 
@@ -65,16 +73,24 @@ class AiBlogGeneratorService
 
         // 4. Generate full blog content
         $content = $this->generateBlogContent($topic, $category->category_name, $allKeywords, $tone, $provider, $options);
+        $content = $this->enforceFullBlogBlueprint($content, $topic, $category->category_name, $allKeywords, $options);
 
         // 5. Fetch image — prefer product images from category, fallback to Pexels/Unsplash
-        $uploadId = $this->fetchAndStoreImage(
+        $uploadId = !empty($options['banner_upload_id']) ? (int) $options['banner_upload_id'] : null;
+        if (!$uploadId) {
+            $uploadId = $this->fetchAndStoreImage(
             $topic . ' ' . $category->category_name,
             $options['product_category_id'] ?? null,
             $category->id,
-        );
+            );
+        }
+        if (!$uploadId) {
+            $uploadId = $this->buildFallbackBanner($topic, $category->category_name);
+        }
+        $metaImageId = !empty($options['meta_image_upload_id']) ? (int) $options['meta_image_upload_id'] : $uploadId;
 
         // 6. Save blog to DB
-        $blog = $this->saveBlog($content, $category->id, $uploadId, (bool)($options['publish'] ?? false));
+        $blog = $this->saveBlog($content, $category->id, $uploadId, (bool)($options['publish'] ?? false), $metaImageId);
 
         // 7. Auto-post to social media if requested
         if (!empty($options['post_to_social'])) {
@@ -90,11 +106,19 @@ class AiBlogGeneratorService
 
     private function resolveCategory(array $options): BlogCategory
     {
+        if (!empty($options['blog_category_id'])) {
+            $existing = BlogCategory::find((int) $options['blog_category_id']);
+            if ($existing) {
+                return $existing;
+            }
+        }
+
         // Explicit category name passed
         if (!empty($options['category_name'])) {
+            $categoryName = trim((string) $options['category_name']);
             return BlogCategory::firstOrCreate(
-                ['category_name' => $options['category_name']],
-                ['slug' => Str::slug($options['category_name'])]
+                ['category_name' => $categoryName],
+                ['slug' => $this->uniqueCategorySlug($categoryName)]
             );
         }
 
@@ -108,7 +132,7 @@ class AiBlogGeneratorService
                     : (string)($productCat->name ?? 'General');
                 return BlogCategory::firstOrCreate(
                     ['category_name' => $name],
-                    ['slug' => Str::slug($name)]
+                    ['slug' => $this->uniqueCategorySlug($name)]
                 );
             }
         }
@@ -121,8 +145,21 @@ class AiBlogGeneratorService
         $defaultName = $this->siteName . ' Tips & Guides';
         return BlogCategory::firstOrCreate(
             ['category_name' => $defaultName],
-            ['slug' => Str::slug($defaultName)]
+            ['slug' => $this->uniqueCategorySlug($defaultName)]
         );
+    }
+
+    private function uniqueCategorySlug(string $name): string
+    {
+        $slug = Str::slug($name) ?: 'blog-category';
+        $base = $slug;
+        $i = 1;
+
+        while (BlogCategory::where('slug', $slug)->exists()) {
+            $slug = $base . '-' . $i++;
+        }
+
+        return $slug;
     }
 
     private function buildTopicFromCategory(BlogCategory $category, array $options): string
@@ -193,6 +230,9 @@ class AiBlogGeneratorService
         $siteUrl  = $this->siteUrl;
         $country  = SocialAutomationSetting::get('ai_blog_target_country', 'Canada');
         $wordCount = (int) SocialAutomationSetting::get('ai_blog_word_count', 1200);
+        $primaryLocations = SocialAutomationSetting::get('ai_blog_primary_locations', 'Mississauga, Brampton, Toronto');
+        $secondaryLocations = SocialAutomationSetting::get('ai_blog_secondary_locations', 'Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington');
+        $conversionIntents = SocialAutomationSetting::get('ai_blog_conversion_intents', 'Trade Account, Leave a Review');
 
         // Build competitor context for content depth
         $raw = $options['competitor_urls'] ?? SocialAutomationSetting::get('ai_blog_competitor_urls', '');
@@ -214,7 +254,7 @@ class AiBlogGeneratorService
         }
 
         $system = "You are a senior local SEO content writer for {$siteName} ({$siteUrl}), "
-            . "a supply store serving Mississauga and the Greater Toronto Area (GTA), {$country}. "
+            . "a supply store serving {$primaryLocations} and the Greater Toronto Area (GTA), {$country}. "
             . "Write service-page style blog posts that rank for local searches. "
             . "Style reference: open with a strong 2-paragraph intro, then use H2 sections like "
             . "\"Our [Category] Include\", \"Why Choose {$siteName}\", \"Serving Mississauga and the GTA\", \"Visit Our Store\". "
@@ -224,6 +264,9 @@ class AiBlogGeneratorService
 
         $prompt = "Write a local SEO service-page blog post about: {$topic}\n"
             . "Store name: {$siteName} | Store URL: {$siteUrl}\n"
+            . "Primary locations: {$primaryLocations}\n"
+            . "Secondary locations: {$secondaryLocations}\n"
+            . "Conversion intents to include naturally: {$conversionIntents}\n"
             . "Location: Mississauga, ON — also serves Toronto, Brampton, Vaughan, Markham, GTA\n"
             . "Category: {$category}\n"
             . "Target keywords (every single one MUST appear in both the short description AND body): {$keywords}\n"
@@ -234,7 +277,7 @@ class AiBlogGeneratorService
             . "2. Two intro <p> tags — hook the reader, introduce {$siteName}, naturally include at least 6 keywords\n"
             . "3. <h2>Our {$category} Include</h2> — <ul> with 8-10 specific products/items from this category\n"
             . "4. <h2>Why Choose {$siteName} for {$category}</h2> — <ul> with 6-8 benefits (pricing, quality, expertise, GTA service)\n"
-            . "5. <h2>Serving Mississauga and the GTA</h2> — paragraph listing cities served, weave in location + category keywords\n"
+            . "5. <h2>Serving {$primaryLocations} and the GTA</h2> — paragraph listing cities served, weave in location + category keywords\n"
             . "6. <h2>Frequently Asked Questions</h2> — 4 questions using long-tail keywords, concise answers\n"
             . "7. <h2>Visit Our Store or Shop Online</h2> — strong CTA paragraph linking to {$siteUrl}, include address and phone if appropriate\n"
             . "Format: clean HTML body only (no doctype). Use <ul><li> for lists. No inline styles.\n\n"
@@ -305,17 +348,109 @@ class AiBlogGeneratorService
         ];
     }
 
+    private function enforceFullBlogBlueprint(array $content, string $topic, string $category, string $keywords, array $options): array
+    {
+        $title = trim((string)($options['blog_title'] ?? $content['title'] ?? $topic));
+        $title = $title !== '' ? $title : Str::title(Str::limit($topic, 70, ''));
+
+        $slugSeed = trim((string)($options['slug'] ?? $content['slug'] ?? $title));
+        $content['title'] = Str::limit($title, 190, '');
+        $content['slug'] = $this->uniqueBlogSlug($slugSeed);
+
+        $keywordList = $this->keywordList($keywords, $title, $category);
+        $content['meta_keywords'] = trim((string)($options['meta_keywords'] ?? $content['meta_keywords'] ?? ''));
+        if ($content['meta_keywords'] === '') {
+            $content['meta_keywords'] = implode(', ', $keywordList);
+        }
+
+        $plainDescription = trim(preg_replace('/\s+/', ' ', strip_tags((string)($content['description'] ?? ''))));
+        if ($plainDescription === '') {
+            $content['description'] = $this->fallbackContent($topic, $category)['description'];
+            $plainDescription = trim(preg_replace('/\s+/', ' ', strip_tags($content['description'])));
+        }
+
+        if (!preg_match('/<h1[\s>]/i', (string)$content['description'])) {
+            $content['description'] = '<h1>' . e($content['title']) . '</h1>' . "\n" . (string)$content['description'];
+        }
+
+        $shortDescription = trim(strip_tags((string)($content['short_description'] ?? '')));
+        if (str_word_count($shortDescription) < 25) {
+            $shortDescription = $this->buildShortDescription($content['title'], $category, $keywordList);
+        }
+        $content['short_description'] = Str::limit($shortDescription, 700, '');
+
+        $metaTitle = trim((string)($options['meta_title'] ?? $content['meta_title'] ?? ''));
+        $content['meta_title'] = Str::limit($metaTitle !== '' ? $metaTitle : $content['title'] . ' | Canada', 60, '');
+
+        $metaDescription = trim(strip_tags((string)($options['meta_description'] ?? $content['meta_description'] ?? '')));
+        if ($metaDescription === '') {
+            $metaDescription = Str::limit($plainDescription ?: $shortDescription, 158, '');
+        }
+        $content['meta_description'] = Str::limit($metaDescription, 160, '');
+
+        return $content;
+    }
+
+    private function uniqueBlogSlug(string $seed): string
+    {
+        $slug = Str::slug($seed) ?: 'ai-blog';
+        $base = $slug;
+        $i = 1;
+
+        while (Blog::where('slug', $slug)->exists()) {
+            $slug = $base . '-' . $i++;
+        }
+
+        return $slug;
+    }
+
+    private function keywordList(string $keywords, string $title, string $category): array
+    {
+        $items = array_filter(array_map('trim', preg_split('/[\r\n,]+/', $keywords)));
+        $fallbacks = [
+            $title,
+            $category . ' Mississauga',
+            $category . ' Brampton',
+            $category . ' Toronto',
+            $category . ' Canada',
+            $category . ' GTA',
+            'trade account',
+            'leave a review',
+        ];
+
+        return array_values(array_unique(array_filter(array_merge($items, $fallbacks))));
+    }
+
+    private function buildShortDescription(string $title, string $category, array $keywords): string
+    {
+        $keywordText = implode(', ', array_slice($keywords, 0, 8));
+
+        return "{$this->siteName} explains {$title} for Canadian buyers, contractors, and trade customers. "
+            . "This guide covers {$category} options for Mississauga, Brampton, Toronto, and the GTA. "
+            . "It includes practical buying tips, local supply guidance, and related search topics such as {$keywordText}.";
+    }
+
     private function fallbackContent(string $topic, string $category): array
     {
         $title = Str::title(Str::limit($topic, 55));
         $slug  = Str::slug($title);
+        $html = '<h1>' . e($title) . '</h1>'
+            . '<p>' . e($this->siteName . ' helps Canadian buyers source dependable ' . $category . ' with practical product guidance, local availability, and support for Mississauga, Brampton, Toronto, and the GTA.') . '</p>'
+            . '<p>' . e('Use this guide to compare options, understand common applications, and prepare a confident purchase for your business, trade, or facility requirements.') . '</p>'
+            . '<h2>Our ' . e($category) . ' Include</h2>'
+            . '<ul><li>Popular product options for trade and business buyers.</li><li>Helpful specifications for comparison.</li><li>Canada-focused supply and purchasing guidance.</li><li>Support for local customers across the GTA.</li></ul>'
+            . '<h2>Why Choose ' . e($this->siteName) . '</h2>'
+            . '<ul><li>Local supply support for Mississauga, Brampton, and Toronto.</li><li>Clear product information and practical buying help.</li><li>Trade-friendly service and dependable availability.</li></ul>'
+            . '<h2>Frequently Asked Questions</h2>'
+            . '<p><strong>Can I buy ' . e($category) . ' in Canada?</strong> Yes. ' . e($this->siteName) . ' supports Canadian customers with product guidance and local service.</p>'
+            . '<p><strong>Do you support trade customers?</strong> Yes. Trade Account intent is supported where suitable.</p>';
         return [
             'title'             => $title,
             'slug'              => $slug,
-            'description'       => "<h2>{$topic}</h2><p>Stay tuned for our upcoming guide on this topic.</p>",
-            'short_description' => "Read our guide on {$topic}.",
+            'description'       => $html,
+            'short_description' => "{$this->siteName} explains {$topic} for Canadian buyers across Mississauga, Brampton, Toronto, and the GTA. This guide covers {$category} options, buying tips, and trade-friendly supply guidance.",
             'meta_title'        => $title,
-            'meta_description'  => "Learn about {$topic} at {$this->siteName}.",
+            'meta_description'  => Str::limit("Learn about {$topic} at {$this->siteName}. Canada-focused guide for Mississauga, Brampton, Toronto, and GTA buyers.", 160, ''),
             'meta_keywords'     => strtolower($topic) . ', ' . strtolower($category),
         ];
     }
@@ -360,7 +495,7 @@ class AiBlogGeneratorService
         $siteName = $this->siteName;
         $prompt   = "Professional, high-quality product photography banner image for a blog post about '{$keyword}'. "
             . "Clean white or light background, sharp details, commercial e-commerce style. "
-            . "Wide landscape format 1200x630. No text, no logos, no watermarks. "
+            . "Wide landscape format 1300x650. No text, no logos, no watermarks. "
             . "Photorealistic, well-lit, attractive marketing image for {$siteName}.";
 
         try {
@@ -467,8 +602,8 @@ class AiBlogGeneratorService
         }
 
         $count    = min(count($imagePaths), 5);
-        $canvasW  = 1200;
-        $canvasH  = 630;
+        $canvasW  = self::BLOG_BANNER_WIDTH;
+        $canvasH  = self::BLOG_BANNER_HEIGHT;
 
         $canvas = imagecreatetruecolor($canvasW, $canvasH);
         $bg     = imagecolorallocate($canvas, 255, 255, 255);
@@ -553,7 +688,7 @@ class AiBlogGeneratorService
     private function fetchFromUnsplashSource(string $keyword): ?int
     {
         $query    = urlencode(Str::limit($keyword, 50));
-        $imageUrl = "https://source.unsplash.com/1200x630/?{$query}";
+        $imageUrl = "https://source.unsplash.com/" . self::BLOG_BANNER_WIDTH . "x" . self::BLOG_BANNER_HEIGHT . "/?{$query}";
 
         return $this->downloadAndSaveUpload($imageUrl, $keyword);
     }
@@ -565,29 +700,92 @@ class AiBlogGeneratorService
         $imageContent = $response->successful() ? $response->body() : null;
         if (!$imageContent) return null;
 
-        $filename  = 'ai-blog-' . Str::slug(Str::limit($keyword, 30)) . '-' . time() . '.jpg';
-        $path      = 'uploads/all/' . $filename;
+        return $this->saveBannerUploadFromContent($imageContent, $keyword);
+    }
 
-        // Save directly to public/uploads/all so asset('uploads/all/...') resolves correctly
+    private function saveBannerUploadFromContent(string $imageContent, string $keyword): ?int
+    {
+        $filename = 'ai-blog-' . Str::slug(Str::limit($keyword, 30)) . '-' . time() . '.jpg';
+        $path = 'uploads/all/' . $filename;
         $dir = public_path('uploads/all');
         if (!is_dir($dir)) mkdir($dir, 0755, true);
-        file_put_contents(public_path($path), $imageContent);
+
+        $absPath = public_path($path);
+        $saved = false;
+
+        if (extension_loaded('gd') && function_exists('imagecreatefromstring')) {
+            $src = @imagecreatefromstring($imageContent);
+            if ($src) {
+                $canvas = imagecreatetruecolor(self::BLOG_BANNER_WIDTH, self::BLOG_BANNER_HEIGHT);
+                $bg = imagecolorallocate($canvas, 255, 255, 255);
+                imagefill($canvas, 0, 0, $bg);
+
+                $srcW = imagesx($src);
+                $srcH = imagesy($src);
+                $scale = max(self::BLOG_BANNER_WIDTH / max(1, $srcW), self::BLOG_BANNER_HEIGHT / max(1, $srcH));
+                $newW = (int) ceil($srcW * $scale);
+                $newH = (int) ceil($srcH * $scale);
+                $dstX = (int) floor((self::BLOG_BANNER_WIDTH - $newW) / 2);
+                $dstY = (int) floor((self::BLOG_BANNER_HEIGHT - $newH) / 2);
+
+                imagecopyresampled($canvas, $src, $dstX, $dstY, 0, 0, $newW, $newH, $srcW, $srcH);
+                imagejpeg($canvas, $absPath, 88);
+                imagedestroy($src);
+                imagedestroy($canvas);
+                $saved = true;
+            }
+        }
+
+        if (!$saved) {
+            file_put_contents($absPath, $imageContent);
+        }
 
         $upload = Upload::create([
             'file_original_name' => $filename,
-            'file_name'          => $path,
-            'user_id'            => 1,
-            'extension'          => 'jpg',
-            'type'               => 'image',
-            'file_size'          => strlen($imageContent),
+            'file_name' => $path,
+            'user_id' => 1,
+            'extension' => 'jpg',
+            'type' => 'image',
+            'file_size' => filesize($absPath) ?: strlen($imageContent),
         ]);
 
         return $upload->id;
     }
 
+    private function buildFallbackBanner(string $topic, string $category): ?int
+    {
+        if (!extension_loaded('gd')) {
+            return null;
+        }
+
+        $canvas = imagecreatetruecolor(self::BLOG_BANNER_WIDTH, self::BLOG_BANNER_HEIGHT);
+        $bg = imagecolorallocate($canvas, 245, 248, 252);
+        $line = imagecolorallocate($canvas, 42, 98, 158);
+        $text = imagecolorallocate($canvas, 30, 41, 59);
+        $muted = imagecolorallocate($canvas, 91, 105, 122);
+        imagefill($canvas, 0, 0, $bg);
+
+        for ($i = 0; $i < self::BLOG_BANNER_WIDTH; $i += 26) {
+            imageline($canvas, $i, 0, $i - 220, self::BLOG_BANNER_HEIGHT, $line);
+        }
+
+        $title = Str::limit($topic, 58, '');
+        $subtitle = Str::limit($category . ' | ' . $this->siteName, 70, '');
+        imagestring($canvas, 5, 70, 260, $title, $text);
+        imagestring($canvas, 4, 70, 305, $subtitle, $muted);
+        imagestring($canvas, 3, 70, 340, 'Mississauga - Brampton - Toronto - GTA', $muted);
+
+        ob_start();
+        imagejpeg($canvas, null, 88);
+        $content = (string) ob_get_clean();
+        imagedestroy($canvas);
+
+        return $this->saveBannerUploadFromContent($content, 'fallback-' . $topic);
+    }
+
     // ─── Blog Save ────────────────────────────────────────────────────────────
 
-    private function saveBlog(array $content, int $categoryId, ?int $uploadId, bool $publish): Blog
+    private function saveBlog(array $content, int $categoryId, ?int $uploadId, bool $publish, ?int $metaImageId = null): Blog
     {
         $str = fn($v) => is_array($v) ? implode(', ', $v) : (string)($v ?? '');
 
@@ -599,7 +797,7 @@ class AiBlogGeneratorService
         $blog->description       = $str($content['description'] ?? '');
         $blog->banner            = $uploadId;
         $blog->meta_title        = $str($content['meta_title'] ?? '');
-        $blog->meta_img          = $uploadId;
+        $blog->meta_img          = $metaImageId ?: $uploadId;
         $blog->meta_description  = $str($content['meta_description'] ?? '');
         $blog->meta_keywords     = $str($content['meta_keywords'] ?? '');
         $blog->status            = $publish ? 1 : 0;

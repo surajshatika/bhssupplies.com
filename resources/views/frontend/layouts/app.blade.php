@@ -15,6 +15,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
 
+    <meta name="google-site-verification" content="kcvKrK_03vGE3b9Y68sdG1fiEovBpbb4AveAMRsOw68">
+    <meta name="msvalidate.01" content="630730ADB45FC089DA82D9A345A8C413">
+    <meta name="yandex-verification" content="6181917dfa2e4741">
+
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="app-url" content="{{ getBaseURL() }}">
     <meta name="file-base-url" content="{{ getFileBaseURL() }}">

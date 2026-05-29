@@ -2,13 +2,13 @@
 
 @if (isset($category_id))
     @php
-        $catObj          = \App\Models\Category::find($category_id);
+        $catObj          = isset($category) && is_object($category) ? $category : \App\Models\Category::find($category_id);
         $meta_title      = $catObj->meta_title;
         $meta_description= $catObj->meta_description;
     @endphp
 @elseif (isset($brand_id))
     @php
-        $brandObj        = \App\Models\Brand::find($brand_id);
+        $brandObj        = isset($brand) && is_object($brand) ? $brand : \App\Models\Brand::find($brand_id);
         $meta_title      = $brandObj->meta_title;
         $meta_description= $brandObj->meta_description;
     @endphp
@@ -43,9 +43,9 @@
             ['@type' => 'ListItem', 'position' => 1, 'name' => 'Home', 'item' => url('/')],
             ['@type' => 'ListItem', 'position' => 2, 'name' => 'All Categories', 'item' => route('search')],
         ];
-        if (isset($category_id) && ($catBc = \App\Models\Category::find($category_id))) {
+        if (isset($category_id) && ($catBc = (isset($category) && is_object($category) ? $category : \App\Models\Category::find($category_id)))) {
             $breadcrumbItems[] = ['@type' => 'ListItem', 'position' => 3, 'name' => $catBc->getTranslation('name'), 'item' => url()->current()];
-        } elseif (isset($brand_id) && ($brandBc = \App\Models\Brand::find($brand_id))) {
+        } elseif (isset($brand_id) && ($brandBc = (isset($brand) && is_object($brand) ? $brand : \App\Models\Brand::find($brand_id)))) {
             $breadcrumbItems[] = ['@type' => 'ListItem', 'position' => 3, 'name' => $brandBc->getTranslation('name'), 'item' => url()->current()];
         } elseif (isset($query) && $query) {
             $breadcrumbItems[] = ['@type' => 'ListItem', 'position' => 3, 'name' => 'Search: ' . $query, 'item' => url()->current()];

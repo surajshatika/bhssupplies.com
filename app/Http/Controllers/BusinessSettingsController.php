@@ -18,8 +18,10 @@ use CoreComponentRepository;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Str;
 use DB;
+use Throwable;
 use ZipArchive;
 
 class BusinessSettingsController extends Controller
@@ -464,20 +466,36 @@ class BusinessSettingsController extends Controller
     {
         if (env('DEMO_MODE') != 'On') {
             $path = base_path('.env');
-            if (file_exists($path)) {
-                $val = '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], trim((string) $val)) . '"';
-                $contents = file_get_contents($path);
-                $updated = $contents;
+            try {
+                if (file_exists($path)) {
+                    if (!is_readable($path) || !is_writable($path)) {
+                        Log::warning('ENV update skipped because .env is not readable/writable', [
+                            'type' => $type,
+                            'path' => $path,
+                        ]);
+                        return;
+                    }
 
-                if (preg_match('/^' . preg_quote($type, '/') . '=/m', $contents)) {
-                    $updated = preg_replace('/^' . preg_quote($type, '/') . '=.*/m', $type . '=' . $val, $contents);
-                } else {
-                    $updated = rtrim($contents, "\r\n") . PHP_EOL . $type . '=' . $val . PHP_EOL;
-                }
+                    $val = '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], trim((string) $val)) . '"';
+                    $contents = file_get_contents($path);
+                    $updated = $contents;
 
-                if ($updated !== $contents) {
-                    file_put_contents($path, $updated, LOCK_EX);
+                    if (preg_match('/^' . preg_quote($type, '/') . '=/m', $contents)) {
+                        $updated = preg_replace('/^' . preg_quote($type, '/') . '=.*/m', $type . '=' . $val, $contents);
+                    } else {
+                        $updated = rtrim($contents, "\r\n") . PHP_EOL . $type . '=' . $val . PHP_EOL;
+                    }
+
+                    if ($updated !== $contents) {
+                        file_put_contents($path, $updated, LOCK_EX);
+                    }
                 }
+            } catch (Throwable $e) {
+                Log::warning('ENV update failed', [
+                    'type' => $type,
+                    'path' => $path,
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
     }
@@ -518,72 +536,113 @@ class BusinessSettingsController extends Controller
 
     public function update(Request $request)
     {
-       // dd($request->all());
-        $types = $request->types ?? [];
-        $resetRefundData = in_array('refund_type', $types);
+        $types = array_values((array) $request->input('types', []));
+        $resetRefundData = false;
+        $failedSettings = [];
 
-        foreach ($request->types as $key => $type) {
-            if ($type == 'site_name') {
-                $this->overWriteEnvFile('APP_NAME', $request[$type]);
-            }
-            if ($type == 'timezone') {
-                $this->overWriteEnvFile('APP_TIMEZONE', $request[$type]);
-            } else {
-                $lang = null;
-                if (gettype($type) == 'array') {
-                    $lang = array_key_first($type);
-                    $type = $type[$lang];
-                    $business_settings = BusinessSetting::where('type', $type)->where('lang', $lang)->first();
-                } else {
-                    $business_settings = BusinessSetting::where('type', $type)->first();
-                }
-
-                if ($business_settings != null) {
-                    if (gettype($request[$type]) == 'array') {
-                        $business_settings->value = json_encode($request[$type]);
-                    } else {
-                        $business_settings->value = $request[$type];
-                        if ($type == "seller_commission_type"  && $request[$type] == "category_based") {
-                            $business_settings2 = BusinessSetting::where('type', 'category_wise_commission')->first();
-                            $business_settings2->value = 1;
-                            $business_settings2->save();
-                        } elseif ($type == "seller_commission_type" && ($request[$type] == "seller_based" || $request[$type] == "fixed_rate")) {
-                            $business_settings2 = BusinessSetting::where('type', 'category_wise_commission')->first();
-                            $business_settings2->value = 0;
-                            $business_settings2->save();
-                        }
-                    }
-                    $business_settings->lang = $lang;
-                    $business_settings->save();
-                } else {
-                    $business_settings = new BusinessSetting;
-                    $business_settings->type = $type;
-                    if (gettype($request[$type]) == 'array') {
-                        $business_settings->value = json_encode($request[$type]);
-                    } else {
-                        $business_settings->value = $request[$type];
-                    }
-                    $business_settings->lang = $lang;
-                    $business_settings->save();
-                }
+        foreach ($types as $type) {
+            if (!is_array($type) && $type === 'refund_type') {
+                $resetRefundData = true;
+                break;
             }
         }
 
-        
+        foreach ($types as $rawType) {
+            $lang = null;
+            $type = $rawType;
+
+            if (is_array($rawType)) {
+                $lang = array_key_first($rawType);
+                $type = $lang !== null ? ($rawType[$lang] ?? '') : '';
+            }
+
+            $type = is_string($type) ? trim($type) : '';
+            if ($type === '') {
+                continue;
+            }
+
+            try {
+                if ($type === 'site_name') {
+                    $this->overWriteEnvFile('APP_NAME', $request->input($type, ''));
+                }
+
+                if ($type === 'timezone') {
+                    $this->overWriteEnvFile('APP_TIMEZONE', $request->input($type, ''));
+                    continue;
+                }
+
+                $value = $request->input($type);
+                if (is_array($value)) {
+                    $value = json_encode($value);
+                }
+
+                $query = BusinessSetting::where('type', $type);
+                if ($lang !== null) {
+                    $query->where('lang', $lang);
+                }
+
+                $business_settings = $query->first() ?: new BusinessSetting;
+                $business_settings->type = $type;
+                $business_settings->value = $value;
+                $business_settings->lang = $lang;
+                $business_settings->save();
+
+                if ($type === 'seller_commission_type') {
+                    if ($value === 'category_based') {
+                        BusinessSetting::updateOrCreate(
+                            ['type' => 'category_wise_commission'],
+                            ['value' => 1]
+                        );
+                    } elseif (in_array($value, ['seller_based', 'fixed_rate'], true)) {
+                        BusinessSetting::updateOrCreate(
+                            ['type' => 'category_wise_commission'],
+                            ['value' => 0]
+                        );
+                    }
+                }
+            } catch (Throwable $e) {
+                $failedSettings[] = $type;
+                Log::error('Business setting update failed', [
+                    'type' => $type,
+                    'lang' => $lang,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         if ($resetRefundData) {
-            Product::query()->update([
-                'refundable' => 0,
-            ]);
-            Category::query()->update([
-                'refund_request_time' => null,
-            ]);
-            BusinessSetting::where('type', 'refund_request_time')->update([
-                'value' => null,
+            try {
+                Product::query()->update([
+                    'refundable' => 0,
+                ]);
+                Category::query()->update([
+                    'refund_request_time' => null,
+                ]);
+                BusinessSetting::where('type', 'refund_request_time')->update([
+                    'value' => null,
+                ]);
+            } catch (Throwable $e) {
+                $failedSettings[] = 'refund_reset';
+                Log::error('Refund reset after business settings update failed', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        try {
+            Cache::forget('business_settings');
+            Artisan::call('cache:clear');
+        } catch (Throwable $e) {
+            Log::warning('Business settings cache clear failed after update', [
+                'error' => $e->getMessage(),
             ]);
         }
-        Artisan::call('cache:clear');
 
-        flash(translate("Settings updated successfully"))->success();
+        if (!empty($failedSettings)) {
+            flash(translate("Settings saved partially. Please check server logs for failed fields."))->warning();
+        } else {
+            flash(translate("Settings updated successfully"))->success();
+        }
         // If the request from a tabs with tab input
         if ($request->has('tab')) {
             return Redirect::to(URL::previous() . "#" . $request->tab);

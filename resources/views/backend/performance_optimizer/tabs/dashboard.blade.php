@@ -24,6 +24,7 @@
                     </form>
                     <form action="{{ route('performance_optimizer.cache.warm') }}" method="POST" class="perf-action">
                         @csrf
+                        <input type="hidden" name="max" value="5">
                         <button class="btn btn-soft-info" type="submit"><i class="las la-fire"></i> {{ translate('Warm cache') }}</button>
                     </form>
                     <form action="{{ route('performance_optimizer.cache.laravel_clear') }}" method="POST" class="perf-action">

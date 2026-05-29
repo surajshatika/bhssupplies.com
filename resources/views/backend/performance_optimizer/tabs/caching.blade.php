@@ -42,6 +42,8 @@
         </div>
         @if(!$_cacheOn)
         <small class="text-danger d-block mt-1">{{ translate('Page cache is disabled — toggle ON to activate') }}</small>
+        @elseif($_activeDriver === 'memcached' && !class_exists(\Memcached::class))
+        <small class="text-danger d-block mt-1">{{ translate('Memcached PHP extension is missing. File cache fallback is active.') }}</small>
         @endif
     </div>
     {{-- OPcache independent status --}}
@@ -66,6 +68,144 @@
     </div>
 </div>
 
+@php
+    $_cacheTest = session('cache_test_result');
+@endphp
+<div class="perf-section">
+    <div class="perf-section-header">
+        <h5><span class="perf-section-icon" style="background:rgba(14,165,233,.1);color:#0ea5e9"><i class="las la-stopwatch"></i></span>{{ translate('Live Cache Test') }}</h5>
+        @if($_cacheTest)
+            <span class="badge badge-light">{{ $_cacheTest['tested_at'] ?? '' }}</span>
+        @endif
+    </div>
+    <div class="perf-section-body">
+        <form action="{{ route('performance_optimizer.cache.test_url') }}" method="POST" class="row align-items-end">
+            @csrf
+            <div class="col-lg-9 col-md-8 mb-2">
+                <label class="small">{{ translate('Storefront URL') }}</label>
+                <input type="url" name="url" class="form-control form-control-sm"
+                       value="{{ old('url', $_cacheTest['url'] ?? url('/')) }}"
+                       placeholder="{{ url('/') }}">
+            </div>
+            <div class="col-lg-3 col-md-4 mb-2">
+                <button class="btn btn-soft-info btn-sm btn-block">
+                    <i class="las la-vial"></i> {{ translate('Test Cache') }}
+                </button>
+            </div>
+        </form>
+
+        @if($_cacheTest)
+            @php
+                $_diag = $_cacheTest['diagnosis'] ?? [];
+                $_first = $_cacheTest['first'] ?? [];
+                $_second = $_cacheTest['second'] ?? [];
+                $_expectedOk = (bool) ($_diag['cacheable'] ?? false);
+                $_cacheBadge = function ($probe) {
+                    $headers = $probe['headers'] ?? [];
+                    return $headers['x-performance-cache']
+                        ?? $headers['x-litespeed-cache']
+                        ?? $headers['cf-cache-status']
+                        ?? 'NO HEADER';
+                };
+            @endphp
+            <div class="mt-3">
+                <div class="alert py-2 mb-3 {{ $_expectedOk ? 'alert-success' : 'alert-warning' }}">
+                    <div class="d-flex flex-wrap align-items-center" style="gap:8px">
+                        <strong>{{ translate('Expected') }}:</strong>
+                        <span class="badge {{ $_expectedOk ? 'badge-success' : 'badge-warning' }}">
+                            {{ $_expectedOk ? translate('Cacheable') : translate('Bypass') }}
+                        </span>
+                        <span class="badge badge-light">{{ translate('Driver') }}: {{ strtoupper($_diag['driver'] ?? '-') }}</span>
+                        <span class="badge badge-light">{{ translate('TTL') }}: {{ $_diag['ttl_minutes'] ?? 0 }}m</span>
+                        @if(array_key_exists('stored_copy', $_diag) && $_diag['stored_copy'] !== null)
+                            <span class="badge {{ $_diag['stored_copy'] ? 'badge-success' : 'badge-secondary' }}">
+                                {{ $_diag['stored_copy'] ? translate('Stored copy found') : translate('No stored copy') }}
+                            </span>
+                        @endif
+                    </div>
+                </div>
+
+                <div class="row">
+                    @foreach(['First request' => $_first, 'Second request' => $_second] as $_label => $_probe)
+                        <div class="col-md-6 mb-3">
+                            <div class="border rounded p-3 h-100">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <strong>{{ translate($_label) }}</strong>
+                                    <span class="badge {{ ($_probe['ok'] ?? false) ? 'badge-light' : 'badge-danger' }}">
+                                        {{ ($_probe['ok'] ?? false) ? ($_probe['status'] ?? '-') : translate('Failed') }}
+                                    </span>
+                                </div>
+                                <div class="d-flex flex-wrap" style="gap:8px">
+                                    <span class="perf-pill">{{ translate('TTFB') }} {{ $_probe['time_ms'] ?? 0 }}ms</span>
+                                    <span class="perf-pill">{{ translate('Size') }} {{ $_probe['size_kb'] ?? 0 }}KB</span>
+                                    <span class="perf-pill">{{ $_cacheBadge($_probe) }}</span>
+                                </div>
+                                @if(!($_probe['ok'] ?? false))
+                                    <small class="text-danger d-block mt-2">{{ $_probe['error'] ?? translate('Request failed') }}</small>
+                                @endif
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+
+                @if(!empty($_diag['reasons']) || !empty($_diag['warnings']))
+                    <div class="row">
+                        @if(!empty($_diag['reasons']))
+                            <div class="col-md-6 mb-2">
+                                <strong class="small text-warning">{{ translate('Bypass Reasons') }}</strong>
+                                <ul class="small mb-0 pl-3">
+                                    @foreach($_diag['reasons'] as $_reason)
+                                        <li>{{ $_reason }}</li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                        @endif
+                        @if(!empty($_diag['warnings']))
+                            <div class="col-md-6 mb-2">
+                                <strong class="small text-info">{{ translate('Notes') }}</strong>
+                                <ul class="small mb-0 pl-3">
+                                    @foreach($_diag['warnings'] as $_warning)
+                                        <li>{{ $_warning }}</li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                        @endif
+                    </div>
+                @endif
+
+                <div class="table-responsive mt-2">
+                    <table class="table table-sm table-bordered mb-0" style="font-size:12px">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>{{ translate('Header') }}</th>
+                                <th>{{ translate('First') }}</th>
+                                <th>{{ translate('Second') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @php
+                                $_allHeaders = array_unique(array_merge(
+                                    array_keys($_first['headers'] ?? []),
+                                    array_keys($_second['headers'] ?? [])
+                                ));
+                            @endphp
+                            @forelse($_allHeaders as $_header)
+                                <tr>
+                                    <td><code>{{ $_header }}</code></td>
+                                    <td>{{ ($_first['headers'][$_header] ?? '-') }}</td>
+                                    <td>{{ ($_second['headers'][$_header] ?? '-') }}</td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="3" class="text-muted">{{ translate('No cache headers detected.') }}</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        @endif
+    </div>
+</div>
+
 <div class="perf-layout-2col">
     <div>
         <div class="perf-section">
@@ -87,10 +227,17 @@
                     </form>
                     <form action="{{ route('performance_optimizer.cache.warm') }}" method="POST">
                         @csrf
+                        <input type="hidden" name="max" value="5">
                         <button class="btn btn-soft-success btn-sm"><i class="las la-fire"></i> {{ translate('Warm Cache (Preload Pages)') }}</button>
                     </form>
                 </div>
-                <small class="text-muted">{{ translate('Currently cached') }}: <strong>{{ $stats['pages'] }}</strong> {{ translate('pages') }} ({{ $stats['size'] }}) · {{ translate('Driver') }}: <strong>{{ strtoupper($stats['driver']) }}</strong></small>
+                <small class="text-muted">
+                    @if(($stats['driver'] ?? '') === 'litespeed')
+                        {{ translate('Currently cached') }}: <strong>{{ translate('Server-managed') }}</strong> · {{ translate('Driver') }}: <strong>{{ strtoupper($stats['driver']) }}</strong>
+                    @else
+                        {{ translate('Currently cached') }}: <strong>{{ $stats['pages'] }}</strong> {{ translate('pages') }} ({{ $stats['size'] }}) · {{ translate('Driver') }}: <strong>{{ strtoupper($stats['driver']) }}</strong>
+                    @endif
+                </small>
 
                 <hr>
                 <form action="{{ route('performance_optimizer.settings.update') }}" method="POST">
@@ -336,10 +483,10 @@
                         <i class="las la-info-circle"></i>
                         {{ translate('LiteSpeed manages cache storage at the server level. PHP cannot enumerate LSCache pages.') }}
                     </div>
-                @elseif($stats['driver'] === 'redis')
+                @elseif(in_array($stats['driver'], ['redis', 'memcached'], true) && (!isset($cachedPages) || count($cachedPages) === 0))
                     <div class="alert alert-info py-2 small mb-0">
                         <i class="las la-info-circle"></i>
-                        {{ translate('Redis stores pages in memory. Inspect cached keys via Redis CLI with pattern') }} <code>perf_page_cache_*</code>.
+                        {{ strtoupper($stats['driver']) }} {{ translate('stores pages in memory. The table shows entries tracked by Performance Optimizer after the latest warm or visit.') }}
                     </div>
                 @elseif(isset($cachedPages) && count($cachedPages) > 0)
                     <div class="table-responsive" style="max-height:320px;overflow-y:auto">
@@ -368,7 +515,7 @@
                             </tbody>
                         </table>
                     </div>
-                    <small class="text-muted d-block mt-1">{{ translate('Showing up to 50 most recently cached pages (file driver).') }}</small>
+                    <small class="text-muted d-block mt-1">{{ translate('Showing up to 50 most recently tracked cached pages.') }}</small>
                 @else
                     <p class="text-muted small mb-0">
                         {{ translate('No pages cached yet. Enable Page Cache and visit your storefront to populate the cache.') }}

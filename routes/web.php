@@ -81,7 +81,9 @@ Route::controller(DemoController::class)->group(function () {
 });
 
 Route::get('/refresh-csrf', function () {
-    return csrf_token();
+    return response(csrf_token())
+        ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        ->header('Pragma', 'no-cache');
 });
 
 // Marketing short-link redirect (e.g. /c/abc123 → tagged destination URL)

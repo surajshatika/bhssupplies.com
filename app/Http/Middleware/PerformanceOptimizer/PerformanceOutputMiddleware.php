@@ -32,6 +32,8 @@ class PerformanceOutputMiddleware
 {
     protected FontOptimizerService $fonts;
     protected CssJsMinifierService $cssjs;
+    protected array $settings = [];
+    protected array $localFileExists = [];
 
     public function __construct(FontOptimizerService $fonts, CssJsMinifierService $cssjs)
     {
@@ -66,8 +68,8 @@ class PerformanceOutputMiddleware
 
     protected function shouldProcess(Request $request, $response): bool
     {
-        if ((int) get_setting('perf_status', 1) !== 1) return false;
         if (!method_exists($response, 'getStatusCode') || $response->getStatusCode() !== 200) return false;
+        if ((string) $response->headers->get('X-Performance-Cache', '') === 'HIT') return false;
 
         // Skip AJAX / XHR / JSON requests — they return HTML fragments, not full pages.
         // Injecting scripts/preloads into partials causes duplicate loading (e.g. tracker 3×).
@@ -83,6 +85,8 @@ class PerformanceOutputMiddleware
         foreach ($skipPrefixes as $p) {
             if (str_starts_with($path, $p)) return false;
         }
+
+        if ((int) $this->setting('perf_status', 1) !== 1) return false;
 
         // Skip HTML fragments — only process full documents
         $body = (string) $response->getContent();
@@ -103,18 +107,18 @@ class PerformanceOutputMiddleware
         }
 
         // Critical CSS (inlined)
-        if ($cc = trim((string) get_setting('perf_critical_css', ''))) {
+        if ($cc = trim($this->setting('perf_critical_css', ''))) {
             $injects[] = '<style data-perfopt="critical-css">' . $cc . '</style>';
         }
 
         // Font preload tags
-        if ((int) get_setting('perf_fonts_preload_status', 0) === 1) {
+        if ((int) $this->setting('perf_fonts_preload_status', 0) === 1) {
             $tags = $this->fonts->renderPreloadTags();
             if ($tags !== '') $injects[] = $tags;
         }
 
         // Force font-display: swap
-        if ((int) get_setting('perf_fonts_swap_status', 1) === 1) {
+        if ((int) $this->setting('perf_fonts_swap_status', 1) === 1) {
             $injects[] = $this->fonts->renderFontDisplaySwap();
         }
 
@@ -132,10 +136,10 @@ class PerformanceOutputMiddleware
 
     protected function processImages(string $html, ?string $lcpSrc = null): string
     {
-        $lazy   = (int) get_setting('perf_image_lazyload', 1) === 1;
-        $serveWebp = (int) get_setting('perf_image_serve_webp_auto', 0) === 1;
-        $imageCdn  = (int) get_setting('perf_image_cdn_status', 0) === 1;
-        $cdnUrl    = rtrim((string) get_setting('perf_image_cdn_url', ''), '/');
+        $lazy   = (int) $this->setting('perf_image_lazyload', 1) === 1;
+        $serveWebp = (int) $this->setting('perf_image_serve_webp_auto', 0) === 1;
+        $imageCdn  = (int) $this->setting('perf_image_cdn_status', 0) === 1;
+        $cdnUrl    = rtrim($this->setting('perf_image_cdn_url', ''), '/');
         if (!$lazy && !$serveWebp && !($imageCdn && $cdnUrl !== '')) return $html;
 
         $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
@@ -168,7 +172,7 @@ class PerformanceOutputMiddleware
                 if (preg_match('/\.(jpe?g|png)$/i', $src)) {
                     $webpUrl = preg_replace('/\.(jpe?g|png)$/i', '.webp', $src);
                     $localPath = $this->urlToLocal($webpUrl);
-                    if ($localPath && file_exists($localPath)) {
+                    if ($localPath && $this->cachedFileExists($localPath)) {
                         $attrs = preg_replace(
                             '/\bsrc\s*=\s*(["\'])[^"\']+\1/i',
                             'src="' . $webpUrl . '"',
@@ -231,13 +235,13 @@ class PerformanceOutputMiddleware
 
     protected function processScripts(string $html): string
     {
-        if ((int) get_setting('perf_js_defer_status', 0) !== 1) return $html;
+        if ((int) $this->setting('perf_js_defer_status', 0) !== 1) return $html;
 
         // Safety baseline: never defer scripts that ship jQuery or the AIZ core,
         // because the layout has inline <script> blocks that call $() / AIZ.* at parse time.
         // Deferring these breaks home-section AJAX loaders, infinite scroll, modals, etc.
         $defaultExcludes = ['jquery', 'vendors.js', 'aiz-core.js'];
-        $userExcludes    = array_filter(array_map('trim', explode("\n", (string) get_setting('perf_js_defer_exclude', ''))));
+        $userExcludes    = array_filter(array_map('trim', explode("\n", $this->setting('perf_js_defer_exclude', ''))));
         $excludes        = array_values(array_unique(array_merge($defaultExcludes, $userExcludes)));
 
         return preg_replace_callback('/<script\b([^>]*)>/i', function ($m) use ($excludes) {
@@ -260,7 +264,7 @@ class PerformanceOutputMiddleware
 
     protected function processScriptManager(string $html, Request $request): string
     {
-        if ((int) get_setting('perf_script_manager_status', 0) !== 1) return $html;
+        if ((int) $this->setting('perf_script_manager_status', 0) !== 1) return $html;
 
         $sm        = app(ScriptManagerService::class);
         $routePath = ltrim($request->path(), '/');
@@ -278,12 +282,12 @@ class PerformanceOutputMiddleware
     {
         $injects = [];
 
-        if ((int) get_setting('perf_js_delay_status', 0) === 1) {
+        if ((int) $this->setting('perf_js_delay_status', 0) === 1) {
             $injects[] = $this->cssjs->getDelayScript();
         }
 
-        if ((int) get_setting('perf_vitals_collect_status', 0) === 1) {
-            $rate     = max(1, min(100, (int) get_setting('perf_vitals_sample_rate', 10)));
+        if ((int) $this->setting('perf_vitals_collect_status', 0) === 1) {
+            $rate     = max(1, min(100, (int) $this->setting('perf_vitals_sample_rate', 10)));
             $endpoint = route('performance_optimizer.collect_vital');
             $injects[] = "<script data-perfopt=\"vitals-bootstrap\">\nwindow.PERF_VITALS_ENDPOINT='{$endpoint}';\nwindow.PERF_VITALS_RATE={$rate};\n</script>";
             $injects[] = '<script defer src="' . asset('assets/performance_optimizer/js/web_vitals_tracker.js') . '"></script>';
@@ -309,7 +313,7 @@ class PerformanceOutputMiddleware
      */
     protected function detectLcpCandidateSrc(string $html): ?string
     {
-        if ((int) get_setting('perf_lcp_preload_status', 0) !== 1) return null;
+        if ((int) $this->setting('perf_lcp_preload_status', 0) !== 1) return null;
 
         // Only scan the <body> to avoid picking up hidden/icon images in <head>
         $bodyOffset = stripos($html, '<body');
@@ -350,7 +354,7 @@ class PerformanceOutputMiddleware
      */
     protected function minifyHtml(string $html): string
     {
-        if ((int) get_setting('perf_html_minify_status', 0) !== 1) return $html;
+        if ((int) $this->setting('perf_html_minify_status', 0) !== 1) return $html;
 
         // Pull out blocks whose content must never be touched
         $placeholders = [];
@@ -386,5 +390,21 @@ class PerformanceOutputMiddleware
         }
 
         return $html;
+    }
+
+    protected function setting(string $key, $default = null): string
+    {
+        if (!array_key_exists($key, $this->settings)) {
+            $this->settings[$key] = (string) get_setting($key, $default);
+        }
+        return $this->settings[$key];
+    }
+
+    protected function cachedFileExists(string $path): bool
+    {
+        if (!array_key_exists($path, $this->localFileExists)) {
+            $this->localFileExists[$path] = file_exists($path);
+        }
+        return $this->localFileExists[$path];
     }
 }

@@ -37,9 +37,8 @@ class MarketingTracking
             }
 
             // 2) Session ID — sliding 30 min
-            if ($consent['analytics']) {
-                $sessionId = $request->cookie('mm_session_id') ?: (string) Str::uuid();
-                $cookies->queue('mm_session_id', $sessionId, 30);
+            if ($consent['analytics'] && !$request->cookie('mm_session_id')) {
+                $cookies->queue('mm_session_id', (string) Str::uuid(), 30);
             }
 
             // 3) UTM persistence — 30 days (marketing consent)

@@ -163,10 +163,14 @@ if (!function_exists('filter_products')) {
 if (!function_exists('get_cached_products')) {
     function get_cached_products($category_id = null, $limit = 12)
     {
-        return Cache::remember('products-category-' . $category_id . '-' . $limit, 86400, function () use ($category_id, $limit) {
+        return Cache::remember('products-category-v2-' . $category_id . '-' . $limit, 86400, function () use ($category_id, $limit) {
             $subIds = \App\Models\Category::where('parent_id', $category_id)->pluck('id')->toArray();
             $allIds = array_merge([$category_id], $subIds);
-            return filter_products(Product::whereIn('category_id', $allIds))->latest()->take($limit)->get();
+            return filter_products(Product::whereIn('category_id', $allIds))
+                ->with(['brand', 'stocks'])
+                ->latest()
+                ->take($limit)
+                ->get();
         });
     }
 }
@@ -1314,7 +1318,17 @@ if (!function_exists('app_timezone')) {
 if (!function_exists('uploaded_asset')) {
     function uploaded_asset($id)
     {
-        if (($asset = Upload::find($id)) != null) {
+        if ($id instanceof Upload) {
+            $asset = $id;
+        } elseif ($id && is_numeric($id)) {
+            $asset = Cache::remember('uploaded_asset_row_' . $id, 86400, function () use ($id) {
+                return Upload::find($id);
+            });
+        } else {
+            $asset = null;
+        }
+
+        if ($asset != null) {
             return $asset->external_link == null ? my_asset($asset->file_name) : $asset->external_link;
         }
         return static_asset('assets/img/placeholder.jpg');
@@ -1687,8 +1701,8 @@ if (!function_exists('addon_is_activated')) {
                 return Addon::all();
             });
         } catch (\Throwable $e) {
-            \Log::error('addon_is_activated cache failure, falling back to DB: ' . $e->getMessage());
-            $addons = Addon::all();
+            \Log::error('addon_is_activated cache failure: ' . $e->getMessage());
+            return (bool) $default;
         }
 
         $activation = $addons->where('unique_identifier', $identifier)->where('activated', 1)->first();
@@ -1946,9 +1960,13 @@ if (!function_exists('get_product_max_unit_price')) {
 if (!function_exists('get_featured_products')) {
     function get_featured_products()
     {
-        return Cache::remember('featured_products', 3600, function () {
+        return Cache::remember('featured_products_v2', 3600, function () {
             $product_query = Product::query();
-            return filter_products($product_query->where('featured', '1'))->latest()->limit(12)->get();
+            return filter_products($product_query->where('featured', '1'))
+                ->with(['brand', 'stocks'])
+                ->latest()
+                ->limit(12)
+                ->get();
         });
     }
 }
@@ -1960,7 +1978,10 @@ if (!function_exists('get_best_selling_products')) {
         if ($user_id) {
             $product_query = $product_query->where('user_id', $user_id);
         }
-        return filter_products($product_query->orderBy('num_of_sale', 'desc'))->limit($limit)->get();
+        return filter_products($product_query->orderBy('num_of_sale', 'desc'))
+            ->with(['brand', 'stocks'])
+            ->limit($limit)
+            ->get();
     }
 }
 
@@ -1973,7 +1994,11 @@ if (!function_exists('get_todays_deal_products')) {
         if ($user_id) {
             $product_query = $product_query->where('user_id', $user_id);
         }
-        return filter_products($product_query->where('todays_deal', '1'))->orderBy('id', 'desc')->limit($limit)->get();
+        return filter_products($product_query->where('todays_deal', '1'))
+            ->with(['brand', 'stocks'])
+            ->orderBy('id', 'desc')
+            ->limit($limit)
+            ->get();
     }
 }
 
@@ -2252,6 +2277,11 @@ if (!function_exists('get_single_attribute_name')) {
 if (!function_exists('get_user_cart')) {
     function get_user_cart()
     {
+        static $cart = null;
+        if ($cart !== null) {
+            return $cart;
+        }
+
         $cart = [];
         if (auth()->user() != null) {
             $cart = Cart::where('user_id', Auth::user()->id)->get();
@@ -2640,15 +2670,26 @@ if (!function_exists('get_first_product_image')) {
      function get_first_product_image($photos = null, $thumbnail = null)
     {
         $image_url = static_asset('assets/img/placeholder.jpg');
-        $photos = $photos != null ? explode(',', $photos) : [];
+        if ($photos instanceof Upload) {
+            return get_image($photos);
+        }
+        if ($thumbnail instanceof Upload) {
+            $thumbnail = $thumbnail->id;
+        }
+
+        $photos = $photos != null ? explode(',', (string) $photos) : [];
         $photos = array_diff($photos, [$thumbnail]);
         $firstPhotoId = reset($photos);
         $image = null;
         if (!empty($firstPhotoId)) {
-            $image = Upload::find($firstPhotoId);
+            $image = Cache::remember('uploaded_asset_row_' . $firstPhotoId, 86400, function () use ($firstPhotoId) {
+                return Upload::find($firstPhotoId);
+            });
         }
         if ($image == null && $thumbnail != null) {
-            $image = Upload::find($thumbnail);
+            $image = Cache::remember('uploaded_asset_row_' . $thumbnail, 86400, function () use ($thumbnail) {
+                return Upload::find($thumbnail);
+            });
         }
         if ($image instanceof \Illuminate\Database\Eloquent\Collection) {
             $image = $image->first();
@@ -3307,8 +3348,11 @@ if (!function_exists('get_custom_labels')) {
         $labels_array = [];
         if($labels){
             $labels = explode(',',$labels);
+            $allLabels = Cache::remember('custom_labels_frontend', 86400, function () {
+                return CustomLabel::all()->keyBy('id');
+            });
             foreach($labels as $label){
-                $label_data = CustomLabel::where('id',$label)->first();
+                $label_data = $allLabels->get((int) $label);
                 if($label_data){
                     $labels_array[] = $label_data;
                 }

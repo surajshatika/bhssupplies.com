@@ -66,6 +66,12 @@ Route::group([
         Route::post('/performance-optimizer/caching/warm',   'warm')->name('performance_optimizer.cache.warm');
         Route::post('/performance-optimizer/caching/laravel-clear', 'clearLaravel')->name('performance_optimizer.cache.laravel_clear');
         Route::post('/performance-optimizer/caching/laravel-optimize', 'optimize')->name('performance_optimizer.cache.optimize');
+        Route::post('/performance-optimizer/caching/test-url', 'testUrl')->name('performance_optimizer.cache.test_url');
+        Route::get('/performance-optimizer/caching/clear', 'actionRequiresPost');
+        Route::get('/performance-optimizer/caching/warm', 'actionRequiresPost');
+        Route::get('/performance-optimizer/caching/laravel-clear', 'actionRequiresPost');
+        Route::get('/performance-optimizer/caching/laravel-optimize', 'actionRequiresPost');
+        Route::get('/performance-optimizer/caching/test-url', 'actionRequiresPost');
         // Combined purge (LiteSpeed + Cloudflare + file/Redis in one click)
         Route::post('/performance-optimizer/caching/purge-all',           'purgeEverything')->name('performance_optimizer.cache.purge_everything');
         // LiteSpeed Cache
@@ -73,6 +79,10 @@ Route::group([
         Route::post('/performance-optimizer/caching/purge-litespeed-tag', 'purgeLiteSpeedTag')->name('performance_optimizer.cache.purge_litespeed_tag');
         // OPcache
         Route::post('/performance-optimizer/caching/flush-opcache',  'flushOpcache')->name('performance_optimizer.cache.flush_opcache');
+        Route::get('/performance-optimizer/caching/purge-all', 'actionRequiresPost');
+        Route::get('/performance-optimizer/caching/purge-litespeed', 'actionRequiresPost');
+        Route::get('/performance-optimizer/caching/purge-litespeed-tag', 'actionRequiresPost');
+        Route::get('/performance-optimizer/caching/flush-opcache', 'actionRequiresPost');
         Route::get('/performance-optimizer/caching/opcache-stats',   'opcacheStats')->name('performance_optimizer.cache.opcache_stats');
     });
 

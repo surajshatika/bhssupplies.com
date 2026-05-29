@@ -16,6 +16,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Session;
 use Redirect;
+use Throwable;
 
 class MyfatoorahController extends Controller
 {
@@ -25,9 +26,21 @@ class MyfatoorahController extends Controller
      */
     public function __construct()
     {
+        if (!class_exists(PaymentMyfatoorahApiV2::class)) {
+            logger()->warning('MyFatoorah legacy API class is not available.');
+            $this->mfObj = null;
+            return;
+        }
 
-        // If you want to set the credentials and the mode manually.
-        $this->mfObj = new PaymentMyfatoorahApiV2(env('MYFATOORAH_TOKEN'), env('MYFATOORAH_COUNTRY_ISO'), get_setting('myfatoorah_sandbox') == 1 ? true : false);
+        try {
+            // If you want to set the credentials and the mode manually.
+            $this->mfObj = new PaymentMyfatoorahApiV2(env('MYFATOORAH_TOKEN'), env('MYFATOORAH_COUNTRY_ISO'), get_setting('myfatoorah_sandbox') == 1 ? true : false);
+        } catch (Throwable $e) {
+            logger()->warning('MyFatoorah gateway initialization failed.', [
+                'error' => $e->getMessage(),
+            ]);
+            $this->mfObj = null;
+        }
     }
 
     /**
@@ -38,6 +51,10 @@ class MyfatoorahController extends Controller
 
     public function pay(Request $request)
     {
+        if (!$this->mfObj) {
+            return response()->json(['result' => false, 'message' => translate("MyFatoorah gateway is not available")], 503);
+        }
+
         $payment_type = $request->payment_type;
         $amount = $request->amount;
         $user = User::find($request->user_id);
@@ -93,6 +110,10 @@ class MyfatoorahController extends Controller
 
     public function callback(Request $request)
     {
+        if (!$this->mfObj) {
+            return response()->json(['result' => false, 'message' => translate("MyFatoorah gateway is not available")], 503);
+        }
+
         try {
             $response = $this->mfObj->getPaymentStatus(request('paymentId'), 'PaymentId');
             if ($response->InvoiceStatus == 'Paid') {

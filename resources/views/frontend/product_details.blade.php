@@ -62,7 +62,7 @@
         $pdQty          = $detailedProduct->stocks->sum('qty');
         $pdInStock      = ($pdQty > 0) ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock';
         $pdRating       = $detailedProduct->rating ?: null;
-        $pdReviewCount  = $detailedProduct->reviews->count();
+        $pdReviewCount  = $review_count ?? $detailedProduct->reviews->count();
         $pdImages       = [];
         if ($detailedProduct->photos) {
             foreach (explode(',', $detailedProduct->photos) as $photo) {
@@ -72,22 +72,26 @@
         if (empty($pdImages)) { $pdImages[] = $_pd_img; }
         $pdPriceValidUntil = now()->addYear()->format('Y-m-d');
     @endphp
+    @php
+        $_pdSkuVal = (string) ($detailedProduct->sku ?? '');
+        $_pdDescClean = trim(strip_tags($_pd_desc));
+    @endphp
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "Product",
-      "@id": "{{ $_pd_url }}",
-      "name": "{{ addslashes($_pd_title) }}",
-      "description": "{{ addslashes($_pd_desc) }}",
+      "@id": {!! json_encode($_pd_url) !!},
+      "name": {!! json_encode($_pd_title) !!},
+      @if($_pdDescClean)"description": {!! json_encode($_pdDescClean) !!},@endif
       "image": @json($pdImages),
-      "sku": "{{ $detailedProduct->sku }}",
+      @if($_pdSkuVal)"sku": {!! json_encode($_pdSkuVal) !!},@endif
       "brand": {
         "@type": "Brand",
-        "name": "{{ $detailedProduct->brand ? addslashes($detailedProduct->brand->getTranslation('name')) : $_site_name }}"
+        "name": {!! json_encode($detailedProduct->brand ? $detailedProduct->brand->getTranslation('name') : $_site_name) !!}
       },
       "offers": {
         "@type": "Offer",
-        "url": "{{ $_pd_url }}",
+        "url": {!! json_encode($_pd_url) !!},
         "priceCurrency": "{{ $pdCurrencyCode }}",
         "price": "{{ number_format($detailedProduct->unit_price, 2, '.', '') }}",
         "priceValidUntil": "{{ $pdPriceValidUntil }}",
@@ -95,7 +99,7 @@
         "itemCondition": "https://schema.org/NewCondition",
         "seller": {
           "@type": "Organization",
-          "name": "{{ $_site_name }}"
+          "name": {!! json_encode($_site_name) !!}
         }
       }@if($pdRating && $pdReviewCount > 0),
       "aggregateRating": {
@@ -476,8 +480,7 @@
 
                             {{-- Stock badge + Brand --}}
                             @php
-                                $total = 0;
-                                $total += $detailedProduct->reviews->count();
+                                $total = $review_count ?? $detailedProduct->reviews->count();
                                 $totalQtyBadge = 0;
                                 foreach ($detailedProduct->stocks as $s) { $totalQtyBadge += $s->qty; }
                             @endphp
@@ -602,7 +605,7 @@
                                         <div class="row no-gutters">
                                             <div class="col-sm-2">
                                                 <div class="opacity-50 my-2">
-                                                    {{ \App\Models\Attribute::find($choice->attribute_id)->getTranslation('name') }}:
+                                                    {{ optional($choiceAttributes->get($choice->attribute_id))->getTranslation('name') }}:
                                                 </div>
                                             </div>
                                             <div class="col-sm-10">
@@ -633,10 +636,11 @@
                                         <div class="col-sm-10">
                                             <div class="aiz-radio-inline">
                                                 @foreach (json_decode($detailedProduct->colors) as $key => $color)
+                                                    @php $colorName = optional($productColors->get($color))->name ?: $color; @endphp
                                                     <label class="aiz-megabox pl-0 mr-2" data-toggle="tooltip"
-                                                        data-title="{{ \App\Models\Color::where('code', $color)->first()->name }}">
+                                                        data-title="{{ $colorName }}">
                                                         <input type="radio" name="color"
-                                                            value="{{ \App\Models\Color::where('code', $color)->first()->name }}"
+                                                            value="{{ $colorName }}"
                                                             @if ($key == 0) checked @endif>
                                                         <span
                                                             class="aiz-megabox-elem rounded d-flex align-items-center justify-content-center p-1 mb-2">
@@ -1001,7 +1005,7 @@
                             <div class="tab-pane fade" id="tab_default_4">
                                 <div class="p-4">
                                     <ul class="list-group list-group-flush">
-                                        @foreach ($detailedProduct->reviews as $key => $review)
+                                        @foreach ($reviews as $key => $review)
                                             @if ($review->user != null)
                                                 <li class="media list-group-item d-flex">
                                                     <span class="avatar avatar-md mr-3">
@@ -1036,7 +1040,7 @@
                                         @endforeach
                                     </ul>
 
-                                    @if (count($detailedProduct->reviews) <= 0)
+                                    @if (($review_count ?? $reviews->total()) <= 0)
                                         <div class="text-center fs-18 opacity-70">
                                             {{ translate('There have been no reviews for this product yet.') }}
                                         </div>
@@ -1053,13 +1057,7 @@
                             data-items="4" data-xl-items="4"
                             data-lg-items="3" data-md-items="3" data-sm-items="2" data-xs-items="2"
                             data-arrows="true" data-infinite="false">
-                            @foreach (filter_products(\App\Models\Product::where(function ($query) use ($detailedProduct) {
-                                $query->where('category_id', $detailedProduct->category_id)
-                                    ->orWhereHas('categories', function ($categoryQuery) use ($detailedProduct) {
-                                        $categoryQuery->whereIn('categories.id', $detailedProduct->categories->pluck('id')->push($detailedProduct->category_id)->filter()->unique()->all());
-                                    });
-                            })->where('id', '!=', $detailedProduct->id))->limit(12)->get()
-    as $key => $related_product)
+                            @foreach ($related_products as $key => $related_product)
                                 <div class="carousel-box px-2 py-2">
                                     @include('frontend.'.get_setting('homepage_select').'.partials.product_box_1', ['product' => $related_product])
                                 </div>

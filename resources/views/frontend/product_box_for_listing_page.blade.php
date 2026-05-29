@@ -10,6 +10,9 @@
     $attributes = is_string($product->attributes) ? json_decode($product->attributes, true) : $product->attributes;
     $hasOptions = (is_array($colors) && count($colors) > 0) || (is_array($attributes) && count($attributes) > 0);
     $firstSku = optional($product->stocks->first())->sku ?: $product->sku ?? null;
+    $discountPercent = discount_in_percentage($product);
+    $basePrice = home_base_price($product);
+    $discountedBasePrice = home_discounted_base_price($product);
 @endphp
 
 <div class="pc-card h-100 d-flex flex-column">
@@ -17,8 +20,8 @@
     {{-- Image Area --}}
     <div class="pc-img-wrap position-relative">
         {{-- Badges --}}
-        @if (discount_in_percentage($product) > 0)
-            <span class="bhs-badge-discount">-{{ discount_in_percentage($product) }}%</span>
+        @if ($discountPercent > 0)
+            <span class="bhs-badge-discount">-{{ $discountPercent }}%</span>
         @endif
         @if ($product->wholesale_product)
             <span class="bhs-badge-wholesale">{{ translate('Wholesale') }}</span>
@@ -38,7 +41,7 @@
                 width="300" height="300"
                 onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder.jpg') }}';">
             <img class="lazyload pc-img pc-img-hover position-absolute"
-                src="{{ get_first_product_image($product->thumbnail, $product->photos) }}"
+                src="{{ get_first_product_image($product->photos, $product->thumbnail_img) }}"
                 alt="{{ $product->getTranslation('name') }}"
                 loading="lazy"
                 width="300" height="300"
@@ -89,10 +92,10 @@
         {{-- Price --}}
         <div class="pc-price-row">
             @if ($product->auction_product == 0)
-                @if (home_base_price($product) != home_discounted_base_price($product))
-                    <del class="pc-price-orig">{{ home_base_price($product) }}</del>
+                @if ($basePrice != $discountedBasePrice)
+                    <del class="pc-price-orig">{{ $basePrice }}</del>
                 @endif
-                <span class="pc-price-final">{{ home_discounted_base_price($product) }}</span>
+                <span class="pc-price-final">{{ $discountedBasePrice }}</span>
             @else
                 <span class="pc-price-final">{{ single_price($product->starting_bid) }}</span>
             @endif

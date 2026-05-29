@@ -60,16 +60,6 @@
     <link rel="icon" href="{{ $site_icon }}">
     <link rel="apple-touch-icon" href="{{ $site_icon }}">
 
-    {{-- Preload header logo so the browser starts fetching it before parsing the body --}}
-    @php
-        $__seoLogoUrl = ($_logo = get_setting('header_logo'))
-            ? uploaded_asset($_logo)
-            : static_asset('assets/img/logo.png');
-    @endphp
-    @if ($__seoLogoUrl)
-        <link rel="preload" as="image" href="{{ $__seoLogoUrl }}">
-    @endif
-
     @yield('lcp_preload')
     @yield('preload_assets')
 
@@ -236,12 +226,20 @@
 @endphp
 
     <!-- LocalBusiness Schema -->
+    @php
+        $_socialLinks = array_values(array_filter([
+            get_setting('facebook_link'),
+            get_setting('instagram_link'),
+            get_setting('twitter_link'),
+        ]));
+        $_siteIconUrl = uploaded_asset(get_setting('site_icon')) ?: null;
+    @endphp
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": ["HVACBusiness", "Store"],
       "name": "BHS Supplies",
-      "image": "{{ uploaded_asset(get_setting('site_icon')) }}",
+      @if($_siteIconUrl)"image": "{{ $_siteIconUrl }}",@endif
       "@id": "{{ url('/') }}#localbusiness",
       "url": "{{ url('/') }}",
       "telephone": "+1 (647) 456-2244",
@@ -336,12 +334,9 @@
           "longitude": -79.6631853
         },
         "geoRadius": "50000"
-      },
-      "sameAs": [
-        "{{ get_setting('facebook_link') }}",
-        "{{ get_setting('instagram_link') }}",
-        "{{ get_setting('twitter_link') }}"
-      ]
+      }@if(!empty($_socialLinks)),
+      "sameAs": @json($_socialLinks)
+      @endif
     }
     </script>
 
@@ -353,12 +348,12 @@
       "@id": "{{ url('/') }}#organization",
       "name": "BHS Supplies",
       "url": "{{ url('/') }}",
-      "logo": {
+      @if($_siteIconUrl)"logo": {
         "@type": "ImageObject",
-        "url": "{{ uploaded_asset(get_setting('site_icon')) }}",
+        "url": "{{ $_siteIconUrl }}",
         "width": 512,
         "height": 512
-      },
+      },@endif
       "contactPoint": [
         {
           "@type": "ContactPoint",
@@ -390,12 +385,8 @@
         "addressCountry": "CA"
       },
       "email": "support@bhssupplies.com",
-      "telephone": "+1-647-456-2244",
-      "sameAs": [
-        "{{ get_setting('facebook_link') }}",
-        "{{ get_setting('instagram_link') }}",
-        "{{ get_setting('twitter_link') }}"
-      ]
+      "telephone": "+1-647-456-2244"
+      @if(!empty($_socialLinks)),"sameAs": @json($_socialLinks)@endif
     }
     </script>
 
@@ -799,6 +790,77 @@
     </script>
     <script src="{{ static_asset('assets/js/vendors.js?v=') }}{{ get_setting('current_version') }}"></script>
     <script src="{{ static_asset('assets/js/aiz-core.min.js?v=') }}{{ get_setting('current_version') }}"></script>
+    <script>
+    (function () {
+        var placeholder = '__PERFOPT_CSRF_TOKEN__';
+        var endpoint = '{{ url('/refresh-csrf') }}';
+        var ready = false;
+        var started = false;
+        var callbacks = [];
+
+        function currentToken() {
+            return (window.AIZ && AIZ.data && AIZ.data.csrf) ||
+                ($('meta[name="csrf-token"]').attr('content') || '');
+        }
+
+        function applyToken(token) {
+            if (!token) return;
+            $('meta[name="csrf-token"]').attr('content', token);
+            $('input[name="_token"]').val(token);
+            window.AIZ = window.AIZ || {};
+            AIZ.data = AIZ.data || {};
+            AIZ.data.csrf = token;
+            $.ajaxSetup({headers: {'X-CSRF-TOKEN': token}});
+            ready = true;
+            while (callbacks.length) {
+                try { callbacks.shift()(token); } catch (e) {}
+            }
+        }
+
+        window.perfCurrentCsrf = currentToken;
+        window.perfFreshCsrf = function (callback) {
+            if (callback) callbacks.push(callback);
+            if (ready && currentToken() && currentToken() !== placeholder) {
+                applyToken(currentToken());
+                return;
+            }
+            if (started) return;
+            started = true;
+            $.get(endpoint).done(applyToken).always(function () {
+                if (!ready) applyToken(currentToken());
+            });
+        };
+
+        $.ajaxPrefilter(function (options) {
+            var token = currentToken();
+            if (!token || token === placeholder) return;
+            var method = (options.type || options.method || 'GET').toUpperCase();
+            if (method === 'GET') return;
+
+            options.headers = options.headers || {};
+            options.headers['X-CSRF-TOKEN'] = token;
+
+            if (typeof options.data === 'string') {
+                if (options.data.indexOf('_token=') !== -1) {
+                    options.data = options.data.replace(/_token=[^&]*/g, '_token=' + encodeURIComponent(token));
+                }
+            } else if ($.isPlainObject(options.data) && Object.prototype.hasOwnProperty.call(options.data, '_token')) {
+                options.data._token = token;
+            }
+        });
+
+        $(function () {
+            var token = currentToken();
+            if (!token || token === placeholder) {
+                window.perfFreshCsrf();
+            } else if (window.requestIdleCallback) {
+                requestIdleCallback(function () { window.perfFreshCsrf(); }, {timeout: 2500});
+            } else {
+                setTimeout(function () { window.perfFreshCsrf(); }, 1800);
+            }
+        });
+    })();
+    </script>
 
     {{-- WhatsApp Chat — deferred until user interaction or 3 s to avoid TBT penalty --}}
     @if (get_setting('whatsapp_chat') == 1)
@@ -845,7 +907,7 @@
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
-                        "X-CSRF-TOKEN": "{{ csrf_token() }}"
+                        "X-CSRF-TOKEN": (window.perfCurrentCsrf ? window.perfCurrentCsrf() : "{{ csrf_token() }}")
                     },
                     body: JSON.stringify({})
                 });
@@ -915,12 +977,24 @@
         @if (Route::currentRouteName() == 'home' || Route::currentRouteName() == '/')
         // Guard: only fire each AJAX call when its target container actually exists in
         // the current theme. Eliminates 4-5 wasted server round-trips on thecore theme.
+        var _homeSectionQueue = [];
         function _homeSection(route, selector, extra) {
             if (!$(selector).length) return;
-            $.post(route, {_token: '{{ csrf_token() }}'}, function(data) {
-                $(selector).html(data);
-                AIZ.plugins.slickCarousel();
+            if ($.trim($(selector).html()).length) {
                 if (extra) extra();
+                return;
+            }
+            _homeSectionQueue.push({route: route, selector: selector, extra: extra});
+        }
+        function _runHomeSections(i) {
+            if (i >= _homeSectionQueue.length) return;
+            var item = _homeSectionQueue[i];
+            $.post(item.route, {_token: (window.perfCurrentCsrf ? window.perfCurrentCsrf() : AIZ.data.csrf)}, function(data) {
+                $(item.selector).html(data);
+                AIZ.plugins.slickCarousel();
+                if (item.extra) item.extra();
+            }).always(function() {
+                setTimeout(function() { _runHomeSections(i + 1); }, 150);
             });
         }
 
@@ -938,6 +1012,15 @@
         if (@json(addon_is_activated('preorder'))) {
             _homeSection('{{ route('home.section.preorder_products') }}', '#section_featured_preorder_products');
         }
+        $(window).on('load', function() {
+            setTimeout(function() {
+                if (window.perfFreshCsrf) {
+                    window.perfFreshCsrf(function() { _runHomeSections(0); });
+                } else {
+                    _runHomeSections(0);
+                }
+            }, 300);
+        });
 
         @endif
 
@@ -1936,7 +2019,7 @@
         function aizStartChat() {
             fetch('{{ route("support_board.chat_start") }}', {
                 method: 'POST',
-                headers: {'Content-Type':'application/json','X-CSRF-TOKEN':'{{ csrf_token() }}'},
+                headers: {'Content-Type':'application/json','X-CSRF-TOKEN': (window.perfCurrentCsrf ? window.perfCurrentCsrf() : '{{ csrf_token() }}')},
                 body: JSON.stringify({})
             }).then(r => r.json()).then(data => {
                 aizConvId = data.conversation_id;
@@ -1966,7 +2049,7 @@
                 headers: {
                     'Content-Type':'application/json',
                     'Accept':'application/json',
-                    'X-CSRF-TOKEN':'{{ csrf_token() }}'
+                    'X-CSRF-TOKEN': (window.perfCurrentCsrf ? window.perfCurrentCsrf() : '{{ csrf_token() }}')
                 },
                 body: JSON.stringify({conversation_id: aizConvId, message: msg, page_context: aizPageCtx})
             }).then(function(r) {

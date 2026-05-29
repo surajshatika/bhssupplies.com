@@ -80,8 +80,12 @@ class HomeController extends Controller
     {
         $theme = get_setting('homepage_select');
         $lang  = app()->getLocale();
-        $html  = Cache::remember("section_todays_deal_{$theme}_{$lang}", 1800, function () use ($theme) {
-            $todays_deal_products = filter_products(Product::where('todays_deal', '1'))->orderBy('id', 'desc')->get();
+        $html  = Cache::remember("section_todays_deal_v2_{$theme}_{$lang}", 1800, function () use ($theme) {
+            $todays_deal_products = filter_products(Product::where('todays_deal', '1'))
+                ->with(['brand', 'stocks'])
+                ->orderBy('id', 'desc')
+                ->limit(24)
+                ->get();
             return view("frontend.{$theme}.partials.todays_deal", compact('todays_deal_products'))->render();
         });
         return response($html)->header('Content-Type', 'text/html');
@@ -96,13 +100,14 @@ class HomeController extends Controller
             $offset = ($page - 1) * $limit;
 
             $newest_products = filter_products(Product::latest())
+                ->with(['brand', 'stocks'])
                 ->skip($offset)
                 ->take($limit)
                 ->get();
             return view('frontend.' . get_setting('homepage_select') . '.partials.newest_products_section', compact('newest_products'));
         }
-        $newest_products = Cache::remember('newest_products', 3600, function () use ($limit) {
-            return filter_products(Product::latest())->take($limit)->get();
+        $newest_products = Cache::remember('newest_products_v2', 3600, function () use ($limit) {
+            return filter_products(Product::latest())->with(['brand', 'stocks'])->take($limit)->get();
         });
 
         return view('frontend.' . get_setting('homepage_select') . '.partials.newest_products_section', compact('newest_products'));
@@ -112,7 +117,7 @@ class HomeController extends Controller
     {
         $theme = get_setting('homepage_select');
         $lang  = app()->getLocale();
-        $html  = Cache::remember("section_featured_{$theme}_{$lang}", 1800, function () use ($theme) {
+        $html  = Cache::remember("section_featured_v2_{$theme}_{$lang}", 1800, function () use ($theme) {
             return view("frontend.{$theme}.partials.featured_products_section")->render();
         });
         return response($html)->header('Content-Type', 'text/html');
@@ -122,7 +127,7 @@ class HomeController extends Controller
     {
         $theme = get_setting('homepage_select');
         $lang  = app()->getLocale();
-        $html  = Cache::remember("section_best_selling_{$theme}_{$lang}", 1800, function () use ($theme) {
+        $html  = Cache::remember("section_best_selling_v2_{$theme}_{$lang}", 1800, function () use ($theme) {
             return view("frontend.{$theme}.partials.best_selling_section")->render();
         });
         return response($html)->header('Content-Type', 'text/html');
@@ -141,7 +146,7 @@ class HomeController extends Controller
     {
         $theme = get_setting('homepage_select');
         $lang  = app()->getLocale();
-        $html  = Cache::remember("section_home_categories_{$theme}_{$lang}", 1800, function () use ($theme) {
+        $html  = Cache::remember("section_home_categories_v2_{$theme}_{$lang}", 1800, function () use ($theme) {
             return view("frontend.{$theme}.partials.home_categories_section")->render();
         });
         return response($html)->header('Content-Type', 'text/html');
@@ -406,7 +411,18 @@ class HomeController extends Controller
             session(['link' => url()->current()]);
         }
 
-        $detailedProduct  = Product::with('reviews', 'brand', 'stocks', 'user', 'user.shop')->where('auction_product', 0)->where('slug', $slug)->where('approved', 1)->first();
+        $detailedProduct  = Product::with([
+            'brand',
+            'stocks.wholesalePrices',
+            'user.shop',
+            'categories',
+            'category',
+        ])->withCount([
+            'reviews as approved_reviews_count' => function ($q) {
+                $q->where('status', 1);
+            },
+            'product_queries as product_queries_count',
+        ])->where('auction_product', 0)->where('slug', $slug)->where('approved', 1)->first();
 
         if ($detailedProduct != null && $detailedProduct->published) {
             if ((get_setting('vendor_system_activation') != 1) && $detailedProduct->added_by == 'seller') {
@@ -422,8 +438,10 @@ class HomeController extends Controller
             }
 
             $product_queries = ProductQuery::where('product_id', $detailedProduct->id)->where('customer_id', '!=', Auth::id())->latest('id')->paginate(3);
-            $total_query = ProductQuery::where('product_id', $detailedProduct->id)->count();
-            $reviews = $detailedProduct->reviews()->where('status', 1)->orderBy('created_at', 'desc')->paginate(3);
+            $total_query = (int) $detailedProduct->product_queries_count;
+            $review_count = (int) $detailedProduct->approved_reviews_count;
+            $reviews = $detailedProduct->reviews()->with('user')->where('status', 1)->orderBy('created_at', 'desc')->paginate(6);
+            $detailedProduct->setRelation('reviews', $reviews->getCollection());
 
             // Pagination using Ajax
             if (request()->ajax()) {
@@ -477,7 +495,23 @@ class HomeController extends Controller
                 \Log::warning('[HomeController] Marketing dispatch failed: ' . $e->getMessage());
             }
 
-            return view('frontend.product_details', compact('detailedProduct', 'product_queries', 'total_query', 'reviews', 'review_status', 'order_id'));
+            $related_category_ids = $detailedProduct->categories->pluck('id')->push($detailedProduct->category_id)->filter()->unique()->values()->all();
+            $related_products = filter_products(Product::where('id', '!=', $detailedProduct->id)
+                ->where(function ($query) use ($related_category_ids) {
+                    $query->whereIn('category_id', $related_category_ids)
+                        ->orWhereHas('categories', function ($categoryQuery) use ($related_category_ids) {
+                            $categoryQuery->whereIn('categories.id', $related_category_ids);
+                        });
+                }))
+                ->with(['brand', 'stocks'])
+                ->limit(12)
+                ->get();
+
+            $choiceAttributeIds = collect(json_decode($detailedProduct->choice_options ?: '[]'))->pluck('attribute_id')->filter()->unique()->all();
+            $choiceAttributes = \App\Models\Attribute::whereIn('id', $choiceAttributeIds)->get()->keyBy('id');
+            $productColors = \App\Models\Color::whereIn('code', json_decode($detailedProduct->colors ?: '[]'))->get()->keyBy('code');
+
+            return view('frontend.product_details', compact('detailedProduct', 'product_queries', 'total_query', 'reviews', 'review_count', 'review_status', 'order_id', 'related_products', 'choiceAttributes', 'productColors'));
         }
         abort(404);
     }

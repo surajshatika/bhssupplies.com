@@ -37,35 +37,32 @@ class SearchController extends Controller
 
         $conditions = [];
 
-        $attributes = Attribute::with('attribute_values')->get();
+        [$attributes, $colors] = \Cache::remember('frontend_listing_filter_counts_v2', 3600, function () {
+            $attributes = Attribute::with('attribute_values')->get();
 
-        foreach ($attributes as $attribute) {
-            $productsQuery = Product::whereJsonContains('attributes', (string) $attribute->id);
-            $productsQuery = filter_products($productsQuery);
-            $filteredProducts = $productsQuery->get();
+            foreach ($attributes as $attribute) {
+                $attribute->product_count = filter_products(
+                    Product::whereJsonContains('attributes', (string) $attribute->id)
+                )->count();
 
-            $attribute->product_count = $filteredProducts->count();
-
-            foreach ($attribute->attribute_values as $value) {
-                $valueQuery = Product::query()
-                    ->where('choice_options', 'like', '%"attribute_id":"' . $attribute->id . '"%')
-                    ->where('choice_options', 'like', '%"' . $value->value . '"%');
-
-                $valueQuery = filter_products($valueQuery);
-
-                $value->product_count = $valueQuery->count();
+                foreach ($attribute->attribute_values as $value) {
+                    $value->product_count = filter_products(
+                        Product::query()
+                            ->where('choice_options', 'like', '%"attribute_id":"' . $attribute->id . '"%')
+                            ->where('choice_options', 'like', '%"' . $value->value . '"%')
+                    )->count();
+                }
             }
-        }
 
+            $colors = Color::all();
+            foreach ($colors as $color) {
+                $color->product_count = filter_products(
+                    Product::where('colors', 'like', '%' . $color->code . '%')
+                )->count();
+            }
 
-        $colors = Color::all();
-        foreach ($colors as $color) {
-            // $color->product_count = Product::where('colors', 'like', '%' . $color->code . '%')
-            // ->count();
-            $productsColor =  Product::where('colors', 'like', '%' . $color->code . '%');
-            $productsColor = filter_products($productsColor);
-            $color->product_count = $productsColor->count();
-        }
+            return [$attributes, $colors];
+        });
 
         // return $colors;
 
@@ -183,54 +180,50 @@ class SearchController extends Controller
         }
         //------------------- category product count start here ----------------------
 
-        $filteredProductIds = filter_products(Product::query())->pluck('id');
+        $categories = \Cache::remember('frontend_listing_categories_with_counts_v2', 3600, function () {
+            $productCountsSubCategory = ProductCategory::select('category_id')
+                ->selectRaw('COUNT(product_id) as count')
+                ->whereIn('product_id', filter_products(Product::query())->select('id'))
+                ->groupBy('category_id')
+                ->pluck('count', 'category_id');
 
-        $productCountsSubCategory = ProductCategory::select('category_id')
-            ->selectRaw('COUNT(product_id) as count')
-            ->whereIn('product_id', $filteredProductIds)
-            ->groupBy('category_id')
-            ->pluck('count', 'category_id');
+            $allCategories = Category::with('childrenCategories', 'coverImage')
+                ->orderBy('order_level', 'desc')
+                ->where('level', 0)
+                ->get();
 
+            foreach ($allCategories as $category1) {
+                $this->categoryProductCount($category1, $productCountsSubCategory);
+            }
 
-        $allCategories = Category::with('childrenCategories', 'coverImage')
-            ->orderBy('order_level', 'desc')
-            ->where('level', 0)
-            ->get();
-
-        foreach ($allCategories as $category1) {
-            $this->categoryProductCount($category1, $productCountsSubCategory);
-        }
-
-        $categories = $allCategories;
+            return $allCategories;
+        });
         // return $categories;
         
        $preorder_categories=[];
        if (addon_is_activated('preorder')) {
             // ################# preorder category start here #################
 
-            $preorder_products = PreorderProduct::where('is_published', 1);
-            $preorder_products_ids = filter_preorder_product($preorder_products)->pluck('id');
+            $preorder_categories = \Cache::remember('frontend_listing_preorder_categories_with_counts_v2', 3600, function () {
+                $preorder_products = PreorderProduct::where('is_published', 1);
 
+                $preorder_productCountsSubCategory = PreorderProductCategory::select('category_id')
+                    ->selectRaw('COUNT(preorder_product_id) as count')
+                    ->whereIn('preorder_product_id', filter_preorder_product($preorder_products)->select('id'))
+                    ->groupBy('category_id')
+                    ->pluck('count', 'category_id');
 
-            //    return $preorder_products_ids;
+                $preorder_allCategories = Category::with('childrenCategories', 'coverImage')
+                    ->orderBy('order_level', 'desc')
+                    ->where('level', 0)
+                    ->get();
 
-            $preorder_productCountsSubCategory = PreorderProductCategory::select('category_id')
-                ->selectRaw('COUNT(preorder_product_id) as count')
-                ->whereIn('preorder_product_id', $preorder_products_ids)
-                ->groupBy('category_id')
-                ->pluck('count', 'category_id');
-            // return $preorder_productCountsSubCategory;
+                foreach ($preorder_allCategories as $category1) {
+                    $this->categoryProductCount($category1, $preorder_productCountsSubCategory);
+                }
 
-            $preorder_allCategories = Category::with('childrenCategories', 'coverImage')
-                ->orderBy('order_level', 'desc')
-                ->where('level', 0)
-                ->get();
-
-            foreach ($preorder_allCategories as $category1) {
-                $this->categoryProductCount($category1, $preorder_productCountsSubCategory);
-            }
-
-            $preorder_categories = $preorder_allCategories;
+                return $preorder_allCategories;
+            });
 
             // return $preorder_categories;
 
@@ -304,7 +297,7 @@ class SearchController extends Controller
             });
         }
 
-        $products = filter_products($products)->with('taxes')->paginate(36)->appends(request()->query());
+        $products = filter_products($products)->with(['taxes', 'brand', 'stocks'])->paginate(36)->appends(request()->query());
         if ($request->ajax()) {
             return view('frontend.product_listing_products', compact('products'));
         }

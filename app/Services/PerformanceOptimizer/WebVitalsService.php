@@ -14,8 +14,11 @@ class WebVitalsService
             if (!in_array($metric, ['LCP', 'FID', 'CLS', 'INP', 'FCP', 'TTFB'])) return false;
 
             $value = (float) ($payload['value'] ?? 0);
+            $url = substr((string) ($payload['url'] ?? ''), 0, 500);
+            if (!$this->shouldRecord($payload, $url, $metric, $value)) return false;
+
             WebVital::create([
-                'url'        => substr((string) ($payload['url']        ?? ''), 0, 500),
+                'url'        => $url,
                 'metric'     => $metric,
                 'value'      => $value,
                 'rating'     => WebVital::ratingFor($metric, $value),
@@ -38,8 +41,11 @@ class WebVitalsService
         foreach ($metrics as $m) {
             $rows = WebVital::where('metric', $m)
                 ->where('created_at', '>=', $since)
+                ->where('url', 'not like', '/admin%')
                 ->orderBy('value')
                 ->pluck('value')
+                ->filter(fn($value) => $this->isReasonableValue($m, (float) $value))
+                ->values()
                 ->all();
             $count = count($rows);
             if ($count === 0) {
@@ -81,8 +87,11 @@ class WebVitalsService
             foreach ($labels as $d) {
                 $rows = WebVital::where('metric', $m)
                     ->whereDate('created_at', $d)
+                    ->where('url', 'not like', '/admin%')
                     ->orderBy('value')
                     ->pluck('value')
+                    ->filter(fn($value) => $this->isReasonableValue($m, (float) $value))
+                    ->values()
                     ->all();
                 if (empty($rows)) {
                     $vals[] = null;
@@ -113,6 +122,7 @@ class WebVitalsService
         try {
             var data = new Blob([JSON.stringify({
                 metric: metric, value: value, url: location.pathname,
+                host: location.hostname,
                 device: device, connection: conn,
                 user_agent: (navigator.userAgent || '').substring(0, 240),
                 _token: csrf
@@ -172,5 +182,31 @@ class WebVitalsService
 })();
 </script>
 JS;
+    }
+
+    protected function shouldRecord(array $payload, string $url, string $metric, float $value): bool
+    {
+        $path = ltrim(parse_url($url, PHP_URL_PATH) ?: $url, '/');
+        if ($path === 'admin' || str_starts_with($path, 'admin/')) return false;
+
+        $host = strtolower((string) ($payload['host'] ?? ''));
+        if (in_array($host, ['localhost', '127.0.0.1', '::1'], true)) return false;
+        if (str_ends_with($host, '.local') || str_ends_with($host, '.test')) return false;
+
+        return $this->isReasonableValue($metric, $value);
+    }
+
+    protected function isReasonableValue(string $metric, float $value): bool
+    {
+        if ($value < 0) return false;
+        $max = [
+            'LCP' => 60000,
+            'FID' => 5000,
+            'CLS' => 5,
+            'INP' => 10000,
+            'FCP' => 60000,
+            'TTFB' => 30000,
+        ];
+        return $value <= ($max[$metric] ?? 60000);
     }
 }

@@ -9,7 +9,10 @@ use App\Services\PerformanceOptimizer\PageCacheService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Exception;
+use Throwable;
 
 class PerformanceCacheController extends Controller
 {
@@ -53,11 +56,28 @@ class PerformanceCacheController extends Controller
         return back();
     }
 
-    public function warm()
+    public function warm(Request $request)
     {
         if ($r = $this->demoBlock()) return $r;
-        $r = $this->service->warmFromSitemap();
-        flash(translate('Cache warmed.') . " {$r['warmed']} / {$r['total']} URLs. {$r['failed']} " . translate('failed.'))->success();
+
+        $max = (int) $request->input('max', 5);
+        $max = max(1, min($max, 20));
+
+        try {
+            $result = $this->service->warmFromSitemap($max);
+            $message = translate('Cache warm completed.') . " {$result['warmed']} / {$result['attempted']} "
+                . translate('URLs warmed.') . " {$result['failed']} " . translate('failed.');
+
+            if (($result['warmed'] ?? 0) > 0) {
+                flash($message)->success();
+            } else {
+                flash($message . ' ' . translate('Please check server connectivity and sitemap URLs.'))->warning();
+            }
+        } catch (Throwable $e) {
+            Log::error('Performance cache warm failed', ['error' => $e->getMessage()]);
+            flash(translate('Cache warm failed. Please check server logs.'))->error();
+        }
+
         return back();
     }
 
@@ -105,14 +125,45 @@ class PerformanceCacheController extends Controller
     public function optimize()
     {
         if ($r = $this->demoBlock()) return $r;
-        try {
-            Artisan::call('config:cache');
-            Artisan::call('route:cache');
-            Artisan::call('view:cache');
-            flash(translate('Laravel optimization cache built (config + route + view).'))->success();
-        } catch (Exception $e) {
-            flash(translate('Optimization failed') . ': ' . $e->getMessage())->error();
+
+        $ok = [];
+        $failed = [];
+
+        foreach ([
+            'config:cache' => translate('Config cache'),
+            'view:cache' => translate('View cache'),
+            'route:cache' => translate('Route cache'),
+        ] as $cmd => $label) {
+            try {
+                Artisan::call($cmd);
+                $ok[] = $label;
+            } catch (Throwable $e) {
+                $failed[$label] = $e->getMessage();
+                Log::warning('Performance optimizer Laravel optimize step failed', [
+                    'command' => $cmd,
+                    'error' => $e->getMessage(),
+                ]);
+
+                if ($cmd === 'route:cache') {
+                    try {
+                        Artisan::call('route:clear');
+                    } catch (Throwable $clearError) {
+                        Log::warning('Route cache clear failed after route:cache failure', [
+                            'error' => $clearError->getMessage(),
+                        ]);
+                    }
+                }
+            }
         }
+
+        if (empty($failed)) {
+            flash(translate('Laravel optimization cache built (config + route + view).'))->success();
+        } elseif (!empty($ok)) {
+            flash(translate('Laravel optimization partially completed.') . ' ' . translate('Failed') . ': ' . implode(', ', array_keys($failed)))->warning();
+        } else {
+            flash(translate('Optimization failed. Please check server logs.'))->error();
+        }
+
         return back();
     }
 
@@ -131,8 +182,8 @@ class PerformanceCacheController extends Controller
         $lines   = [];
         $driver  = (string) get_setting('perf_page_cache_driver', 'file');
 
-        // 1. File / Redis page cache
-        if (in_array($driver, ['file', 'redis'], true)) {
+        // 1. File / Redis / Memcached page cache
+        if (in_array($driver, ['file', 'redis', 'memcached'], true)) {
             $n = $this->service->clearAll();
             $lines[] = translate('Page cache cleared') . ": {$n} " . translate('pages');
         }
@@ -209,5 +260,151 @@ class PerformanceCacheController extends Controller
     public function opcacheStats()
     {
         return response()->json($this->opcache->getStats());
+    }
+
+    public function testUrl(Request $request)
+    {
+        $input = trim((string) $request->input('url', url('/')));
+        $normalized = $this->normalizeTestUrl($input);
+
+        if (!$normalized['ok']) {
+            flash($normalized['message'])->error();
+            return back()->withInput();
+        }
+
+        $url = $normalized['url'];
+        $diagnosis = $this->service->diagnoseUrl($url);
+
+        $first = $this->probeUrl($url);
+        usleep(250000);
+        $second = $this->probeUrl($url);
+
+        return redirect()
+            ->route('performance_optimizer.cache')
+            ->with('cache_test_result', [
+                'url' => $url,
+                'diagnosis' => $diagnosis,
+                'first' => $first,
+                'second' => $second,
+                'tested_at' => now()->format('Y-m-d H:i:s'),
+            ]);
+    }
+
+    public function actionRequiresPost(Request $request)
+    {
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => false,
+                'message' => translate('This action requires a POST request.'),
+            ], 405);
+        }
+
+        flash(translate('Please use the button inside Performance Optimizer. Direct action URLs are disabled for safety.'))->warning();
+        return redirect()->route('performance_optimizer.cache');
+    }
+
+    protected function normalizeTestUrl(string $input): array
+    {
+        if ($input === '') {
+            $input = url('/');
+        }
+
+        if (str_starts_with($input, '/')) {
+            $input = rtrim(url('/'), '/') . '/' . ltrim($input, '/');
+        } elseif (!preg_match('#^https?://#i', $input)) {
+            $input = 'https://' . $input;
+        }
+
+        $host = strtolower((string) parse_url($input, PHP_URL_HOST));
+        if ($host === '') {
+            return ['ok' => false, 'message' => translate('Please enter a valid URL.')];
+        }
+
+        $allowedHosts = array_filter(array_unique([
+            strtolower((string) parse_url(url('/'), PHP_URL_HOST)),
+            strtolower((string) parse_url(config('app.url'), PHP_URL_HOST)),
+        ]));
+
+        $hostAllowed = false;
+        foreach ($allowedHosts as $allowedHost) {
+            if ($host === $allowedHost || $host === 'www.' . $allowedHost || 'www.' . $host === $allowedHost) {
+                $hostAllowed = true;
+                break;
+            }
+        }
+
+        if (!$hostAllowed) {
+            return ['ok' => false, 'message' => translate('Only this store domain can be tested from the cache tester.')];
+        }
+
+        return ['ok' => true, 'url' => $input];
+    }
+
+    protected function probeUrl(string $url): array
+    {
+        $started = microtime(true);
+        $verifyTls = !str_contains($url, 'localhost') && !str_contains($url, '127.0.0.1');
+
+        try {
+            $client = Http::connectTimeout(2)
+                ->timeout(12)
+                ->withOptions(['allow_redirects' => true])
+                ->withHeaders([
+                    'Accept' => 'text/html,application/xhtml+xml',
+                    'User-Agent' => 'BHS-Performance-Optimizer/1.1',
+                ]);
+
+            if (!$verifyTls) {
+                $client = $client->withoutVerifying();
+            }
+
+            $response = $client->get($url);
+            $elapsed = (int) round((microtime(true) - $started) * 1000);
+
+            return [
+                'ok' => true,
+                'status' => $response->status(),
+                'time_ms' => $elapsed,
+                'size_kb' => round(strlen((string) $response->body()) / 1024, 1),
+                'headers' => $this->cacheProbeHeaders($response),
+            ];
+        } catch (Throwable $e) {
+            return [
+                'ok' => false,
+                'status' => null,
+                'time_ms' => (int) round((microtime(true) - $started) * 1000),
+                'size_kb' => 0,
+                'error' => $e->getMessage(),
+                'headers' => [],
+            ];
+        }
+    }
+
+    protected function cacheProbeHeaders($response): array
+    {
+        $headers = [];
+        foreach ([
+            'x-performance-cache',
+            'x-litespeed-cache',
+            'x-litespeed-cache-control',
+            'cf-cache-status',
+            'cache-control',
+            'age',
+            'server',
+            'content-type',
+            'location',
+        ] as $key) {
+            $value = $response->header($key);
+            if ($value !== null && $value !== '') {
+                $headers[$key] = is_array($value) ? implode(', ', $value) : (string) $value;
+            }
+        }
+
+        $setCookie = $response->header('set-cookie');
+        if ($setCookie) {
+            $headers['set-cookie'] = is_array($setCookie) ? count($setCookie) . ' cookies' : 'present';
+        }
+
+        return $headers;
     }
 }

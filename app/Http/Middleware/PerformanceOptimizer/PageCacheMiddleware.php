@@ -20,6 +20,10 @@ class PageCacheMiddleware
 
     public function handle(Request $request, Closure $next)
     {
+        if ((int) get_setting('perf_status', 1) !== 1) {
+            return $next($request);
+        }
+
         $driver = (string) get_setting('perf_page_cache_driver', 'file');
 
         // ── LiteSpeed Cache driver ────────────────────────────────────────────
@@ -27,9 +31,10 @@ class PageCacheMiddleware
         // PHP only needs to set the correct X-LiteSpeed-Cache-Control headers.
         if ($driver === 'litespeed' && (int) get_setting('perf_page_cache_status', 0) === 1) {
             $response = $next($request);
-            if ($this->isCacheable($response) && $this->cache->shouldCache($request)) {
+            if ($this->cache->shouldCache($request) && $this->isLiteSpeedCacheable($response)) {
                 $ttlMinutes = $this->cache->ttlMinutesFor($request);
                 $ttlSeconds = $ttlMinutes * 60;
+                $response->setContent($this->cache->prepareHtmlForSharedCache((string) $response->getContent()));
                 // LSCache header — tells LiteSpeed server to cache this page
                 $response->headers->set('X-LiteSpeed-Cache-Control', "public,max-age={$ttlSeconds}");
                 $response->headers->set('X-LiteSpeed-Vary', 'value=cookie[currency_code],value=cookie[locale_code]');
@@ -52,7 +57,7 @@ class PageCacheMiddleware
             // Expose BYPASS header on GET HTML responses so admins can verify cache-rule wiring
             if ((int) get_setting('perf_page_cache_status', 0) === 1
                 && $request->isMethod('GET')
-                && method_exists($response, 'headers')
+                && isset($response->headers)
                 && stripos((string) $response->headers->get('Content-Type', ''), 'text/html') !== false
                 && !$response->headers->has('X-Performance-Cache')
             ) {
@@ -63,16 +68,14 @@ class PageCacheMiddleware
 
         $url = $request->fullUrl();
 
-        if ($this->cache->has($url, $request)) {
-            $cached = $this->cache->get($url, $request);
-            if ($cached !== null) {
-                $sMageAge = $this->cache->ttlMinutesFor($request) * 60;
-                return response($cached, 200)
-                    ->header('Content-Type', 'text/html; charset=UTF-8')
-                    ->header('X-Performance-Cache', 'HIT')
-                    ->header('Cache-Control', "public, max-age=0, s-maxage={$sMageAge}, stale-while-revalidate=60")
-                    ->header('Vary', 'Accept-Encoding');
-            }
+        $cached = $this->cache->get($url, $request);
+        if ($cached !== null) {
+            $sMageAge = $this->cache->ttlMinutesFor($request) * 60;
+            return response($cached, 200)
+                ->header('Content-Type', 'text/html; charset=UTF-8')
+                ->header('X-Performance-Cache', 'HIT')
+                ->header('Cache-Control', "public, max-age=0, s-maxage={$sMageAge}, stale-while-revalidate=60")
+                ->header('Vary', 'Accept-Encoding');
         }
 
         /** @var \Symfony\Component\HttpFoundation\Response $response */
@@ -116,6 +119,12 @@ class PageCacheMiddleware
             $sessionCookieName = config('session.cookie', 'laravel_session');
             $rememberCookieName = 'remember_web';
             foreach ($headers->all('Set-Cookie') as $cookieHeader) {
+                // First-party analytics cookies are generated per visitor but page cache stores
+                // only HTML content, not response headers, so they must not prevent cache fill.
+                if (str_starts_with($cookieHeader, 'mm_') || str_starts_with($cookieHeader, 'XSRF-TOKEN=')) {
+                    continue;
+                }
+
                 // Block if any Set-Cookie is NOT the plain session token (e.g. auth, cart, remember_me)
                 if (!str_starts_with($cookieHeader, $sessionCookieName . '=')
                     && !str_starts_with($cookieHeader, $rememberCookieName . '_')
@@ -130,7 +139,31 @@ class PageCacheMiddleware
         }
 
         $cc = strtolower((string) $headers->get('Cache-Control', ''));
-        if (str_contains($cc, 'no-store') || str_contains($cc, 'private') || str_contains($cc, 'no-cache')) {
+        if (str_contains($cc, 'no-store')) {
+            return false;
+        }
+
+        $contentType = (string) $headers->get('Content-Type', '');
+        if (stripos($contentType, 'text/html') === false) {
+            return false;
+        }
+
+        $body = (string) $response->getContent();
+        if (strlen($body) < 200) {
+            return false;
+        }
+
+        return true;
+    }
+
+    protected function isLiteSpeedCacheable($response): bool
+    {
+        if (!method_exists($response, 'getStatusCode') || $response->getStatusCode() !== 200) {
+            return false;
+        }
+
+        $headers = $response->headers;
+        if ($headers->get('X-Performance-Cache') === 'BYPASS') {
             return false;
         }
 

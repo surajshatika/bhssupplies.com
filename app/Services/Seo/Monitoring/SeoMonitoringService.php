@@ -9,6 +9,8 @@ use App\Models\SeoKeyword;
 use App\Models\SeoMeta;
 use App\Models\SeoRun;
 use App\Models\SeoScoreHistory;
+use App\Services\Seo\Board\AiSeoBoardService;
+use App\Services\Seo\Budget\SeoBudgetGuard;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -45,6 +47,59 @@ class SeoMonitoringService
             'keyword_movers'=> $this->keywordMovers(),
             'broken_links'  => $this->brokenLinkSummary(),
             'score_buckets' => $this->scoreBuckets(),
+            'autopilot'     => $this->autopilotHealth(),
+        ];
+    }
+
+    protected function autopilotHealth(): array
+    {
+        $enabled = (int) get_setting('seo_auto_seo_enabled', 1) === 1;
+        $batchSize = (int) get_setting('seo_auto_seo_batch_size', 10);
+        $breakdown = [];
+        $pendingTotal = 0;
+        $activeBatch = null;
+        $recentFailureCount = 0;
+
+        try {
+            if (Schema::hasTable('seo_meta')) {
+                $breakdown = app(AiSeoBoardService::class)->pendingBreakdownByType(['product', 'category', 'page']);
+                $pendingTotal = collect($breakdown)->sum('pending');
+            }
+            if (Schema::hasTable('seo_fix_batches')) {
+                $activeBatch = SeoFixBatch::query()
+                    ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
+                    ->latest()
+                    ->first();
+                $recentFailureCount = SeoFixBatch::query()
+                    ->where('created_at', '>=', now()->subDays(7))
+                    ->whereIn('status', [SeoFixBatch::STATUS_FAILED, SeoFixBatch::STATUS_CANCELLED])
+                    ->count();
+            }
+        } catch (Throwable $e) {
+            $breakdown = [];
+        }
+
+        $budget = app(SeoBudgetGuard::class);
+        $cap = $budget->dailyCapUsd();
+        $spent = round($budget->spendToday(), 4);
+
+        return [
+            'enabled' => $enabled,
+            'batch_size' => $batchSize,
+            'pending_total' => $pendingTotal,
+            'days_to_completion' => $batchSize > 0 ? (int) ceil($pendingTotal / $batchSize) : null,
+            'active_batch' => $activeBatch ? [
+                'id' => $activeBatch->id,
+                'status' => $activeBatch->status,
+                'percent' => $activeBatch->progressPercent(),
+                'processed' => $activeBatch->processed,
+                'total' => $activeBatch->total,
+            ] : null,
+            'recent_failure_count' => $recentFailureCount,
+            'budget_cap' => $cap,
+            'spent_today' => $spent,
+            'remaining_today' => $cap > 0 ? round($budget->remainingUsd(), 4) : null,
+            'breakdown' => $breakdown,
         ];
     }
 

@@ -10,6 +10,8 @@ use App\Models\SeoScoreHistory;
 use App\Services\Seo\Optimization\OptimizationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 
 class OptimizationController extends Controller
 {
@@ -26,8 +28,20 @@ class OptimizationController extends Controller
         $dashboard = $setupRequired
             ? ['current_score' => 0, 'current_grade' => 'N/A', 'trend' => [], 'average_score' => 0, 'provider' => 'aggregate']
             : app(OptimizationService::class)->buildScoreDashboard(['project_id' => $project->id]);
+        $settings = $this->loadOptimizationSettings();
+        $optimizationDashboard = $this->buildOptimizationDashboard($runs, $redirects, $histories, $dashboard, $settings);
 
-        return view('backend.seo.optimization.index', compact('project', 'features', 'runs', 'redirects', 'histories', 'dashboard', 'setupRequired'));
+        return view('backend.seo.optimization.index', compact(
+            'project',
+            'features',
+            'runs',
+            'redirects',
+            'histories',
+            'dashboard',
+            'setupRequired',
+            'settings',
+            'optimizationDashboard'
+        ));
     }
 
     public function run(Request $request)
@@ -111,6 +125,161 @@ class OptimizationController extends Controller
 
         flash(translate('Redirect saved successfully'))->success();
         return redirect()->route('admin.seo_optimization.index');
+    }
+
+    protected function loadOptimizationSettings(): array
+    {
+        return [
+            'master_automation_enabled' => (int) get_setting('seo_master_automation_enabled', 1),
+            'auto_optimization_enabled' => (int) get_setting('seo_auto_optimization_enabled', 1),
+            'auto_seo_enabled' => (int) get_setting('seo_auto_seo_enabled', 1),
+            'auto_seo_batch_size' => (int) get_setting('seo_auto_seo_batch_size', 10),
+            'auto_offpage_enabled' => (int) get_setting('seo_auto_offpage_enabled', 1),
+            'auto_offpage_batch_size' => (int) get_setting('seo_auto_offpage_batch_size', 3),
+            'auto_indexnow' => (int) get_setting('seo_auto_indexnow', 0),
+            'indexnow_key' => get_setting('seo_indexnow_key', config('seo.indexnow.key')),
+            'search_console_site' => get_setting('seo_search_console_site', config('seo.search_console.site_url')),
+            'gsc_refresh_token' => get_setting('seo_gsc_refresh_token'),
+            'pagespeed_api_key' => get_setting('seo_pagespeed_api_key'),
+            'enable_minify' => (int) get_setting('seo_optimization_minify', 0),
+            'enable_lazyload' => (int) get_setting('seo_optimization_lazyload', 0),
+            'cloudflare_api_token' => get_setting('seo_cloudflare_api_token'),
+            'cloudflare_zone_id' => get_setting('seo_cloudflare_zone_id'),
+            'auto_cloudflare_purge' => (int) get_setting('seo_auto_cloudflare_purge', 0),
+            'openai_api_key' => env('OPENAI_API_KEY') ?? get_setting('seo_openai_api_key'),
+            'anthropic_api_key' => env('ANTHROPIC_API_KEY') ?? get_setting('seo_anthropic_api_key'),
+            'gemini_api_key' => env('GEMINI_API_KEY') ?? get_setting('seo_gemini_api_key'),
+            'grok_api_key' => env('GROK_API_KEY') ?? get_setting('seo_grok_api_key'),
+        ];
+    }
+
+    protected function buildOptimizationDashboard($runs, $redirects, $histories, array $dashboard, array $settings): array
+    {
+        $runs = collect($runs);
+        $redirects = collect($redirects);
+        $histories = collect($histories);
+
+        $files = [
+            'sitemap' => $this->fileHealth('Smart Sitemap', base_path('sitemap.xml'), 'la-sitemap', 'admin.seo-suite.sitemap', 'post'),
+            'robots' => $this->fileHealth('Robots.txt', public_path('robots.txt'), 'la-robot', 'admin.seo-suite.robots', 'post'),
+            'llms' => $this->fileHealth('LLMs.txt', public_path('llms.txt'), 'la-file-code', 'admin.seo-suite.llms_txt', 'post'),
+            'rss' => $this->fileHealth('RSS Feed', public_path('rss.xml'), 'la-rss', 'admin.seo-suite.rss', 'post'),
+        ];
+
+        $totalRuns = $runs->count();
+        $completedRuns = $runs->where('status', 'completed')->count();
+        $failedRuns = $runs->where('status', 'failed')->count();
+        $queuedRuns = $runs->whereIn('status', ['queued', 'processing', 'running'])->count();
+        $successRate = $totalRuns > 0 ? (int) round(($completedRuns / $totalRuns) * 100) : 100;
+
+        $providersConfigured = collect([
+            $settings['openai_api_key'] ?? null,
+            $settings['anthropic_api_key'] ?? null,
+            $settings['gemini_api_key'] ?? null,
+            $settings['grok_api_key'] ?? null,
+        ])->filter()->count();
+
+        $readinessParts = [
+            $files['sitemap']['exists'] ? 15 : 0,
+            $files['robots']['exists'] ? 12 : 0,
+            $files['llms']['exists'] ? 10 : 0,
+            $files['rss']['exists'] ? 8 : 0,
+            !empty($settings['indexnow_key']) ? 10 : 0,
+            !empty($settings['gsc_refresh_token']) ? 12 : 0,
+            !empty($settings['pagespeed_api_key']) ? 10 : 0,
+            !empty($settings['enable_minify']) ? 6 : 0,
+            !empty($settings['enable_lazyload']) ? 6 : 0,
+            !empty($settings['master_automation_enabled']) ? 11 : 0,
+        ];
+
+        $actions = [];
+        if (empty($settings['master_automation_enabled'])) {
+            $actions[] = $this->optimizationAction('critical', 'la-bolt', 'Enable master hourly automation', 'Turn on the master SEO automation command so cron can run pending SEO every hour.', 'admin.seo-suite.settings.view');
+        }
+        foreach ($files as $file) {
+            if (!$file['exists']) {
+                $actions[] = $this->optimizationAction('high', $file['icon'], 'Generate ' . $file['label'], 'Required technical SEO artifact is missing.', $file['route'], $file['method']);
+            } elseif (($file['age_days'] ?? 0) > 7) {
+                $actions[] = $this->optimizationAction('medium', $file['icon'], 'Refresh ' . $file['label'], 'Last generated ' . $file['age_days'] . ' days ago.', $file['route'], $file['method']);
+            }
+        }
+        if (empty($settings['indexnow_key'])) {
+            $actions[] = $this->optimizationAction('high', 'la-bolt', 'Generate IndexNow key', 'Required for instant URL discovery on Bing/Yandex.', 'admin.seo-suite.indexnow.generate_key', 'post');
+        }
+        if (empty($settings['gsc_refresh_token'])) {
+            $actions[] = $this->optimizationAction('high', 'la-chart-line', 'Connect Search Console', 'Unlock query, click, impression, and coverage automation.', 'admin.seo-suite.settings.view');
+        }
+        if (empty($settings['pagespeed_api_key'])) {
+            $actions[] = $this->optimizationAction('medium', 'la-tachometer-alt', 'Add PageSpeed API key', 'Enable scheduled Core Web Vitals checks.', 'admin.seo-suite.settings.view');
+        }
+        if (empty($settings['enable_minify']) || empty($settings['enable_lazyload'])) {
+            $actions[] = $this->optimizationAction('medium', 'la-compress-arrows-alt', 'Enable performance switches', 'Minify and lazy-load settings improve crawl and Core Web Vitals readiness.', 'admin.seo-suite.settings.view');
+        }
+        if ($failedRuns > 0) {
+            $actions[] = $this->optimizationAction('medium', 'la-exclamation-circle', 'Review failed optimization runs', $failedRuns . ' recent optimization task(s) failed.', 'admin.seo-suite.revisions');
+        }
+
+        $actions = collect($actions)->sortBy(fn($action) => [
+            'critical' => 0,
+            'high' => 1,
+            'medium' => 2,
+            'low' => 3,
+        ][$action['severity']] ?? 4)->take(6)->values()->all();
+
+        return [
+            'technical_readiness' => min(100, array_sum($readinessParts)),
+            'success_rate' => $successRate,
+            'failed_runs' => $failedRuns,
+            'queued_runs' => $queuedRuns,
+            'providers_configured' => $providersConfigured,
+            'active_redirects' => Schema::hasTable('seo_redirects') ? SeoRedirect::query()->where('is_active', true)->count() : $redirects->where('is_active', true)->count(),
+            'history_count' => $histories->count(),
+            'files' => $files,
+            'actions' => $actions,
+            'automation' => [
+                'master_enabled' => !empty($settings['master_automation_enabled']),
+                'technical_enabled' => !empty($settings['auto_optimization_enabled']),
+                'onpage_enabled' => !empty($settings['auto_seo_enabled']),
+                'offpage_enabled' => !empty($settings['auto_offpage_enabled']),
+                'auto_indexnow' => !empty($settings['auto_indexnow']),
+                'cron_command' => 'php artisan seo:automation-run',
+                'dry_run_command' => 'php artisan seo:automation-run --dry-run',
+                'scheduler_cron' => '* * * * * cd ' . base_path() . ' && php artisan schedule:run >> /dev/null 2>&1',
+                'direct_hourly_cron' => '0 * * * * cd ' . base_path() . ' && php artisan seo:automation-run >> storage/logs/seo-automation.log 2>&1',
+                'onpage_batch_size' => (int) ($settings['auto_seo_batch_size'] ?? 10),
+                'offpage_batch_size' => (int) ($settings['auto_offpage_batch_size'] ?? 3),
+            ],
+            'local_targets' => [
+                'primary' => ['Mississauga', 'Brampton', 'Toronto'],
+                'secondary' => ['Etobicoke', 'Vaughan', 'Oakville', 'Scarborough', 'Markham', 'North York', 'Burlington'],
+                'conversion' => ['Trade Account', 'Leave a Review'],
+            ],
+            'current_score' => (int) ($dashboard['current_score'] ?? 0),
+            'current_grade' => $dashboard['current_grade'] ?? 'N/A',
+        ];
+    }
+
+    protected function fileHealth(string $label, string $path, string $icon, string $route, string $method = 'get'): array
+    {
+        $exists = File::exists($path);
+        $updatedAt = $exists ? File::lastModified($path) : null;
+
+        return [
+            'label' => $label,
+            'icon' => $icon,
+            'route' => $route,
+            'method' => $method,
+            'exists' => $exists,
+            'size' => $exists ? File::size($path) : 0,
+            'updated_at' => $updatedAt ? date('M d, Y H:i', $updatedAt) : null,
+            'age_days' => $updatedAt ? now()->diffInDays(\Carbon\Carbon::createFromTimestamp($updatedAt)) : null,
+            'path' => $path,
+        ];
+    }
+
+    protected function optimizationAction(string $severity, string $icon, string $title, string $detail, string $route, string $method = 'get'): array
+    {
+        return compact('severity', 'icon', 'title', 'detail', 'route', 'method');
     }
 
     /**

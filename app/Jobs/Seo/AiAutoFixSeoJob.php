@@ -3,6 +3,8 @@
 namespace App\Jobs\Seo;
 
 use App\Models\SeoFixBatch;
+use App\Services\Seo\Optimization\Features\IndexNowService;
+use App\Services\Seo\Optimization\Features\SmartSitemapService;
 use App\Services\Seo\Board\AiSeoBoardService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -54,6 +56,7 @@ class AiAutoFixSeoJob implements ShouldQueue
         ]);
 
         $perEntityCost = $this->perEntityCost($batch);
+        $optimizedUrls = [];
 
         for ($i = $batch->processed; $i < $total; $i++) {
             // Re-read every 5 entities so an admin's "Cancel" click is picked up.
@@ -87,6 +90,10 @@ class AiAutoFixSeoJob implements ShouldQueue
                 } else {
                     $batch->succeeded++;
                     $batch->actual_cost_usd = round((float) $batch->actual_cost_usd + $perEntityCost, 4);
+                    $url = $result['row']['url'] ?? null;
+                    if ($url) {
+                        $optimizedUrls[] = $url;
+                    }
                 }
             } catch (Throwable $e) {
                 $batch->failed++;
@@ -108,6 +115,8 @@ class AiAutoFixSeoJob implements ShouldQueue
             'current_label' => null,
             'completed_at'  => Carbon::now(),
         ]);
+
+        $this->runPostOptimizationActions($optimizedUrls, $batch);
     }
 
     public function failed(Throwable $exception): void
@@ -128,5 +137,30 @@ class AiAutoFixSeoJob implements ShouldQueue
             return 0.0;
         }
         return (float) $batch->estimated_cost_usd / $batch->total;
+    }
+
+    protected function runPostOptimizationActions(array $optimizedUrls, SeoFixBatch $batch): void
+    {
+        if (empty($optimizedUrls)) {
+            return;
+        }
+
+        try {
+            app(SmartSitemapService::class)->handle(['persist' => true, 'base_url' => url('/')]);
+        } catch (Throwable $e) {
+            $batch->appendError('Post-action sitemap refresh failed: ' . $e->getMessage());
+            logger()->warning('SEO post-action sitemap refresh failed', ['batch' => $batch->id, 'err' => $e->getMessage()]);
+        }
+
+        if ((int) get_setting('seo_auto_indexnow', 0) !== 1) {
+            return;
+        }
+
+        try {
+            app(IndexNowService::class)->handle(['urls' => array_values(array_unique($optimizedUrls))]);
+        } catch (Throwable $e) {
+            $batch->appendError('Post-action IndexNow failed: ' . $e->getMessage());
+            logger()->warning('SEO post-action IndexNow failed', ['batch' => $batch->id, 'err' => $e->getMessage()]);
+        }
     }
 }

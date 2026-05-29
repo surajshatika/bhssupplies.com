@@ -50,6 +50,8 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 {{-- Top stats --}}
 <div class="row gutters-8 mb-3">
     <div class="col-6 col-md-3 col-xl-2 mb-2">
@@ -86,6 +88,47 @@
         <div class="mon-stat">
             <div class="num">{{ number_format($totals['entities_scored']) }}</div>
             <div class="label">{{ translate('Entities scored') }}</div>
+        </div>
+    </div>
+</div>
+
+{{-- Autopilot health --}}
+@php $auto = $data['autopilot'] ?? []; @endphp
+<div class="mon-card mb-3">
+    <div class="mon-card-head">
+        <span><i class="las la-bolt mr-1"></i>{{ translate('Autopilot Health') }}</span>
+        <div>
+            <a href="{{ route('admin.seo-suite.index') }}" class="btn btn-xs btn-soft-primary">{{ translate('Suite') }}</a>
+            <a href="{{ route('admin.seo.ai_board.index', ['missing' => 'meta', 'sort' => 'score_asc']) }}" class="btn btn-xs btn-soft-danger ml-1">{{ translate('Pending Board') }}</a>
+        </div>
+    </div>
+    <div class="mon-card-body">
+        <div class="row gutters-8">
+            <div class="col-md-3 mb-2 mb-md-0">
+                <div class="kv-row"><span class="k">{{ translate('Status') }}</span><span class="{{ !empty($auto['enabled']) ? 'text-success' : 'text-warning' }}">{{ !empty($auto['enabled']) ? translate('Enabled') : translate('Disabled') }}</span></div>
+                <div class="kv-row"><span class="k">{{ translate('Batch size') }}</span><span>{{ $auto['batch_size'] ?? 10 }}</span></div>
+            </div>
+            <div class="col-md-3 mb-2 mb-md-0">
+                <div class="kv-row"><span class="k">{{ translate('Pending') }}</span><span class="text-danger font-weight-600">{{ $auto['pending_total'] ?? 0 }}</span></div>
+                <div class="kv-row"><span class="k">{{ translate('Forecast') }}</span><span>{{ $auto['days_to_completion'] ?? '-' }} {{ translate('days') }}</span></div>
+            </div>
+            <div class="col-md-3 mb-2 mb-md-0">
+                <div class="kv-row"><span class="k">{{ translate('Budget spent') }}</span><span>${{ number_format($auto['spent_today'] ?? 0, 4) }}</span></div>
+                <div class="kv-row"><span class="k">{{ translate('Daily cap') }}</span><span>{{ ($auto['budget_cap'] ?? 0) > 0 ? '$'.number_format($auto['budget_cap'], 2) : translate('No cap') }}</span></div>
+            </div>
+            <div class="col-md-3">
+                <div class="kv-row">
+                    <span class="k">{{ translate('Active batch') }}</span>
+                    <span>
+                        @if(!empty($auto['active_batch']))
+                            #{{ $auto['active_batch']['id'] }} {{ $auto['active_batch']['status'] }} {{ $auto['active_batch']['percent'] }}%
+                        @else
+                            {{ translate('None') }}
+                        @endif
+                    </span>
+                </div>
+                <div class="kv-row"><span class="k">{{ translate('7d failed/cancelled') }}</span><span>{{ $auto['recent_failure_count'] ?? 0 }}</span></div>
+            </div>
         </div>
     </div>
 </div>

@@ -15,6 +15,8 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 <div class="row">
     <div class="col-lg-4">
         <div class="card">

@@ -69,6 +69,7 @@ return [
 
     'features' => [
         'on_page' => [
+            'local_onpage_blueprint' => 'Local On-Page Blueprint',
             'meta_tags'           => 'Meta Title & Description Generator',
             'keyword_density'     => 'Focus Keyword Density Analyzer',
             'content_writer'      => 'SEO Content / Article Writer',
@@ -84,6 +85,7 @@ return [
             'image_seo'           => 'Image SEO Optimizer',
         ],
         'off_page' => [
+            'ai_backlink_campaign'=> 'AI Backlink Campaign Generator',
             'backlink_outreach'   => 'Backlink Outreach Email Generator',
             'guest_post_topics'   => 'Guest Post Topic Generator',
             'guest_post_article'  => 'Guest Post Full Article Writer',
@@ -93,6 +95,7 @@ return [
         ],
         'optimization' => [
             'page_speed'          => 'Page Speed Analyzer & Fixer',
+            'technical_refresh'   => 'Automated Technical Refresh',
             'technical_audit'     => 'Technical SEO Audit',
             'competitor_gap'      => 'Competitor Keyword Gap Analyzer',
             'smart_sitemap'       => 'Smart XML Sitemap Generator',

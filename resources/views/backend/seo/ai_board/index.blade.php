@@ -65,6 +65,13 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
+<div class="alert alert-info py-2 small">
+    <i class="las la-shield-alt mr-1"></i>
+    {{ translate('Protection active: completed SEO URLs are not selected by autopilot. Use filters or selected rows only when you intentionally want to review specific URLs.') }}
+</div>
+
 {{-- Stat row --}}
 <div class="row gutters-8 mb-3">
     <div class="col-6 col-md-3 col-xl mb-2">

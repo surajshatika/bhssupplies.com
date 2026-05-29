@@ -29,6 +29,16 @@
     $runsFailed     = $runs->where('status', 'failed')->count();
     $runsQueued     = $runs->where('status', 'queued')->count();
     $runsTotal      = $runs->count();
+    $advancedDashboard = $advancedDashboard ?? [];
+    $advancedActions   = $advancedDashboard['actions'] ?? [];
+    $advancedFiles     = $advancedDashboard['files'] ?? [];
+    $providerHealth    = $advancedDashboard['providers'] ?? [];
+    $automationReady   = $advancedDashboard['automation_readiness'] ?? 0;
+    $successRate       = $advancedDashboard['success_rate'] ?? 0;
+    $trendDelta        = $advancedDashboard['trend_delta'] ?? 0;
+    $riskLevel         = $advancedDashboard['risk_level'] ?? 'high';
+    $competitorCount   = count(array_filter(array_map('trim', preg_split('/[\r\n,]+/', (string) ($settings['competitor_urls'] ?? '')))));
+    $offpageAutoOn     = !empty($settings['auto_offpage_enabled']);
 @endphp
 
 <style>
@@ -44,6 +54,15 @@
 .module-card.off-page  { border-color: #1cc88a; }
 .module-card.optim     { border-color: #36b9cc; }
 .notification-item { border-left: 3px solid #4e73df; }
+.advanced-metric { min-height: 108px; border: 1px solid #edf0f5; border-radius: 8px; padding: 16px; background: #fff; }
+.advanced-metric .metric-value { font-size: 1.65rem; font-weight: 700; line-height: 1; }
+.advanced-action { border: 1px solid #edf0f5; border-left-width: 4px; border-radius: 8px; padding: 12px; background: #fff; }
+.advanced-action.critical { border-left-color: #e74a3b; }
+.advanced-action.high { border-left-color: #f6c23e; }
+.advanced-action.medium { border-left-color: #36b9cc; }
+.advanced-action.low { border-left-color: #858796; }
+.seo-file-health { border: 1px solid #edf0f5; border-radius: 8px; padding: 12px; height: 100%; }
+.seo-status-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 </style>
 
 <div class="mm-hero mm-hero--seo">
@@ -66,12 +85,17 @@
             <a href="{{ route('admin.seo-suite.ai_assistant') }}" class="mm-btn mm-btn-light">
                 <i class="las la-robot"></i> {{ translate('AI Assistant') }}
             </a>
+            <a href="{{ route('admin.seo.ai_board.index') }}" class="mm-btn mm-btn-light">
+                <i class="las la-brain"></i> {{ translate('AI Board') }}
+            </a>
             <a href="{{ route('admin.seo-suite.settings.view') }}" class="mm-btn mm-btn-ghost">
                 <i class="las la-cog"></i> {{ translate('Settings') }}
             </a>
         </div>
     </div>
 </div>
+
+@include('backend.seo.partials.suite_nav')
 
 @if(!empty($setupRequired))
 <div class="alert alert-warning d-flex align-items-center">
@@ -184,6 +208,557 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+{{-- ADVANCED COMMAND CENTER --}}
+<div class="card mb-4">
+    <div class="card-header d-flex flex-wrap align-items-center justify-content-between">
+        <div>
+            <h5 class="mb-0 h6">{{ translate('Advanced SEO Command Center') }}</h5>
+            <small class="text-muted">{{ translate('Automation readiness, run quality, technical file health, and priority actions in one view.') }}</small>
+        </div>
+        <span class="badge badge-{{ $riskLevel === 'low' ? 'success' : ($riskLevel === 'medium' ? 'warning' : 'danger') }} text-uppercase">
+            {{ translate('Risk') }}: {{ translate(ucfirst($riskLevel)) }}
+        </span>
+    </div>
+    <div class="card-body">
+        <div class="row gutters-16 mb-4">
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="advanced-metric">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <span class="text-muted small">{{ translate('Automation Readiness') }}</span>
+                        <i class="las la-rocket text-primary la-lg"></i>
+                    </div>
+                    <div class="metric-value text-primary mt-3">{{ $automationReady }}%</div>
+                    <div class="progress mt-3" style="height:6px;">
+                        <div class="progress-bar bg-primary" style="width:{{ $automationReady }}%;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="advanced-metric">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <span class="text-muted small">{{ translate('Run Success Rate') }}</span>
+                        <i class="las la-check-double text-success la-lg"></i>
+                    </div>
+                    <div class="metric-value text-success mt-3">{{ $successRate }}%</div>
+                    <small class="text-muted">{{ $runsCompleted }} {{ translate('completed') }} / {{ $runsTotal }} {{ translate('recent') }}</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="advanced-metric">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <span class="text-muted small">{{ translate('Score Momentum') }}</span>
+                        <i class="las la-chart-line text-info la-lg"></i>
+                    </div>
+                    <div class="metric-value mt-3 {{ $trendDelta >= 0 ? 'text-success' : 'text-danger' }}">
+                        {{ $trendDelta >= 0 ? '+' : '' }}{{ $trendDelta }}
+                    </div>
+                    <small class="text-muted">{{ translate('points across recent history') }}</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="advanced-metric">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <span class="text-muted small">{{ translate('Average Run Time') }}</span>
+                        <i class="las la-stopwatch text-warning la-lg"></i>
+                    </div>
+                    <div class="metric-value text-warning mt-3">
+                        @if(!is_null($advancedDashboard['avg_duration'] ?? null))
+                            {{ $advancedDashboard['avg_duration'] }}s
+                        @else
+                            -
+                        @endif
+                    </div>
+                    <small class="text-muted">{{ translate('from completed timed runs') }}</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="row gutters-16">
+            <div class="col-lg-5 mb-3 mb-lg-0">
+                <h6 class="font-weight-600 mb-3">{{ translate('Priority Action Queue') }}</h6>
+                @forelse($advancedActions as $action)
+                    <div class="advanced-action {{ $action['severity'] }} mb-2">
+                        <div class="d-flex align-items-start">
+                            <i class="las {{ $action['icon'] }} la-lg mr-2 text-primary"></i>
+                            <div class="flex-grow-1">
+                                <div class="d-flex align-items-center justify-content-between">
+                                    <strong class="small">{{ translate($action['title']) }}</strong>
+                                    <span class="badge badge-soft-secondary text-uppercase">{{ translate($action['severity']) }}</span>
+                                </div>
+                                <p class="small text-muted mb-2">{{ translate($action['detail']) }}</p>
+                                @if(($action['method'] ?? 'get') === 'post')
+                                    <form action="{{ route($action['route']) }}" method="POST" class="d-inline">
+                                        @csrf
+                                        <button class="btn btn-xs btn-soft-primary">{{ translate('Run Now') }}</button>
+                                    </form>
+                                @else
+                                    <a href="{{ route($action['route'], $action['params'] ?? []) }}" class="btn btn-xs btn-soft-primary">{{ translate('Open') }}</a>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                @empty
+                    <div class="text-center text-success py-4 border rounded">
+                        <i class="las la-check-circle la-2x d-block mb-2"></i>
+                        <span class="small">{{ translate('No urgent SEO actions detected.') }}</span>
+                    </div>
+                @endforelse
+            </div>
+            <div class="col-lg-7">
+                <div class="row gutters-12">
+                    <div class="col-md-5 mb-3">
+                        <h6 class="font-weight-600 mb-3">{{ translate('AI Provider Readiness') }}</h6>
+                        @foreach($providerHealth as $provider => $ready)
+                            <div class="d-flex align-items-center justify-content-between mb-2">
+                                <span class="small text-uppercase">{{ $provider }}</span>
+                                <span class="badge badge-{{ $ready ? 'success' : 'secondary' }}">
+                                    {{ $ready ? translate('Ready') : translate('Missing Key') }}
+                                </span>
+                            </div>
+                        @endforeach
+                        <a href="{{ route('admin.seo-suite.settings.view') }}" class="btn btn-xs btn-soft-primary mt-2">
+                            <i class="las la-sliders-h mr-1"></i>{{ translate('Manage Providers') }}
+                        </a>
+                    </div>
+                    <div class="col-md-7">
+                        <h6 class="font-weight-600 mb-3">{{ translate('Technical File Health') }}</h6>
+                        <div class="row gutters-8">
+                            @foreach($advancedFiles as $file)
+                                <div class="col-sm-6 mb-2">
+                                    <div class="seo-file-health">
+                                        <div class="d-flex align-items-center justify-content-between">
+                                            <div>
+                                                <i class="las {{ $file['icon'] }} mr-1 text-primary"></i>
+                                                <strong class="small">{{ translate($file['label']) }}</strong>
+                                            </div>
+                                            <span class="seo-status-dot bg-{{ $file['exists'] ? 'success' : 'danger' }}"></span>
+                                        </div>
+                                        <div class="small text-muted mt-2">
+                                            @if($file['exists'])
+                                                {{ number_format(($file['size'] ?? 0) / 1024, 1) }} KB
+                                                <span class="d-block">{{ $file['updated_at'] }}</span>
+                                            @else
+                                                {{ translate('Not generated') }}
+                                            @endif
+                                        </div>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{-- SEO AUTOPILOT CENTER --}}
+<div class="card mb-4">
+    <div class="card-header d-flex flex-wrap align-items-center justify-content-between">
+        <div>
+            <h5 class="mb-0 h6">{{ translate('SEO Autopilot Center') }}</h5>
+            <small class="text-muted">{{ translate('Fully automated Canada SEO for pending URLs only. Completed SEO URLs stay protected.') }}</small>
+        </div>
+        <div class="d-flex flex-wrap mt-2 mt-md-0" style="gap:.4rem;">
+            <span class="badge badge-{{ !empty($autopilot['enabled']) ? 'success' : 'secondary' }}">
+                {{ !empty($autopilot['enabled']) ? translate('Autopilot ON') : translate('Autopilot OFF') }}
+            </span>
+            <span class="badge badge-soft-info">{{ translate('Next Run') }}: {{ $autopilot['next_run'] ?? 'Daily 02:45' }}</span>
+            <span class="badge badge-{{ $offpageAutoOn ? 'success' : 'secondary' }}">{{ translate('Off-Page') }}: {{ $offpageAutoOn ? translate('ON') : translate('OFF') }}</span>
+            <span class="badge badge-soft-info">{{ translate('Off-Page Run') }}: {{ translate('Daily 03:10') }}</span>
+            <span class="badge badge-soft-secondary">{{ translate('Queue') }}: {{ $autopilot['queue_driver'] ?? '-' }}</span>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="row gutters-16 mb-4">
+            <div class="col-md-3 mb-3">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('URLs Per Auto Run') }}</span>
+                    <div class="metric-value text-primary mt-3">{{ $autopilot['batch_size'] ?? 10 }}</div>
+                    <small class="text-muted">{{ translate('max pending URLs') }}</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Pending Queue') }}</span>
+                    <div class="metric-value text-danger mt-3">{{ $autopilot['pending_total'] ?? 0 }}</div>
+                    <small class="text-muted">{{ translate('protected done URLs excluded') }}</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Completion Forecast') }}</span>
+                    <div class="metric-value text-info mt-3">
+                        @if(!is_null($autopilot['days_to_completion'] ?? null))
+                            {{ $autopilot['days_to_completion'] }}
+                        @else
+                            -
+                        @endif
+                    </div>
+                    <small class="text-muted">{{ translate('scheduled run days') }}</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('AI Spend Today') }}</span>
+                    <div class="metric-value text-warning mt-3">${{ number_format($autopilot['spent_today'] ?? 0, 4) }}</div>
+                    <small class="text-muted">
+                        @if(($autopilot['budget_cap'] ?? 0) > 0)
+                            {{ translate('cap') }} ${{ number_format($autopilot['budget_cap'], 2) }}
+                        @else
+                            {{ translate('no cap') }}
+                        @endif
+                    </small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Active Batch') }}</span>
+                    <div class="metric-value {{ !empty($autopilot['active_batch']) ? 'text-info' : 'text-success' }} mt-3">
+                        @if(!empty($autopilot['active_batch']))
+                            #{{ $autopilot['active_batch']->id }}
+                        @else
+                            {{ translate('Clear') }}
+                        @endif
+                    </div>
+                    <small class="text-muted">
+                        @if(!empty($autopilot['active_batch']))
+                            {{ ucfirst($autopilot['active_batch']->status) }} - {{ $autopilot['active_batch']->progressPercent() }}%
+                        @else
+                            {{ translate('ready for next run') }}
+                        @endif
+                    </small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Next Run Estimate') }}</span>
+                    <div class="metric-value text-primary mt-3">{{ $autopilot['next_run_count'] ?? 0 }}</div>
+                    <small class="text-muted">
+                        ${{ number_format($autopilot['next_run_estimated_cost'] ?? 0, 4) }}
+                        {{ !empty($autopilot['next_run_ai_call']) ? translate('AI') : translate('template') }}
+                    </small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Competitors Tracked') }}</span>
+                    <div class="metric-value {{ $competitorCount > 0 ? 'text-info' : 'text-muted' }} mt-3">{{ $competitorCount }}</div>
+                    <small class="text-muted">{{ translate('used for gap angles') }}</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Off-Page Autopilot') }}</span>
+                    <div class="metric-value {{ $offpageAutoOn ? 'text-success' : 'text-muted' }} mt-3">{{ $offpageAutoOn ? translate('ON') : translate('OFF') }}</div>
+                    <small class="text-muted">{{ $settings['auto_offpage_batch_size'] ?? 3 }} {{ translate('campaigns/run') }} - {{ $autopilot['offpage_ready_count'] ?? 0 }} {{ translate('ready shown') }}</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Protection Rule') }}</span>
+                    <div class="metric-value text-success mt-3"><i class="las la-lock"></i></div>
+                    <small class="text-muted">{{ translate('SEO done URLs are skipped') }}</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="row gutters-16">
+            <div class="col-lg-6 mb-3 mb-lg-0">
+                <h6 class="font-weight-600 mb-3">{{ translate('Pending Breakdown') }}</h6>
+                @forelse(($autopilot['breakdown'] ?? []) as $type => $item)
+                    <div class="mb-3">
+                        <div class="d-flex align-items-center justify-content-between mb-1">
+                            <strong class="small">{{ translate($item['label']) }}</strong>
+                            <span class="small text-muted">{{ $item['done'] }} / {{ $item['total'] }} {{ translate('done') }}</span>
+                        </div>
+                        <div class="progress" style="height:8px;">
+                            <div class="progress-bar bg-success" style="width:{{ $item['completion'] }}%;"></div>
+                        </div>
+                        <div class="d-flex justify-content-between mt-1 small text-muted">
+                            <span>{{ $item['pending'] }} {{ translate('pending') }}</span>
+                            <span>{{ $item['missing_meta'] }} {{ translate('missing meta') }}</span>
+                        </div>
+                    </div>
+                @empty
+                    <div class="text-muted small">{{ translate('No breakdown available until SEO tables are ready.') }}</div>
+                @endforelse
+            </div>
+            <div class="col-lg-6">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <h6 class="font-weight-600 mb-0">{{ translate('Recent Automation Batches') }}</h6>
+                    <a href="{{ route('admin.seo.monitoring.index') }}" class="btn btn-xs btn-soft-primary">{{ translate('Monitoring') }}</a>
+                </div>
+                <div class="table-responsive border rounded">
+                    <table class="table table-sm mb-0">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>{{ translate('Batch') }}</th>
+                                <th>{{ translate('Status') }}</th>
+                                <th>{{ translate('Progress') }}</th>
+                                <th>{{ translate('Cost') }}</th>
+                                <th>{{ translate('Created') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @forelse(($autopilot['recent_batches'] ?? collect()) as $batch)
+                                <tr>
+                                    <td class="small">#{{ $batch->id }}</td>
+                                    <td>
+                                        <span class="badge badge-{{ $batch->status === 'completed' ? 'success' : (in_array($batch->status, ['failed','cancelled']) ? 'danger' : 'warning') }}">
+                                            {{ $batch->status }}
+                                        </span>
+                                    </td>
+                                    <td class="small">{{ $batch->processed }}/{{ $batch->total }} ({{ $batch->progressPercent() }}%)</td>
+                                    <td class="small">${{ number_format((float) $batch->actual_cost_usd, 4) }}</td>
+                                    <td class="small text-muted">{{ optional($batch->created_at)->format('M d H:i') }}</td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="5" class="text-center text-muted py-3">{{ translate('No automation batches yet.') }}</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="alert alert-success mt-3 mb-0 py-2 small">
+            <i class="las la-bolt mr-1"></i>
+            {{ translate('Next-level automation: pending URLs are now ranked by missing SEO fields, weak score, page value, and Canada/GTA opportunity before each run. SEO-done URLs remain locked out of autopilot changes.') }}
+        </div>
+    </div>
+</div>
+
+{{-- AUTOPILOT NEXT TARGETS --}}
+<div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <div>
+            <h5 class="mb-0 h6">{{ translate('Autopilot Next Targets Preview') }}</h5>
+            <small class="text-muted">{{ translate('Smart priority queue for the next automated run. Done SEO URLs are excluded.') }}</small>
+        </div>
+        <a href="{{ route('admin.seo.ai_board.index', ['missing' => 'meta', 'sort' => 'score_asc']) }}" class="btn btn-xs btn-soft-primary">
+            {{ translate('Open AI Board') }}
+        </a>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm mb-0">
+                <thead class="thead-light">
+                    <tr>
+                        <th>{{ translate('Priority') }}</th>
+                        <th>{{ translate('URL') }}</th>
+                        <th>{{ translate('Type') }}</th>
+                        <th>{{ translate('Score') }}</th>
+                        <th>{{ translate('Why Selected') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse(($autopilot['next_targets'] ?? collect()) as $row)
+                        @php
+                            $priorityColor = $row['priority_label'] === 'Critical' ? 'danger' : ($row['priority_label'] === 'High' ? 'warning' : ($row['priority_label'] === 'Medium' ? 'info' : 'secondary'));
+                        @endphp
+                        <tr>
+                            <td>
+                                <span class="badge badge-{{ $priorityColor }}">{{ $row['priority_label'] }}</span>
+                                <span class="d-block small text-muted">{{ $row['priority_score'] }}/100</span>
+                            </td>
+                            <td class="text-truncate" style="max-width:360px;">
+                                <a href="{{ $row['url'] }}" target="_blank" class="small">{{ $row['title'] }}</a>
+                                <span class="d-block small text-muted">{{ $row['url'] }}</span>
+                            </td>
+                            <td><span class="badge badge-soft-info">{{ ucfirst($row['type']) }}</span></td>
+                            <td><span class="badge badge-{{ $row['score'] >= 70 ? 'success' : ($row['score'] >= 50 ? 'warning' : 'danger') }}">{{ $row['score'] }}/100</span></td>
+                            <td class="small text-muted">{{ implode(', ', $row['priority_reasons'] ?? []) }}</td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="5" class="text-center text-muted py-4">{{ translate('No pending autopilot targets found.') }}</td></tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{{-- OFF-PAGE READY TARGETS --}}
+<div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <div>
+            <h5 class="mb-0 h6">{{ translate('Off-Page Ready Backlink Targets') }}</h5>
+            <small class="text-muted">{{ translate('Only SEO-ready protected URLs are eligible. Pending pages are excluded until on-page SEO is complete.') }}</small>
+        </div>
+        <a href="{{ route('admin.seo_off_page.index') }}" class="btn btn-xs btn-soft-success">
+            {{ translate('Open Off-Page') }}
+        </a>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm mb-0">
+                <thead class="thead-light">
+                    <tr>
+                        <th>{{ translate('Authority') }}</th>
+                        <th>{{ translate('URL') }}</th>
+                        <th>{{ translate('Type') }}</th>
+                        <th>{{ translate('SEO Score') }}</th>
+                        <th>{{ translate('Why Ready') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse(($autopilot['offpage_targets'] ?? collect()) as $row)
+                        @php
+                            $offpageScore = (int) ($row['offpage_score'] ?? 0);
+                            $offpageColor = $offpageScore >= 90 ? 'success' : ($offpageScore >= 75 ? 'primary' : ($offpageScore >= 60 ? 'info' : 'secondary'));
+                        @endphp
+                        <tr>
+                            <td>
+                                <span class="badge badge-{{ $offpageColor }}">{{ $row['offpage_label'] ?? translate('Ready') }}</span>
+                                <span class="d-block small text-muted">{{ $offpageScore }}/100</span>
+                            </td>
+                            <td class="text-truncate" style="max-width:360px;">
+                                <a href="{{ $row['url'] }}" target="_blank" class="small">{{ $row['title'] }}</a>
+                                <span class="d-block small text-muted">{{ $row['url'] }}</span>
+                            </td>
+                            <td><span class="badge badge-soft-success">{{ ucfirst($row['type']) }}</span></td>
+                            <td><span class="badge badge-success">{{ $row['score'] }}/100</span></td>
+                            <td class="small text-muted">{{ implode(', ', $row['offpage_reasons'] ?? []) }}</td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="5" class="text-center text-muted py-4">{{ translate('No SEO-ready off-page targets found. Run on-page autopilot first.') }}</td></tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{{-- SEO URL INVENTORY --}}
+<div class="card mb-4">
+    <div class="card-header d-flex flex-wrap align-items-center justify-content-between">
+        <div>
+            <h5 class="mb-0 h6">{{ translate('SEO URL Inventory') }}</h5>
+            <small class="text-muted">{{ translate('Completed SEO URLs with score, plus pending URLs that still need metadata, schema, keywords, or content.') }}</small>
+        </div>
+        <form action="{{ route('admin.seo-suite.bulk_pending') }}" method="POST" class="d-flex flex-wrap align-items-center mt-2 mt-md-0" style="gap:.4rem;">
+            @csrf
+            <select name="limit" class="form-control form-control-sm" style="width:90px;">
+                <option value="5">5 URLs</option>
+                <option value="10" selected>10 URLs</option>
+            </select>
+            <select name="provider" class="form-control form-control-sm" style="width:150px;">
+                <option value="">{{ translate('Default AI') }}</option>
+                @foreach($providers as $val => $label)
+                    <option value="{{ $val }}">{{ $label }}</option>
+                @endforeach
+            </select>
+            <button class="btn btn-primary btn-sm">
+                <i class="las la-magic mr-1"></i>{{ translate('Generate Canada SEO') }}
+            </button>
+        </form>
+    </div>
+    <div class="card-body">
+        <div class="row gutters-16 mb-3">
+            <div class="col-md-4 mb-2 mb-md-0">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Total Crawlable URLs') }}</span>
+                    <div class="metric-value text-primary mt-3">{{ $urlInventory['total_count'] ?? 0 }}</div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-2 mb-md-0">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('SEO Done URLs') }}</span>
+                    <div class="metric-value text-success mt-3">{{ $urlInventory['done_count'] ?? 0 }}</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Pending SEO URLs') }}</span>
+                    <div class="metric-value text-danger mt-3">{{ $urlInventory['pending_count'] ?? 0 }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row gutters-16">
+            <div class="col-lg-6 mb-3 mb-lg-0">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <h6 class="font-weight-600 mb-0">{{ translate('Already Done SEO URLs') }}</h6>
+                    <a href="{{ route('admin.seo.ai_board.index', ['min_score' => 70, 'sort' => 'score_desc']) }}" class="btn btn-xs btn-soft-success">{{ translate('View All') }}</a>
+                </div>
+                <div class="table-responsive border rounded">
+                    <table class="table table-sm mb-0">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>{{ translate('URL') }}</th>
+                                <th>{{ translate('Type') }}</th>
+                                <th>{{ translate('Score') }}</th>
+                                <th>{{ translate('SEO Done') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @forelse(($urlInventory['done'] ?? collect()) as $row)
+                                <tr>
+                                    <td class="text-truncate" style="max-width:240px;">
+                                        <a href="{{ $row['url'] }}" target="_blank" class="small">{{ $row['title'] }}</a>
+                                        <span class="d-block text-muted small">{{ $row['url'] }}</span>
+                                    </td>
+                                    <td><span class="badge badge-soft-info">{{ ucfirst($row['type']) }}</span></td>
+                                    <td><span class="badge badge-success">{{ $row['score'] }}/100</span></td>
+                                    <td class="small">
+                                        <span class="text-success"><i class="las la-check-circle"></i> {{ translate('Meta') }}</span>
+                                        @if($row['has_schema'])
+                                            <span class="text-success d-block"><i class="las la-check-circle"></i> {{ translate('Schema') }}</span>
+                                        @endif
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="4" class="text-center text-muted py-3">{{ translate('No completed SEO URLs found yet.') }}</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <h6 class="font-weight-600 mb-0">{{ translate('Non-SEO / Pending URLs') }}</h6>
+                    <a href="{{ route('admin.seo.ai_board.index', ['missing' => 'meta', 'sort' => 'score_asc']) }}" class="btn btn-xs btn-soft-danger">{{ translate('Fix Board') }}</a>
+                </div>
+                <div class="table-responsive border rounded">
+                    <table class="table table-sm mb-0">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>{{ translate('URL') }}</th>
+                                <th>{{ translate('Type') }}</th>
+                                <th>{{ translate('Score') }}</th>
+                                <th>{{ translate('Missing') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @forelse(($urlInventory['pending'] ?? collect()) as $row)
+                                <tr>
+                                    <td class="text-truncate" style="max-width:240px;">
+                                        <a href="{{ $row['url'] }}" target="_blank" class="small">{{ $row['title'] }}</a>
+                                        <span class="d-block text-muted small">{{ $row['url'] }}</span>
+                                    </td>
+                                    <td><span class="badge badge-soft-warning">{{ ucfirst($row['type']) }}</span></td>
+                                    <td><span class="badge badge-{{ $row['score'] >= 50 ? 'warning' : 'danger' }}">{{ $row['score'] }}/100</span></td>
+                                    <td class="small text-muted">
+                                        @if(!$row['has_meta']) {{ translate('Meta') }} @endif
+                                        @if(!$row['has_focus_kw']) <span class="d-block">{{ translate('Focus keyword') }}</span> @endif
+                                        @if(!$row['has_schema']) <span class="d-block">{{ translate('Schema') }}</span> @endif
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="4" class="text-center text-muted py-3">{{ translate('No pending URLs found.') }}</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="alert alert-info mt-3 mb-0 py-2 small">
+            <i class="las la-info-circle mr-1"></i>
+            {{ translate('Bulk generation uses product, category, and page-specific algorithms. It now prioritizes Mississauga, Brampton, and Toronto first, then Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington, Trade Account, and Leave a Review intent where natural.') }}
         </div>
     </div>
 </div>
@@ -310,6 +885,8 @@
                     ['route' => 'admin.seo_on_page.index',        'icon' => 'la-file-alt',    'label' => 'On-Page SEO Tools'],
                     ['route' => 'admin.seo_off_page.index',       'icon' => 'la-link',        'label' => 'Off-Page SEO Tools'],
                     ['route' => 'admin.seo_optimization.index',   'icon' => 'la-cog',         'label' => 'Optimization Tools'],
+                    ['route' => 'admin.seo.ai_board.index',       'icon' => 'la-brain',       'label' => 'AI SEO Board'],
+                    ['route' => 'admin.seo.monitoring.index',     'icon' => 'la-heartbeat',   'label' => 'SEO Monitoring'],
                     ['route' => 'admin.seo-suite.ai_assistant',   'icon' => 'la-robot',       'label' => 'AI SEO Assistant'],
                     ['route' => 'admin.seo-suite.keyword_tracker','icon' => 'la-chart-line',  'label' => 'Keyword Rank Tracker'],
                     ['route' => 'admin.seo-suite.search_stats',   'icon' => 'la-chart-bar',   'label' => 'Search Statistics'],

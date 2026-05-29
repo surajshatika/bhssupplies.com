@@ -15,6 +15,8 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 @php
     $verifications = $result['verifications'] ?? [];
     $metaTags      = $result['meta_tags'] ?? [];

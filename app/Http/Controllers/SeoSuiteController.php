@@ -8,6 +8,7 @@ use App\Jobs\GenerateSeoContentJob;
 use App\Models\BusinessSetting;
 use App\Models\SeoProject;
 use App\Models\SeoRedirect;
+use App\Models\SeoFixBatch;
 use App\Models\SeoRun;
 use App\Models\SeoScoreHistory;
 use App\Services\Seo\Optimization\OptimizationService;
@@ -26,6 +27,8 @@ use App\Services\Seo\Optimization\Features\AiImageGeneratorService;
 use App\Services\Seo\Optimization\Features\AiAssistantService;
 use App\Services\Seo\Optimization\Features\SeoRevisionsService;
 use App\Services\Seo\Optimization\Features\LinkAssistantService;
+use App\Services\Seo\Board\AiSeoBoardService;
+use App\Services\Seo\Budget\SeoBudgetGuard;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
@@ -51,10 +54,69 @@ class SeoSuiteController extends Controller
             : app(OptimizationService::class)->buildScoreDashboard(['project_id' => $project->id]);
 
         $settings = $this->loadSettings();
+        $advancedDashboard = $this->buildAdvancedDashboard($runs, $histories, $redirects, $settings, $dashboard);
+        $urlInventory = $setupRequired
+            ? ['done' => collect(), 'pending' => collect(), 'done_count' => 0, 'pending_count' => 0, 'total_count' => 0]
+            : app(AiSeoBoardService::class)->dashboardUrlInventory(10, 12);
+        $autopilot = $setupRequired
+            ? $this->emptyAutopilotDashboard($settings)
+            : $this->buildAutopilotDashboard($settings);
 
         return view('backend.seo_suite.index', compact(
-            'project', 'features', 'runs', 'histories', 'redirects', 'dashboard', 'settings', 'setupRequired'
+            'project',
+            'features',
+            'runs',
+            'histories',
+            'redirects',
+            'dashboard',
+            'settings',
+            'setupRequired',
+            'advancedDashboard',
+            'urlInventory',
+            'autopilot'
         ));
+    }
+
+    public function bulkOptimizePendingUrls(Request $request)
+    {
+        if (!$this->seoTablesReady() || !Schema::hasTable('seo_meta')) {
+            flash(translate('Run SEO migrations first.'))->warning();
+            return redirect()->route('admin.seo-suite.index');
+        }
+
+        $request->validate([
+            'limit' => 'nullable|integer|min:5|max:10',
+            'provider' => 'nullable|string',
+        ]);
+
+        $limit = (int) $request->input('limit', 10);
+        $targets = app(AiSeoBoardService::class)->collectPendingTargetsAcrossTypes($limit, ['product', 'category', 'page']);
+
+        if (empty($targets)) {
+            flash(translate('No pending Product, Category, or Page URLs found for SEO generation.'))->warning();
+            return redirect()->route('admin.seo-suite.index');
+        }
+
+        $board = app(AiSeoBoardService::class);
+        $estimate = $board->estimateBatchCost($targets, $request->input('provider'));
+        $guard = app(SeoBudgetGuard::class);
+
+        if (!$guard->allowsAdditional($estimate['usd'])) {
+            flash(translate('Daily SEO AI budget cap would be exceeded. Increase the cap in SEO settings or run fewer URLs.'))->warning();
+            return redirect()->route('admin.seo-suite.index');
+        }
+
+        $batch = $board->createBatch(
+            $targets,
+            $request->input('provider'),
+            optional(auth()->user())->id,
+            'Dashboard Canada SEO auto-fix - ' . count($targets) . ' URLs'
+        );
+
+        $guard->bustCache();
+
+        flash(translate('Advanced Canada SEO generation queued for ' . count($targets) . ' pending URLs. Batch #' . $batch->id))->success();
+        return redirect()->route('admin.seo.ai_board.index', ['missing' => 'meta']);
     }
 
     public function run(Request $request)
@@ -547,7 +609,14 @@ class SeoSuiteController extends Controller
             'seo_auto_cloudflare_purge'     => $request->boolean('auto_cloudflare_purge') ? 1 : 0,
 
             // Auto-actions + safety caps
+            'seo_master_automation_enabled'  => $request->boolean('master_automation_enabled') ? 1 : 0,
             'seo_auto_indexnow'             => $request->boolean('auto_indexnow') ? 1 : 0,
+            'seo_auto_optimization_enabled' => $request->boolean('auto_optimization_enabled') ? 1 : 0,
+            'seo_auto_seo_enabled'          => $request->boolean('auto_seo_enabled') ? 1 : 0,
+            'seo_auto_seo_batch_size'       => min(10, max(1, (int) $request->input('auto_seo_batch_size', 10))),
+            'seo_auto_offpage_enabled'      => $request->boolean('auto_offpage_enabled') ? 1 : 0,
+            'seo_auto_offpage_batch_size'   => min(10, max(1, (int) $request->input('auto_offpage_batch_size', 3))),
+            'seo_competitor_urls'           => $request->competitor_urls,
             'seo_daily_budget_usd'          => $request->daily_budget_usd,
             'seo_ai_rate_per_min'           => $request->ai_rate_per_min,
         ];
@@ -660,12 +729,245 @@ class SeoSuiteController extends Controller
             'auto_cloudflare_purge'  => (int) get_setting('seo_auto_cloudflare_purge', 0),
 
             // Auto-actions + safety
+            'master_automation_enabled' => (int) get_setting('seo_master_automation_enabled', 1),
             'auto_indexnow'          => (int) get_setting('seo_auto_indexnow', 0),
+            'auto_optimization_enabled' => (int) get_setting('seo_auto_optimization_enabled', 1),
+            'auto_seo_enabled'       => (int) get_setting('seo_auto_seo_enabled', 1),
+            'auto_seo_batch_size'    => (int) get_setting('seo_auto_seo_batch_size', 10),
+            'auto_offpage_enabled'   => (int) get_setting('seo_auto_offpage_enabled', 1),
+            'auto_offpage_batch_size'=> (int) get_setting('seo_auto_offpage_batch_size', 3),
+            'competitor_urls'        => get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', '')),
             'daily_budget_usd'       => get_setting('seo_daily_budget_usd', 5),
             'ai_rate_per_min'        => get_setting('seo_ai_rate_per_min', 30),
 
             // PageSpeed Insights
             'pagespeed_api_key'      => get_setting('seo_pagespeed_api_key'),
+        ];
+    }
+
+    protected function buildAdvancedDashboard($runs, $histories, $redirects, array $settings, array $dashboard): array
+    {
+        $runs = collect($runs);
+        $histories = collect($histories);
+        $redirects = collect($redirects);
+
+        $totalRuns = $runs->count();
+        $completedRuns = $runs->where('status', 'completed')->count();
+        $failedRuns = $runs->where('status', 'failed')->count();
+        $queuedRuns = $runs->whereIn('status', ['queued', 'running', 'processing'])->count();
+        $successRate = $totalRuns > 0 ? round(($completedRuns / $totalRuns) * 100) : 0;
+
+        $durations = $runs->filter(function ($run) {
+            return $run->started_at && $run->completed_at;
+        })->map(function ($run) {
+            return $run->completed_at->diffInSeconds($run->started_at);
+        });
+        $avgDuration = $durations->count() ? round($durations->avg()) : null;
+
+        $latestScore = (int) ($dashboard['current_score'] ?? 0);
+        $oldestHistory = $histories->last();
+        $newestHistory = $histories->first();
+        $trendDelta = ($newestHistory && $oldestHistory)
+            ? ((int) $newestHistory->score - (int) $oldestHistory->score)
+            : 0;
+
+        $providers = [
+            'openai' => !empty($settings['openai_api_key']),
+            'claude' => !empty($settings['anthropic_api_key']),
+            'gemini' => !empty($settings['gemini_api_key']),
+            'grok' => !empty($settings['grok_api_key']),
+        ];
+
+        $files = [
+            'sitemap' => $this->fileHealth('Sitemap', base_path('sitemap.xml'), 'la-sitemap', 'admin.seo-suite.sitemap'),
+            'robots' => $this->fileHealth('Robots.txt', public_path('robots.txt'), 'la-robot', 'admin.seo-suite.robots'),
+            'llms' => $this->fileHealth('LLMs.txt', public_path('llms.txt'), 'la-file-code', 'admin.seo-suite.llms_txt'),
+            'rss' => $this->fileHealth('RSS Feed', public_path('rss.xml'), 'la-rss', 'admin.seo-suite.rss'),
+        ];
+
+        $actions = [];
+        if (!in_array(true, $providers, true)) {
+            $actions[] = [
+                'severity' => 'critical',
+                'icon' => 'la-key',
+                'title' => 'Connect an AI provider',
+                'detail' => 'Add at least one API key so audits, rewrites, schemas, and recommendations can run.',
+                'route' => 'admin.seo-suite.settings.view',
+            ];
+        }
+        if (empty($settings['search_console_site']) || empty($settings['gsc_refresh_token'])) {
+            $actions[] = [
+                'severity' => 'high',
+                'icon' => 'la-chart-line',
+                'title' => 'Connect Google Search Console',
+                'detail' => 'Unlock clicks, impressions, coverage signals, and query intelligence inside the suite.',
+                'route' => 'admin.seo-suite.settings.view',
+            ];
+        }
+        foreach ($files as $file) {
+            if (!$file['exists']) {
+                $actions[] = [
+                    'severity' => 'high',
+                    'icon' => $file['icon'],
+                    'title' => 'Generate ' . $file['label'],
+                    'detail' => 'This file is missing and should be published for search engines and AI crawlers.',
+                    'route' => $file['route'],
+                    'method' => 'post',
+                ];
+            } elseif ($file['age_days'] !== null && $file['age_days'] > 14) {
+                $actions[] = [
+                    'severity' => 'medium',
+                    'icon' => $file['icon'],
+                    'title' => 'Refresh ' . $file['label'],
+                    'detail' => 'Last generated ' . $file['age_days'] . ' days ago. Regenerate after product, category, or blog changes.',
+                    'route' => $file['route'],
+                    'method' => 'post',
+                ];
+            }
+        }
+        if ($latestScore > 0 && $latestScore < 80) {
+            $actions[] = [
+                'severity' => 'high',
+                'icon' => 'la-clipboard-check',
+                'title' => 'Run a complete optimization audit',
+                'detail' => 'Current score is below 80. Prioritize technical, schema, speed, and content improvements.',
+                'route' => 'admin.seo_optimization.index',
+            ];
+        }
+        if ($failedRuns > 0) {
+            $actions[] = [
+                'severity' => 'medium',
+                'icon' => 'la-exclamation-circle',
+                'title' => 'Review failed AI runs',
+                'detail' => $failedRuns . ' recent task(s) failed. Check provider keys, payloads, limits, and logs.',
+                'route' => 'admin.seo-suite.revisions',
+            ];
+        }
+        if ($redirects->count() === 0) {
+            $actions[] = [
+                'severity' => 'low',
+                'icon' => 'la-exchange-alt',
+                'title' => 'Audit legacy URL redirects',
+                'detail' => 'Add 301 redirects for old product, category, and campaign URLs to preserve authority.',
+                'route' => 'admin.seo-suite.index',
+                'params' => ['tab' => 'redirects'],
+            ];
+        }
+
+        $actions = collect($actions)->sortBy(function ($action) {
+            return ['critical' => 0, 'high' => 1, 'medium' => 2, 'low' => 3][$action['severity']] ?? 4;
+        })->take(6)->values()->all();
+
+        $readinessParts = [
+            in_array(true, $providers, true) ? 20 : 0,
+            !empty($settings['google_verification']) || !empty($settings['bing_verification']) ? 15 : 0,
+            !empty($settings['gsc_refresh_token']) ? 20 : 0,
+            $files['sitemap']['exists'] ? 15 : 0,
+            $files['robots']['exists'] ? 10 : 0,
+            $files['llms']['exists'] ? 10 : 0,
+            $successRate >= 80 || $totalRuns === 0 ? 10 : 5,
+        ];
+
+        return [
+            'automation_readiness' => array_sum($readinessParts),
+            'success_rate' => $successRate,
+            'failed_runs' => $failedRuns,
+            'queued_runs' => $queuedRuns,
+            'avg_duration' => $avgDuration,
+            'trend_delta' => $trendDelta,
+            'providers' => $providers,
+            'files' => $files,
+            'actions' => $actions,
+            'risk_level' => $latestScore >= 80 && $successRate >= 80 ? 'low' : ($latestScore >= 50 ? 'medium' : 'high'),
+        ];
+    }
+
+    protected function buildAutopilotDashboard(array $settings): array
+    {
+        $board = app(AiSeoBoardService::class);
+        $budget = app(SeoBudgetGuard::class);
+        $breakdown = $board->pendingBreakdownByType(['product', 'category', 'page']);
+        $batchSize = (int) ($settings['auto_seo_batch_size'] ?? 10);
+        $pendingTotal = collect($breakdown)->sum('pending');
+        $nextPreview = $board->nextAutopilotTargetPreview(max(10, $batchSize), ['product', 'category', 'page']);
+        $nextTargets = $nextPreview
+            ->take($batchSize)
+            ->map(fn(array $row) => ['type' => $row['type'], 'id' => (int) $row['id']])
+            ->values()
+            ->all();
+        $nextEstimate = $board->estimateBatchCost($nextTargets, $settings['default_provider'] ?? null);
+        $offpageTargets = $board->offPageCampaignTargetPreview(10, ['product', 'category', 'page']);
+
+        $activeBatch = Schema::hasTable('seo_fix_batches')
+            ? SeoFixBatch::query()
+                ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
+                ->latest()
+                ->first()
+            : null;
+
+        $recentBatches = Schema::hasTable('seo_fix_batches')
+            ? SeoFixBatch::query()->latest()->limit(5)->get()
+            : collect();
+
+        return [
+            'enabled' => (int) ($settings['auto_seo_enabled'] ?? 1) === 1,
+            'batch_size' => $batchSize,
+            'next_run' => 'Daily 02:45',
+            'queue_driver' => config('queue.default'),
+            'active_batch' => $activeBatch,
+            'recent_batches' => $recentBatches,
+            'breakdown' => $breakdown,
+            'next_targets' => $nextPreview->take(10)->values(),
+            'offpage_targets' => $offpageTargets,
+            'offpage_ready_count' => $offpageTargets->count(),
+            'pending_total' => $pendingTotal,
+            'days_to_completion' => $batchSize > 0 ? (int) ceil($pendingTotal / $batchSize) : null,
+            'next_run_count' => count($nextTargets),
+            'next_run_estimated_cost' => $nextEstimate['usd'] ?? 0,
+            'next_run_ai_call' => $nextEstimate['ai_call'] ?? false,
+            'budget_cap' => $budget->dailyCapUsd(),
+            'spent_today' => round($budget->spendToday(), 4),
+            'remaining_today' => $budget->dailyCapUsd() > 0 ? round($budget->remainingUsd(), 4) : null,
+        ];
+    }
+
+    protected function emptyAutopilotDashboard(array $settings): array
+    {
+        return [
+            'enabled' => (int) ($settings['auto_seo_enabled'] ?? 1) === 1,
+            'batch_size' => (int) ($settings['auto_seo_batch_size'] ?? 10),
+            'next_run' => 'Daily 02:45',
+            'queue_driver' => config('queue.default'),
+            'active_batch' => null,
+            'recent_batches' => collect(),
+            'breakdown' => [],
+            'next_targets' => collect(),
+            'offpage_targets' => collect(),
+            'offpage_ready_count' => 0,
+            'pending_total' => 0,
+            'days_to_completion' => null,
+            'next_run_count' => 0,
+            'next_run_estimated_cost' => 0,
+            'next_run_ai_call' => false,
+            'budget_cap' => 0,
+            'spent_today' => 0,
+            'remaining_today' => null,
+        ];
+    }
+
+    protected function fileHealth(string $label, string $path, string $icon, string $route): array
+    {
+        $exists = file_exists($path);
+        $updatedAt = $exists ? filemtime($path) : null;
+
+        return [
+            'label' => $label,
+            'icon' => $icon,
+            'route' => $route,
+            'exists' => $exists,
+            'size' => $exists ? filesize($path) : 0,
+            'updated_at' => $updatedAt ? date('M d, Y H:i', $updatedAt) : null,
+            'age_days' => $updatedAt ? now()->diffInDays(\Carbon\Carbon::createFromTimestamp($updatedAt)) : null,
         ];
     }
 

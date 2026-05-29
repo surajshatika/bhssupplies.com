@@ -33,6 +33,8 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 <form action="{{ route('admin.seo-suite.settings') }}" method="POST">
 @csrf
 
@@ -370,6 +372,18 @@
             <div class="card-header"><h6 class="mb-0"><i class="las la-shield-alt mr-1 text-danger"></i>{{ translate('Auto Actions & Safety Caps') }}</h6></div>
             <div class="card-body">
                 <div class="form-group row mb-2">
+                    <label class="col-9 col-form-label small">
+                        {{ translate('Master hourly SEO automation command') }}
+                        <span class="d-block text-muted">{{ translate('Runs pending on-page SEO every hour and interval-gates heavier technical, rank, PageSpeed, and link checks.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="master_automation_enabled" value="1" @if(!empty($settings['master_automation_enabled'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group row mb-2">
                     <label class="col-9 col-form-label small">{{ translate('Auto-ping IndexNow on entity save') }}</label>
                     <div class="col-3 text-right">
                         <label class="aiz-switch aiz-switch-success mb-0">
@@ -377,6 +391,60 @@
                             <span></span>
                         </label>
                     </div>
+                </div>
+                <div class="form-group row mb-2">
+                    <label class="col-9 col-form-label small">
+                        {{ translate('Automated technical optimization refresh') }}
+                        <span class="d-block text-muted">{{ translate('Refreshes sitemap, robots.txt, llms.txt, RSS, SEO scores, and optional IndexNow pings.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="auto_optimization_enabled" value="1" @if(!empty($settings['auto_optimization_enabled'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group row mb-2">
+                    <label class="col-9 col-form-label small">
+                        {{ translate('Fully automated Canada SEO for pending URLs') }}
+                        <span class="d-block text-muted">{{ translate('Runs nightly and skips already-done Product, Category, and Page SEO.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="auto_seo_enabled" value="1" @if(!empty($settings['auto_seo_enabled'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Auto SEO URLs Per Run') }}</label>
+                    <input type="number" min="1" max="10" class="form-control" name="auto_seo_batch_size"
+                        value="{{ $settings['auto_seo_batch_size'] ?? '10' }}">
+                    <small class="text-muted">{{ translate('Recommended: 5-10. The system only selects pending/non-SEO URLs unless you manually run another tool.') }}</small>
+                </div>
+                <div class="form-group row mb-2">
+                    <label class="col-9 col-form-label small">
+                        {{ translate('Fully automated AI off-page backlink campaigns') }}
+                        <span class="d-block text-muted">{{ translate('Creates white-hat backlink prospect, citation, guest post, outreach, and anchor text plans.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="auto_offpage_enabled" value="1" @if(!empty($settings['auto_offpage_enabled'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Off-Page Campaigns Per Run') }}</label>
+                    <input type="number" min="1" max="10" class="form-control" name="auto_offpage_batch_size"
+                        value="{{ $settings['auto_offpage_batch_size'] ?? '3' }}">
+                    <small class="text-muted">{{ translate('Recommended: 2-3. These are AI campaign plans and outreach templates, not spam auto-posted links.') }}</small>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Competitor Websites to Outrank') }}</label>
+                    <textarea class="form-control" name="competitor_urls" rows="4"
+                        placeholder="https://competitor1.ca&#10;https://competitor2.ca">{{ $settings['competitor_urls'] ?? '' }}</textarea>
+                    <small class="text-muted">{{ translate('One URL per line or comma-separated. Autopilot uses these only for keyword gaps, content angles, and positioning. It will not copy competitor content or mention competitor brand names.') }}</small>
                 </div>
                 <div class="form-group">
                     <label>{{ translate('Daily AI Budget Cap (USD)') }}</label>

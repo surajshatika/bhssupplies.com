@@ -9,6 +9,8 @@ use App\Models\Page;
 use App\Models\Product;
 use App\Models\SeoFixBatch;
 use App\Models\SeoMeta;
+use App\Models\SeoProject;
+use App\Models\SeoScoreHistory;
 use App\Services\Seo\OnPage\Features\TruSeoAnalysisService;
 use App\Services\Seo\Providers\SeoProviderManager;
 use Illuminate\Database\Eloquent\Builder;
@@ -81,6 +83,351 @@ class AiSeoBoardService
         $stats['good']        = (clone $metaQuery)->where('seo_score', '>=', 80)->count();
 
         return $stats;
+    }
+
+    public function dashboardUrlInventory(int $doneLimit = 10, int $pendingLimit = 12): array
+    {
+        $done = collect();
+        $pending = collect();
+
+        if (!Schema::hasTable('seo_meta')) {
+            return [
+                'done' => collect(),
+                'pending' => collect(),
+                'done_count' => 0,
+                'pending_count' => 0,
+                'total_count' => 0,
+            ];
+        }
+
+        foreach (array_keys($this->typeMap) as $type) {
+            $query = $this->baseQuery($type)->latest('updated_at')->limit(max($doneLimit, $pendingLimit) * 2);
+            foreach ($query->get() as $entity) {
+                $row = $this->buildRow($entity, $type);
+                if ($this->isSeoDoneRow($row)) {
+                    $done->push($row);
+                } else {
+                    $pending->push($row);
+                }
+            }
+        }
+
+        return [
+            'done' => $done->sortByDesc('score')->take($doneLimit)->values(),
+            'pending' => $pending->sortBy('score')->take($pendingLimit)->values(),
+            'done_count' => $this->countSeoDoneUrls(),
+            'pending_count' => $this->countSeoPendingUrls(),
+            'total_count' => collect(array_keys($this->typeMap))->sum(fn($type) => $this->baseQuery($type)->count()),
+        ];
+    }
+
+    public function collectPendingTargetsAcrossTypes(int $limit = 10, array $types = ['product', 'category', 'page']): array
+    {
+        $limit = max(1, min(10, $limit));
+
+        return $this->nextAutopilotTargetPreview($limit, $types)
+            ->map(fn(array $row) => ['type' => $row['type'], 'id' => (int) $row['id']])
+            ->values()
+            ->all();
+    }
+
+    protected function isSeoDoneRow(array $row): bool
+    {
+        return !empty($row['has_meta'])
+            && !empty($row['has_focus_kw'])
+            && !empty($row['has_schema'])
+            && (int) ($row['score'] ?? 0) >= 70;
+    }
+
+    public function pendingBreakdownByType(array $types = ['product', 'category', 'page']): array
+    {
+        $rows = [];
+
+        foreach ($types as $type) {
+            if (!isset($this->typeMap[$type])) {
+                continue;
+            }
+
+            $class = $this->typeMap[$type]['class'];
+            $total = $this->baseQuery($type)->count();
+            $done = Schema::hasTable('seo_meta')
+                ? SeoMeta::query()
+                    ->where('model_type', $class)
+                    ->whereNotNull('meta_title')
+                    ->whereNotNull('meta_description')
+                    ->whereNotNull('focus_keyword')
+                    ->whereNotNull('schema_json')
+                    ->where('seo_score', '>=', 70)
+                    ->count()
+                : 0;
+
+            $missingMetaQuery = $this->baseQuery($type);
+            if (Schema::hasTable('seo_meta')) {
+                $this->applyMissingFilter($missingMetaQuery, $class, 'meta');
+            }
+
+            $rows[$type] = [
+                'label' => $this->typeMap[$type]['label'],
+                'total' => $total,
+                'done' => $done,
+                'pending' => max(0, $total - $done),
+                'missing_meta' => Schema::hasTable('seo_meta') ? $missingMetaQuery->count() : $total,
+                'completion' => $total > 0 ? (int) round(($done / $total) * 100) : 0,
+            ];
+        }
+
+        return $rows;
+    }
+
+    public function nextAutopilotTargetPreview(int $limit = 10, array $types = ['product', 'category', 'page']): Collection
+    {
+        $limit = max(1, min(20, $limit));
+
+        return $this->pendingAutopilotRows($limit, $types)
+            ->take($limit)
+            ->values();
+    }
+
+    protected function pendingAutopilotRows(int $limit, array $types): Collection
+    {
+        $preview = collect();
+        $candidateLimit = max(40, $limit * 8);
+
+        foreach ($types as $type) {
+            if (!isset($this->typeMap[$type])) {
+                continue;
+            }
+
+            $class = $this->typeMap[$type]['class'];
+            $entities = collect();
+
+            if (Schema::hasTable('seo_meta')) {
+                foreach (['meta', 'focus', 'schema'] as $missing) {
+                    $query = $this->baseQuery($type);
+                    $this->applyMissingFilter($query, $class, $missing);
+                    $entities = $entities->merge($query->latest('updated_at')->limit($candidateLimit)->get());
+                }
+            }
+
+            $entities = $entities->merge(
+                $this->baseQuery($type)->latest('updated_at')->limit($candidateLimit)->get()
+            );
+
+            foreach ($entities->unique(fn($entity) => $type . ':' . $entity->getKey()) as $entity) {
+                $row = $this->buildRow($entity, $type);
+                if ($this->isSeoDoneRow($row)) {
+                    continue;
+                }
+
+                $preview->push($this->buildAutopilotPreviewRow($row));
+            }
+        }
+
+        return $preview
+            ->sortByDesc('priority_score')
+            ->values();
+    }
+
+    protected function buildAutopilotPreviewRow(array $row): array
+    {
+        $priorityScore = $this->autopilotPriorityScore($row);
+        $row['priority_score'] = $priorityScore;
+        $row['priority_label'] = $priorityScore >= 90 ? 'Critical' : ($priorityScore >= 70 ? 'High' : ($priorityScore >= 45 ? 'Medium' : 'Low'));
+        $row['priority_reasons'] = $this->autopilotPriorityReasons($row);
+
+        return $row;
+    }
+
+    protected function autopilotPriorityReasons(array $row): array
+    {
+        $reasons = [];
+
+        if (!$row['has_meta']) {
+            $reasons[] = 'Missing meta';
+        }
+        if (!$row['has_focus_kw']) {
+            $reasons[] = 'Missing focus keyword';
+        }
+        if (!$row['has_schema']) {
+            $reasons[] = 'Missing schema';
+        }
+
+        $score = (int) ($row['score'] ?? 0);
+        if ($score < 50) {
+            $reasons[] = 'Critical score';
+        } elseif ($score < 70) {
+            $reasons[] = 'Weak score';
+        }
+
+        $type = $row['type'] ?? '';
+        if ($type === 'product') {
+            $reasons[] = 'Revenue page';
+        } elseif ($type === 'category') {
+            $reasons[] = 'Category expansion';
+        } elseif ($type === 'page') {
+            $reasons[] = 'Trust page';
+        }
+
+        $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
+        if (Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
+            $reasons[] = 'Primary city intent';
+        } elseif (Str::contains($haystack, ['etobicoke', 'vaughan', 'oakville', 'scarborough', 'markham', 'north york', 'burlington'])) {
+            $reasons[] = 'GTA city intent';
+        } else {
+            $reasons[] = 'Needs Canada/GTA terms';
+        }
+
+        return array_slice(array_values(array_unique($reasons ?: ['Needs review'])), 0, 5);
+    }
+
+    public function offPageCampaignTargetPreview(int $limit = 10, array $types = ['product', 'category', 'page']): Collection
+    {
+        $preview = collect();
+        $limit = max(1, min(20, $limit));
+
+        if (!Schema::hasTable('seo_meta')) {
+            return $preview;
+        }
+
+        foreach ($types as $type) {
+            if (!isset($this->typeMap[$type])) {
+                continue;
+            }
+
+            $entities = $this->baseQuery($type)->latest('updated_at')->limit($limit * 6)->get();
+            foreach ($entities as $entity) {
+                $row = $this->buildRow($entity, $type);
+                if (!$this->isSeoDoneRow($row)) {
+                    continue;
+                }
+
+                $offPageScore = $this->offPagePriorityScore($row);
+                $row['offpage_score'] = $offPageScore;
+                $row['offpage_label'] = $offPageScore >= 90
+                    ? 'Tier 1'
+                    : ($offPageScore >= 75 ? 'Strong' : ($offPageScore >= 60 ? 'Ready' : 'Reserve'));
+                $row['offpage_reasons'] = $this->offPagePriorityReasons($row);
+                $preview->push($row);
+            }
+        }
+
+        return $preview
+            ->sortByDesc('offpage_score')
+            ->take($limit)
+            ->values();
+    }
+
+    protected function autopilotPriorityScore(array $row): int
+    {
+        $score = 0;
+        if (!$row['has_meta']) {
+            $score += 35;
+        }
+        if (!$row['has_focus_kw']) {
+            $score += 20;
+        }
+        if (!$row['has_schema']) {
+            $score += 20;
+        }
+        $seoScore = (int) ($row['score'] ?? 0);
+        if ($seoScore < 40) {
+            $score += 30;
+        } elseif ($seoScore < 70) {
+            $score += 18;
+        } elseif ($seoScore < 80) {
+            $score += 8;
+        }
+
+        $typeBoost = ['product' => 8, 'category' => 6, 'page' => 4, 'blog' => 2];
+        $score += $typeBoost[$row['type'] ?? ''] ?? 0;
+
+        $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
+        if (!Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
+            $score += 10;
+        }
+        if (!Str::contains($haystack, ['canada', 'gta', 'ontario'])) {
+            $score += 6;
+        }
+        if (($row['type'] ?? '') === 'category' && !Str::contains($haystack, ['supplier', 'supplies', 'wholesale', 'trade'])) {
+            $score += 6;
+        }
+        if (($row['type'] ?? '') === 'product' && !Str::contains($haystack, ['buy', 'shop', 'canada'])) {
+            $score += 4;
+        }
+
+        return min(100, $score);
+    }
+
+    protected function offPagePriorityScore(array $row): int
+    {
+        $score = (int) floor(min(100, max(0, (int) ($row['score'] ?? 0))) / 2);
+
+        $typeBoost = ['category' => 12, 'page' => 10, 'product' => 8, 'blog' => 4];
+        $score += $typeBoost[$row['type'] ?? ''] ?? 0;
+
+        if (!empty($row['has_schema'])) {
+            $score += 10;
+        }
+        if (!empty($row['has_focus_kw'])) {
+            $score += 8;
+        }
+        if (!empty($row['has_meta'])) {
+            $score += 6;
+        }
+
+        $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
+        if (Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
+            $score += 10;
+        }
+        if (Str::contains($haystack, ['etobicoke', 'vaughan', 'oakville', 'scarborough', 'markham', 'north york', 'burlington'])) {
+            $score += 6;
+        }
+        if (Str::contains($haystack, ['trade account', 'leave a review', 'review'])) {
+            $score += 8;
+        }
+
+        $seoScore = (int) ($row['score'] ?? 0);
+        if ($seoScore >= 85) {
+            $score += 8;
+        } elseif ($seoScore >= 75) {
+            $score += 5;
+        }
+
+        return min(100, $score);
+    }
+
+    protected function offPagePriorityReasons(array $row): array
+    {
+        $reasons = ['SEO protected'];
+        $type = $row['type'] ?? '';
+
+        if ($type === 'category') {
+            $reasons[] = 'Category authority';
+        } elseif ($type === 'product') {
+            $reasons[] = 'Money page';
+        } elseif ($type === 'page') {
+            $reasons[] = 'Trust asset';
+        }
+
+        if (!empty($row['has_schema'])) {
+            $reasons[] = 'Schema ready';
+        }
+        if (!empty($row['has_focus_kw'])) {
+            $reasons[] = 'Keyword ready';
+        }
+
+        $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
+        if (Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
+            $reasons[] = 'Primary city intent';
+        } elseif (Str::contains($haystack, ['etobicoke', 'vaughan', 'oakville', 'scarborough', 'markham', 'north york', 'burlington'])) {
+            $reasons[] = 'GTA city intent';
+        }
+
+        if (trim((string) get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', ''))) !== '') {
+            $reasons[] = 'Competitor gap campaign';
+        }
+
+        return array_slice(array_values(array_unique($reasons)), 0, 5);
     }
 
     /**
@@ -226,19 +573,24 @@ class AiSeoBoardService
 
         if (empty($meta['meta_title'])) {
             $patch['meta_title'] = $aiData['title']
-                ?? Str::limit($name . ' | ' . get_setting('website_name', config('app.name')), 60, '');
+                ?? $this->templateTitle($name, $type);
             $applied['meta_title'] = $patch['meta_title'];
         }
 
         if (empty($meta['meta_description'])) {
             $patch['meta_description'] = $aiData['description']
-                ?? Str::limit('Shop ' . $name . '. Quality products, fast delivery, and competitive prices.', 160, '');
+                ?? $this->templateDescription($name, $type);
             $applied['meta_description'] = $patch['meta_description'];
         }
 
         if (empty($meta['focus_keyword'])) {
-            $patch['focus_keyword'] = $aiData['focus_keyword'] ?? Str::limit(Str::lower($name), 60, '');
+            $patch['focus_keyword'] = $aiData['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type);
             $applied['focus_keyword'] = $patch['focus_keyword'];
+        }
+
+        if (empty($meta['secondary_keywords'])) {
+            $patch['secondary_keywords'] = $aiData['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type);
+            $applied['secondary_keywords'] = implode(', ', $patch['secondary_keywords']);
         }
 
         if (empty($meta['og_image'])) {
@@ -263,6 +615,24 @@ class AiSeoBoardService
             $this->persistMeta($entity, $type, $patch);
         }
 
+        $contentPatch = $this->contentPatch($entity, $type, $aiData, $patch + $meta);
+        if (!empty($contentPatch)) {
+            $entity->forceFill($contentPatch)->save();
+            foreach ($contentPatch as $field => $value) {
+                $applied[$field] = Str::limit(strip_tags((string) $value), 120);
+            }
+        }
+
+        $entity->refresh();
+        $afterScore = $this->scoreEntity($entity, $type);
+        $this->persistMeta($entity, $type, [
+            'seo_score' => $afterScore['score'],
+            'seo_grade' => $afterScore['grade'],
+            'analysis_checks' => $afterScore['checks'],
+            'last_analyzed_at' => now(),
+        ]);
+        $this->recordScoreHistory($entity, $type, $afterScore);
+
         $afterRow = $this->buildRow($entity->refresh(), $type);
 
         return [
@@ -272,6 +642,33 @@ class AiSeoBoardService
             'source'       => $source,
             'row'          => $afterRow,
         ];
+    }
+
+    protected function recordScoreHistory(Model $entity, string $type, array $score): void
+    {
+        if (!Schema::hasTable('seo_score_histories')) {
+            return;
+        }
+
+        try {
+            SeoScoreHistory::create([
+                'project_id' => optional(SeoProject::query()->first())->id,
+                'seo_run_id' => null,
+                'target_type' => $this->typeMap[$type]['class'],
+                'target_id' => $entity->getKey(),
+                'url' => $this->urlFor($entity, $type),
+                'score' => $score['score'],
+                'grade' => $score['grade'],
+                'metrics' => $score,
+                'recorded_at' => now(),
+            ]);
+        } catch (Throwable $e) {
+            logger()->warning('AI SEO Board score history write failed', [
+                'type' => $type,
+                'id' => $entity->getKey(),
+                'err' => $e->getMessage(),
+            ]);
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -405,6 +802,24 @@ class AiSeoBoardService
             ],
             $patch
         );
+    }
+
+    protected function countSeoDoneUrls(): int
+    {
+        return SeoMeta::query()
+            ->whereIn('model_type', array_column($this->typeMap, 'class'))
+            ->whereNotNull('meta_title')
+            ->whereNotNull('meta_description')
+            ->whereNotNull('focus_keyword')
+            ->whereNotNull('schema_json')
+            ->where('seo_score', '>=', 70)
+            ->count();
+    }
+
+    protected function countSeoPendingUrls(): int
+    {
+        $total = collect(array_keys($this->typeMap))->sum(fn($type) => $this->baseQuery($type)->count());
+        return max(0, $total - $this->countSeoDoneUrls());
     }
 
     protected function plainContent(Model $entity, string $type): string
@@ -541,17 +956,34 @@ class AiSeoBoardService
     {
         $siteName = get_setting('website_name', config('app.name'));
         $entityLabel = $this->typeMap[$type]['label'];
+        $contentField = match ($type) {
+            'product' => 'product_description_html',
+            'category' => 'category_description_html',
+            'page' => 'page_content_html',
+            default => 'content_html',
+        };
+        $competitorContext = $this->competitorContext();
+        $strategy = match ($type) {
+            'product' => 'Use buyer intent, specs, applications, Canadian availability, B2B supply language, and conversion-focused benefits.',
+            'category' => 'Use collection intent, product range coverage, Canada supplier wording, selection guidance, and internal-link friendly copy.',
+            'page' => 'Use service/page intent, trust signals, Canada-focused value proposition, clear sections, and helpful explanatory content.',
+            'blog' => 'Use informational intent, practical Canadian buyer guidance, FAQ-style support, and topical authority.',
+            default => 'Use search intent and Canada-focused commercial relevance.',
+        };
 
         $systemPrompt = 'You are an expert SEO copywriter. Output ONLY valid JSON, no markdown, no code fences, no extra commentary.';
 
-        $prompt = "Generate SEO metadata for an ecommerce {$entityLabel} on {$siteName}.\n"
+        $prompt = "Generate advanced Canada-focused SEO for an ecommerce {$entityLabel} on {$siteName}.\n"
             . "Name: \"{$name}\"\n"
             . ($description ? "Details: \"" . Str::limit($description, 400) . "\"\n" : '')
+            . "Algorithm: {$strategy}\n"
+            . "Local priority: primary targets are Mississauga, Brampton, Toronto. Secondary targets are Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington. Include Trade Account and Leave a Review intent only where natural.\n"
+            . $competitorContext
             . "Return ONLY this JSON shape with no other text:\n"
-            . '{"title":"SEO title 30-60 chars","description":"meta description 120-160 chars","focus_keyword":"primary keyword phrase"}';
+            . '{"title":"SEO title 30-60 chars","description":"meta description 120-160 chars","focus_keyword":"primary keyword phrase","secondary_keywords":["keyword 1","keyword 2","keyword 3","keyword 4","keyword 5"],"'.$contentField.'":"clean HTML with H2/H3 sections, Canada intent, benefits, and FAQ"}';
 
         try {
-            $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 400]);
+            $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 1000]);
             if (!$raw) {
                 return null;
             }
@@ -570,11 +1002,188 @@ class AiSeoBoardService
                 'title'         => isset($decoded['title']) ? Str::limit(trim((string) $decoded['title']), 60, '') : null,
                 'description'   => isset($decoded['description']) ? Str::limit(trim((string) $decoded['description']), 160, '') : null,
                 'focus_keyword' => isset($decoded['focus_keyword']) ? Str::limit(trim((string) $decoded['focus_keyword']), 80, '') : null,
+                'secondary_keywords' => isset($decoded['secondary_keywords']) && is_array($decoded['secondary_keywords'])
+                    ? array_values(array_filter(array_map(fn($k) => Str::limit(trim((string) $k), 80, ''), $decoded['secondary_keywords'])))
+                    : null,
+                'content_html' => $decoded[$contentField] ?? $decoded['content_html'] ?? null,
             ];
         } catch (Throwable $e) {
             logger()->warning('AiSeoBoard ai bundle failed', ['e' => $e->getMessage()]);
             return null;
         }
+    }
+
+    protected function contentPatch(Model $entity, string $type, ?array $aiData, array $meta): array
+    {
+        $html = trim((string) ($aiData['content_html'] ?? ''));
+        if ($html === '') {
+            $html = $this->templateContentHtml($this->displayName($entity, $type), $type, $meta);
+        }
+
+        $html = $this->cleanGeneratedHtml($html);
+        if ($html === '') {
+            return [];
+        }
+
+        $table = $entity->getTable();
+        $patch = [];
+
+        if ($type === 'product') {
+            if (Schema::hasColumn($table, 'description') && $this->isThinContent($entity->description ?? null, 180)) {
+                $patch['description'] = $html;
+            }
+            if (Schema::hasColumn($table, 'short_description') && $this->isThinContent($entity->short_description ?? null, 70)) {
+                $patch['short_description'] = Str::limit(strip_tags($html), 240, '');
+            }
+        } elseif ($type === 'category') {
+            if (Schema::hasColumn($table, 'top_description') && $this->isThinContent($entity->top_description ?? null, 80)) {
+                $patch['top_description'] = $this->categoryIntroHtml($this->displayName($entity, $type), $meta);
+            }
+            if (Schema::hasColumn($table, 'bottom_description') && $this->isThinContent($entity->bottom_description ?? null, 180)) {
+                $patch['bottom_description'] = $html;
+            }
+        } elseif ($type === 'page' && Schema::hasColumn($table, 'content') && $this->isThinContent($entity->content ?? null, 180)) {
+            $patch['content'] = $html;
+        }
+
+        return $patch;
+    }
+
+    protected function isThinContent($value, int $minWords): bool
+    {
+        return str_word_count(strip_tags((string) $value)) < $minWords;
+    }
+
+    protected function cleanGeneratedHtml(string $html): string
+    {
+        $html = preg_replace('/```(?:html)?|```/', '', $html);
+        $html = trim($html);
+        return strip_tags($html, '<h2><h3><p><ul><ol><li><strong><em><br>');
+    }
+
+    protected function templateTitle(string $name, string $type): string
+    {
+        return match ($type) {
+            'product' => Str::limit($name . ' in Canada | ' . get_setting('website_name', config('app.name')), 60, ''),
+            'category' => Str::limit($name . ' Supplier in Canada', 60, ''),
+            'page' => Str::limit($name . ' | Canada', 60, ''),
+            default => Str::limit($name . ' Canada SEO Guide', 60, ''),
+        };
+    }
+
+    protected function templateDescription(string $name, string $type): string
+    {
+        return match ($type) {
+            'product' => Str::limit('Shop ' . $name . ' in Canada with reliable supply, clear specs, competitive pricing, and expert support for Canadian buyers.', 160, ''),
+            'category' => Str::limit('Explore ' . $name . ' in Canada. Compare options, request pricing, and source dependable products for business and industrial needs.', 160, ''),
+            'page' => Str::limit('Learn about ' . $name . ' for Canadian customers with helpful details, trusted support, and clear next steps.', 160, ''),
+            default => Str::limit('Find practical Canada-focused information about ' . $name . ' with expert guidance and useful next steps.', 160, ''),
+        };
+    }
+
+    protected function primaryCanadaKeyword(string $name, string $type): string
+    {
+        $suffix = match ($type) {
+            'product' => 'Canada',
+            'category' => 'supplier Canada',
+            'page' => 'Canada',
+            default => 'Canada',
+        };
+        return Str::limit(Str::lower(trim($name . ' ' . $suffix)), 80, '');
+    }
+
+    protected function canadaKeywordSet(string $name, string $type): array
+    {
+        $base = Str::lower($name);
+        $intent = $type === 'category' ? 'supplier' : ($type === 'product' ? 'buy' : 'services');
+        return array_values(array_unique([
+            "{$base} Mississauga",
+            "{$base} Brampton",
+            "{$base} Toronto",
+            "{$base} GTA",
+            "{$base} Etobicoke",
+            "{$base} Vaughan",
+            "{$base} Oakville",
+            "{$base} Scarborough",
+            "{$base} Markham",
+            "{$base} North York",
+            "{$base} Burlington",
+            "{$base} trade account",
+            "{$base} leave a review",
+            "{$base} Canadian supplier",
+            "{$intent} {$base} Mississauga",
+        ]));
+    }
+
+    protected function competitorContext(): string
+    {
+        $raw = (string) get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', ''));
+        $urls = $this->parseCompetitorUrls($raw);
+
+        if (empty($urls)) {
+            return '';
+        }
+
+        return "Competitor websites to outrank/reference for keyword gaps and content angles: "
+            . implode(', ', array_slice($urls, 0, 8))
+            . ". Do not copy their wording. Do not mention competitor brand names.\n";
+    }
+
+    protected function parseCompetitorUrls(string $raw): array
+    {
+        if (trim($raw) === '') {
+            return [];
+        }
+
+        $normalized = preg_replace('/(https?:\/\/)/', '|||$1', $raw);
+        $parts = str_contains($normalized, '|||')
+            ? explode('|||', $normalized)
+            : preg_split('/[\r\n,]+/', $raw);
+
+        $urls = [];
+        foreach ($parts as $part) {
+            $url = trim($part);
+            if ($url === '') {
+                continue;
+            }
+            if (!preg_match('#^https?://#i', $url)) {
+                $url = 'https://' . ltrim($url, '/');
+            }
+            if (filter_var($url, FILTER_VALIDATE_URL)) {
+                $urls[] = rtrim($url, '/');
+            }
+        }
+
+        return array_values(array_unique($urls));
+    }
+
+    protected function templateContentHtml(string $name, string $type, array $meta): string
+    {
+        $keyword = $meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type);
+
+        if ($type === 'product') {
+            return '<h2>' . e($name) . ' for Canadian Buyers</h2>'
+                . '<p>' . e($name . ' is prepared for customers across Canada who need dependable supply, clear product information, and practical buying support.') . '</p>'
+                . '<h3>Key Benefits</h3><ul><li>Suitable for business, industrial, and trade purchasing needs.</li><li>Local sourcing support for Mississauga, Brampton, Toronto, Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, and Burlington.</li><li>Clear product details to help compare quality, fit, and value.</li></ul>'
+                . '<h3>Related Keywords</h3><p>' . e($keyword . ', ' . implode(', ', $this->canadaKeywordSet($name, $type))) . '</p>';
+        }
+
+        if ($type === 'category') {
+            return '<h2>' . e($name) . ' in Canada</h2>'
+                . '<p>' . e('Browse ' . $name . ' for Canadian business and industrial requirements. This category is structured to help buyers compare products, applications, and purchasing options quickly.') . '</p>'
+                . '<h3>How to Choose</h3><p>Review specifications, use case, availability, compliance needs, and long-term value before selecting the right option.</p>'
+                . '<h3>Local Supply Coverage</h3><p>Useful for buyers searching in Mississauga, Brampton, Toronto, Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington, and across the GTA.</p>';
+        }
+
+        return '<h2>' . e($name) . ' in Canada</h2>'
+            . '<p>' . e('This page explains ' . $name . ' for Canadian customers, including helpful details, trust signals, and practical next steps.') . '</p>'
+            . '<h3>What You Should Know</h3><p>Use this information to compare options, understand requirements, and choose the right solution for your needs.</p>'
+            . '<h3>Frequently Asked Questions</h3><p><strong>Is this available in Canada?</strong> Yes, this content is optimized for Canadian search intent and buyer expectations.</p>';
+    }
+
+    protected function categoryIntroHtml(string $name, array $meta): string
+    {
+        return '<p>' . e('Shop ' . $name . ' in Canada with a focused selection, helpful product details, and support for Canadian buyers comparing quality, availability, and value.') . '</p>';
     }
 
     protected function grade(int $score): string

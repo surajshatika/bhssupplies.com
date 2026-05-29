@@ -15,6 +15,8 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 @php
     $totalRevisions = count($histories);
     $avgScore = $totalRevisions ? round(array_sum(array_column($histories, 'score')) / $totalRevisions) : 0;

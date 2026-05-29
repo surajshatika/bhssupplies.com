@@ -347,6 +347,7 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         // Dashboard & Run
         Route::get('/seo-suite',             'index')->name('admin.seo-suite.index');
         Route::post('/seo-suite/run',        'run')->name('admin.seo-suite.run');
+        Route::post('/seo-suite/bulk-pending','bulkOptimizePendingUrls')->name('admin.seo-suite.bulk_pending');
 
         // Settings
         Route::get('/seo-suite/settings',    'settings')->name('admin.seo-suite.settings.view');

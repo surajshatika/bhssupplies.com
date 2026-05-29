@@ -12,11 +12,45 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 @if($setupRequired)
     <div class="alert alert-warning">
         {{ translate('SEO suite database tables are missing. Run the four SEO migrations to activate task history, score tracking, and redirects.') }}
     </div>
 @endif
+
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0 h6">{{ translate('Local On-Page AI Strategy') }}</h5>
+        <span class="badge badge-soft-primary">{{ translate('Mississauga / Brampton / Toronto first') }}</span>
+    </div>
+    <div class="card-body">
+        <div class="row gutters-16">
+            <div class="col-md-4 mb-3 mb-md-0">
+                <strong class="small d-block mb-2">{{ translate('Primary Targets') }}</strong>
+                <span class="badge badge-success mr-1">Mississauga</span>
+                <span class="badge badge-success mr-1">Brampton</span>
+                <span class="badge badge-success">Toronto</span>
+            </div>
+            <div class="col-md-5 mb-3 mb-md-0">
+                <strong class="small d-block mb-2">{{ translate('Secondary Targets') }}</strong>
+                @foreach(['Etobicoke','Vaughan','Oakville','Scarborough','Markham','North York','Burlington'] as $city)
+                    <span class="badge badge-soft-info mr-1 mb-1">{{ $city }}</span>
+                @endforeach
+            </div>
+            <div class="col-md-3">
+                <strong class="small d-block mb-2">{{ translate('Conversion Intent') }}</strong>
+                <span class="badge badge-soft-warning mr-1">{{ translate('Trade Account') }}</span>
+                <span class="badge badge-soft-warning">{{ translate('Leave a Review') }}</span>
+            </div>
+        </div>
+        <div class="alert alert-info py-2 mt-3 mb-0 small">
+            <i class="las la-brain mr-1"></i>
+            {{ translate('Use Local On-Page Blueprint for page-level title, description, headings, schema, internal links, competitor-gap angles, and quick fixes. Autopilot continues to skip SEO-done URLs.') }}
+        </div>
+    </div>
+</div>
 
 <div class="row gutters-16 mb-4">
     @foreach($features as $key => $label)
@@ -93,21 +127,22 @@
 
                     <div id="dynamicFields">
                         <!-- URL Field -->
-                        <div class="form-group tool-field" data-tools="meta_tags,keyword_density,heading_structure,internal_links,readability,seo_audit,open_graph,schema_markup">
+                        <div class="form-group tool-field" data-tools="local_onpage_blueprint,meta_tags,keyword_density,heading_structure,internal_links,readability,seo_audit,open_graph,schema_markup">
                             <label>{{ translate('Target URL') }}</label>
                             <input type="url" class="form-control" name="url" placeholder="https://example.com/page">
                         </div>
 
                         <!-- Content writer topic -->
-                        <div class="form-group tool-field" data-tools="content_writer" style="display:none">
+                        <div class="form-group tool-field" data-tools="local_onpage_blueprint,content_writer" style="display:none">
                             <label>{{ translate('Topic for Article') }}</label>
                             <input type="text" class="form-control" name="topic" placeholder="e.g. Benefits of Industrial Gloves">
                         </div>
                         
                         <!-- Primary Keyword -->
-                        <div class="form-group tool-field" data-tools="keyword_density,content_writer" style="display:none">
+                        <div class="form-group tool-field" data-tools="local_onpage_blueprint,keyword_density,content_writer,meta_tags,heading_structure,seo_audit" style="display:none">
                             <label>{{ translate('Primary Keyword') }}</label>
-                            <input type="text" class="form-control" name="keyword" placeholder="industrial safety gloves">
+                            <input type="text" class="form-control" name="keyword" placeholder="HVAC supplies Mississauga">
+                            <small class="text-muted">{{ translate('AI will prioritize Mississauga, Brampton, Toronto, nearby GTA cities, Trade Account, Leave a Review, and configured competitor gap angles.') }}</small>
                         </div>
 
                         <!-- Images field -->

@@ -43,7 +43,7 @@
             @endforeach
         @endif
 
-        <a href="{{ $product_url }}" class="d-block pc-img-link">
+        <a href="{{ $product_url }}" class="d-block pc-img-link {{ $showHoverImage ? 'has-hover-image' : '' }}">
             <img class="{{ $isPriorityImage ? '' : 'lazyload' }} pc-img"
                 src="{{ $isPriorityImage ? $mainImage : $placeholderImage }}"
                 @if(!$isPriorityImage) data-src="{{ $mainImage }}" @endif

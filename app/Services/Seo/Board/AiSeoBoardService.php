@@ -537,9 +537,8 @@ class AiSeoBoardService
     }
 
     /**
-     * Apply an AI-generated fix to a single entity. Writes ONLY missing
-     * fields (meta_title, meta_description, og_image, focus_keyword,
-     * schema_json) so existing curated SEO content is never overwritten.
+     * Apply an AI-generated fix to a single pending entity. SEO-done rows are
+     * protected, while weak pending rows can have bad meta/content repaired.
      *
      * @return array{applied: array<string,string>, score_before:int, score_after:int, source: 'ai'|'template'}
      */
@@ -552,6 +551,17 @@ class AiSeoBoardService
             throw new \RuntimeException("Entity {$type}#{$id} not found.");
         }
 
+        $currentRow = $this->buildRow($entity, $type);
+        if ($this->isSeoDoneRow($currentRow)) {
+            return [
+                'applied'      => [],
+                'score_before' => (int) ($currentRow['score'] ?? 0),
+                'score_after'  => (int) ($currentRow['score'] ?? 0),
+                'source'       => 'protected',
+                'row'          => $currentRow,
+            ];
+        }
+
         $before = $this->scoreEntity($entity, $type);
         $meta   = $this->loadOrSynthesizeMeta($entity, $type);
         $name   = $this->displayName($entity, $type);
@@ -559,38 +569,46 @@ class AiSeoBoardService
 
         $applied = [];
         $source  = 'template';
+        $actualProvider = null;
 
-        $ai = SeoProviderManager::make($providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')));
-
-        $aiData = null;
-        if ($ai && method_exists($ai, 'isConfigured') && $ai->isConfigured()) {
-            $aiData = $this->askAiForSeoBundle($ai, $name, $desc, $type);
-            if (!empty($aiData)) {
-                $source = 'ai';
-            }
+        $bundle = $this->askBestAiForSeoBundle(
+            $providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')),
+            $name,
+            $desc,
+            $type
+        );
+        $aiData = $bundle['data'];
+        if (!empty($aiData)) {
+            $source = 'ai';
+            $actualProvider = $bundle['provider'];
         }
 
         $patch = [];
 
-        if (empty($meta['meta_title'])) {
-            $patch['meta_title'] = $aiData['title']
-                ?? $this->templateTitle($name, $type);
-            $applied['meta_title'] = $patch['meta_title'];
-        }
+        $candidateFocus = $this->normalizeFocusKeyword(
+            $aiData['focus_keyword'] ?? ($meta['focus_keyword'] ?? null),
+            $name,
+            $type
+        );
 
-        if (empty($meta['meta_description'])) {
-            $patch['meta_description'] = !empty($aiData['description'])
-                ? $this->fitDescription($aiData['description'])
-                : $this->templateDescription($name, $type);
-            $applied['meta_description'] = $patch['meta_description'];
-        }
-
-        if (empty($meta['focus_keyword'])) {
-            $patch['focus_keyword'] = $aiData['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type);
+        if ($this->needsFocusKeywordRefresh($meta['focus_keyword'] ?? null)) {
+            $patch['focus_keyword'] = $candidateFocus;
             $applied['focus_keyword'] = $patch['focus_keyword'];
         }
 
-        if (empty($meta['secondary_keywords'])) {
+        $focusForCopy = $patch['focus_keyword'] ?? ($meta['focus_keyword'] ?? $candidateFocus);
+
+        if ($this->needsMetaTitleRefresh($meta['meta_title'] ?? null, $focusForCopy)) {
+            $patch['meta_title'] = $this->bestTitleForFocus($aiData['title'] ?? null, $focusForCopy, $name, $type);
+            $applied['meta_title'] = $patch['meta_title'];
+        }
+
+        if ($this->needsMetaDescriptionRefresh($meta['meta_description'] ?? null, $focusForCopy)) {
+            $patch['meta_description'] = $this->bestDescriptionForFocus($aiData['description'] ?? null, $focusForCopy, $name, $type);
+            $applied['meta_description'] = $patch['meta_description'];
+        }
+
+        if ($this->needsSecondaryKeywordsRefresh($meta['secondary_keywords'] ?? null)) {
             $patch['secondary_keywords'] = $aiData['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type);
             $applied['secondary_keywords'] = implode(', ', $patch['secondary_keywords']);
         }
@@ -645,6 +663,10 @@ class AiSeoBoardService
             $this->persistMeta($entity, $type, $patch);
         }
 
+        if (!empty($applied) && $actualProvider) {
+            $applied['ai_provider'] = $actualProvider;
+        }
+
         $entity->refresh();
         $afterScore = $this->scoreEntity($entity, $type);
         $this->persistMeta($entity, $type, [
@@ -688,13 +710,16 @@ class AiSeoBoardService
         $desc   = $this->plainContent($entity, $type);
 
         $source = 'template';
-        $ai = SeoProviderManager::make($providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')));
         $aiData = null;
-        if ($ai && method_exists($ai, 'isConfigured') && $ai->isConfigured()) {
-            $aiData = $this->askAiForSeoBundle($ai, $name, $desc, $type);
-            if (!empty($aiData)) {
-                $source = 'ai';
-            }
+        $bundle = $this->askBestAiForSeoBundle(
+            $providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')),
+            $name,
+            $desc,
+            $type
+        );
+        if (!empty($bundle['data'])) {
+            $aiData = $bundle['data'];
+            $source = 'ai';
         }
 
         $suggestions = [];
@@ -1028,6 +1053,9 @@ class AiSeoBoardService
         $alts = [];
         if ($rawHtml !== '' && preg_match_all('/<img\s[^>]*alt=["\']([^"\']*)["\']/i', $rawHtml, $m)) {
             $alts = array_values(array_filter($m[1]));
+        }
+        if (empty($alts) && $this->fallbackImage($entity, $type)) {
+            $alts[] = (string) ($meta['focus_keyword'] ?? $this->displayName($entity, $type));
         }
 
         // Entity pages in this app always render a canonical via the layout,
@@ -1484,6 +1512,118 @@ class AiSeoBoardService
         }
     }
 
+    /**
+     * Try the selected AI first, then fall back through the strongest configured
+     * SEO writers. Weak/partial JSON is repaired once, but empty or unusable
+     * output moves to the next provider automatically.
+     */
+    protected function askBestAiForSeoBundle(?string $preferredProvider, string $name, string $description, string $type): array
+    {
+        $tried = [];
+
+        foreach ($this->providerFallbackOrder($preferredProvider) as $providerName) {
+            $ai = SeoProviderManager::make($providerName);
+            if (!$ai || !method_exists($ai, 'isConfigured') || !$ai->isConfigured()) {
+                continue;
+            }
+
+            $actualName = method_exists($ai, 'getName') ? $ai->getName() : $providerName;
+            $data = $this->askAiForSeoBundle($ai, $name, $description, $type);
+            $tried[] = $actualName;
+
+            if (empty($data)) {
+                logger()->info('AI SEO provider returned empty bundle; trying fallback', [
+                    'provider' => $actualName,
+                    'type' => $type,
+                    'name' => Str::limit($name, 80),
+                ]);
+                continue;
+            }
+
+            $data = $this->repairSeoBundle($data, $name, $type);
+            if ($this->seoBundleHasMinimumQuality($data)) {
+                return [
+                    'data' => $data,
+                    'provider' => $actualName,
+                    'tried' => $tried,
+                ];
+            }
+
+            logger()->info('AI SEO provider bundle was too weak; trying fallback', [
+                'provider' => $actualName,
+                'type' => $type,
+                'name' => Str::limit($name, 80),
+            ]);
+        }
+
+        return ['data' => null, 'provider' => null, 'tried' => $tried];
+    }
+
+    protected function providerFallbackOrder(?string $preferredProvider): array
+    {
+        $preferred = $this->normalizeProviderName($preferredProvider ?: config('seo.default_provider', 'openai'));
+
+        return array_values(array_unique(array_filter([
+            $preferred,
+            'claude',
+            'openai',
+            'gemini',
+            'grok',
+        ])));
+    }
+
+    protected function normalizeProviderName(?string $provider): ?string
+    {
+        $provider = Str::lower(trim((string) $provider));
+
+        return match ($provider) {
+            'anthropic' => 'claude',
+            'chatgpt' => 'openai',
+            'google' => 'gemini',
+            'xai' => 'grok',
+            default => $provider ?: null,
+        };
+    }
+
+    protected function seoBundleHasMinimumQuality(array $data): bool
+    {
+        return !empty($data['title'])
+            && !empty($data['description'])
+            && !empty($data['focus_keyword'])
+            && str_word_count(strip_tags((string) ($data['content_html'] ?? ''))) >= 220;
+    }
+
+    protected function repairSeoBundle(array $data, string $name, string $type): array
+    {
+        $focus = trim((string) ($data['focus_keyword'] ?? ''));
+        if ($focus === '') {
+            $focus = $this->primaryCanadaKeyword($name, $type);
+            $data['focus_keyword'] = $focus;
+        }
+
+        if (empty($data['title']) || mb_stripos((string) $data['title'], $focus) === false) {
+            $data['title'] = $this->titleWithFocus($focus, $name, $type);
+        }
+
+        if (empty($data['description']) || mb_stripos((string) $data['description'], $focus) === false) {
+            $data['description'] = $this->descriptionWithFocus($focus, $name, $type);
+        } else {
+            $data['description'] = $this->fitDescription((string) $data['description']);
+        }
+
+        if (empty($data['secondary_keywords']) || !is_array($data['secondary_keywords'])) {
+            $data['secondary_keywords'] = $this->canadaKeywordSet($name, $type);
+        }
+
+        $html = trim((string) ($data['content_html'] ?? ''));
+        if ($html === '') {
+            $html = $this->templateContentHtml($name, $type, $data);
+        }
+        $data['content_html'] = $this->ensureSeoContentSignals($html, $name, $type, $data);
+
+        return $data;
+    }
+
     protected function askAiForSeoBundle($ai, string $name, string $description, string $type): ?array
     {
         $siteName = get_setting('website_name', config('app.name'));
@@ -1517,7 +1657,7 @@ class AiSeoBoardService
             . '{"title":"SEO title 50-60 chars with focus keyword first","description":"meta description 150-160 chars, never under 150, focus keyword + benefit + CTA","focus_keyword":"primary keyword phrase","secondary_keywords":["keyword 1","keyword 2","keyword 3","keyword 4","keyword 5"],"'.$contentField.'":"clean HTML; focus keyword in at least one <h2>; H2/H3 sections; Canada intent; benefits; FAQ","faqs":[{"question":"...","answer":"..."}]}';
 
         try {
-            $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 1000]);
+            $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 1800]);
             if (!$raw) {
                 return null;
             }
@@ -1558,6 +1698,8 @@ class AiSeoBoardService
             $html = $this->templateContentHtml($this->displayName($entity, $type), $type, $meta);
         }
 
+        $name = $this->displayName($entity, $type);
+        $html = $this->ensureSeoContentSignals($html, $name, $type, $meta);
         $html = $this->cleanGeneratedHtml($html);
         if ($html === '') {
             return [];
@@ -1567,21 +1709,21 @@ class AiSeoBoardService
         $patch = [];
 
         if ($type === 'product') {
-            if (Schema::hasColumn($table, 'description') && $this->isThinContent($entity->description ?? null, 180)) {
-                $patch['description'] = $html;
+            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 300)) {
+                $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta);
             }
-            if (Schema::hasColumn($table, 'short_description') && $this->isThinContent($entity->short_description ?? null, 70)) {
-                $patch['short_description'] = Str::limit(strip_tags($html), 240, '');
+            if (Schema::hasColumn($table, 'short_description') && $this->needsSeoContentRefresh($entity->short_description ?? null, $meta, 45, false)) {
+                $patch['short_description'] = $this->shortSeoText($name, $type, $meta);
             }
         } elseif ($type === 'category') {
-            if (Schema::hasColumn($table, 'top_description') && $this->isThinContent($entity->top_description ?? null, 80)) {
-                $patch['top_description'] = $this->categoryIntroHtml($this->displayName($entity, $type), $meta);
+            if (Schema::hasColumn($table, 'top_description') && $this->needsSeoContentRefresh($entity->top_description ?? null, $meta, 60, false)) {
+                $patch['top_description'] = $this->categoryIntroHtml($name, $meta);
             }
-            if (Schema::hasColumn($table, 'bottom_description') && $this->isThinContent($entity->bottom_description ?? null, 180)) {
-                $patch['bottom_description'] = $html;
+            if (Schema::hasColumn($table, 'bottom_description') && $this->needsSeoContentRefresh($entity->bottom_description ?? null, $meta, 300)) {
+                $patch['bottom_description'] = $this->mergeSeoHtml($entity->bottom_description ?? null, $html, $meta);
             }
-        } elseif ($type === 'page' && Schema::hasColumn($table, 'content') && $this->isThinContent($entity->content ?? null, 180)) {
-            $patch['content'] = $html;
+        } elseif ($type === 'page' && Schema::hasColumn($table, 'content') && $this->needsSeoContentRefresh($entity->content ?? null, $meta, 300)) {
+            $patch['content'] = $this->mergeSeoHtml($entity->content ?? null, $html, $meta);
         }
 
         return $patch;
@@ -1592,21 +1734,177 @@ class AiSeoBoardService
         return str_word_count(strip_tags((string) $value)) < $minWords;
     }
 
+    protected function needsSeoContentRefresh($value, array $meta, int $minWords, bool $needHeading = true): bool
+    {
+        $html = trim((string) $value);
+        $plain = trim(preg_replace('/\s+/', ' ', strip_tags($html)));
+        $focus = trim((string) ($meta['focus_keyword'] ?? ''));
+
+        if (str_word_count($plain) < $minWords) {
+            return true;
+        }
+        if ($focus !== '' && mb_stripos($plain, $focus) === false) {
+            return true;
+        }
+        if ($needHeading && $focus !== '' && !$this->htmlHeadingContains($html, $focus)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    protected function mergeSeoHtml($current, string $generated, array $meta): string
+    {
+        $current = trim((string) $current);
+        if ($current === '') {
+            return $generated;
+        }
+
+        $focus = trim((string) ($meta['focus_keyword'] ?? ''));
+        $plain = trim(preg_replace('/\s+/', ' ', strip_tags($current)));
+        if ($focus !== '' && mb_stripos($plain, $focus) !== false && str_word_count($plain) >= 300 && $this->htmlHeadingContains($current, $focus)) {
+            return $current;
+        }
+
+        return $generated . "\n\n" . $current;
+    }
+
+    protected function htmlHeadingContains(string $html, string $needle): bool
+    {
+        if ($html === '' || $needle === '') {
+            return false;
+        }
+
+        if (!preg_match_all('/<h[23][^>]*>(.*?)<\/h[23]>/is', $html, $matches)) {
+            return false;
+        }
+
+        foreach ($matches[1] as $heading) {
+            if (mb_stripos(strip_tags($heading), $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     protected function cleanGeneratedHtml(string $html): string
     {
         $html = preg_replace('/```(?:html)?|```/', '', $html);
         $html = trim($html);
-        return strip_tags($html, '<h2><h3><p><ul><ol><li><strong><em><br>');
+        $html = preg_replace('/\s(on\w+|style)=["\'][^"\']*["\']/i', '', $html);
+        $html = preg_replace('/href=["\']\s*javascript:[^"\']*["\']/i', 'href="#"', $html);
+        return strip_tags($html, '<h2><h3><p><ul><ol><li><strong><em><br><a>');
+    }
+
+    protected function ensureSeoContentSignals(string $html, string $name, string $type, array $meta): string
+    {
+        $focus = trim((string) ($meta['focus_keyword'] ?? ''));
+        if ($focus === '') {
+            $focus = $this->primaryCanadaKeyword($name, $type);
+            $meta['focus_keyword'] = $focus;
+        }
+
+        $plain = trim(preg_replace('/\s+/', ' ', strip_tags($html)));
+        $needsCoreBlock = str_word_count($plain) < 300
+            || mb_stripos($plain, $focus) === false
+            || !$this->htmlHeadingContains($html, $focus);
+
+        if ($needsCoreBlock) {
+            return $this->seoSupportHtml($name, $type, $meta) . ($html !== '' ? "\n\n" . $html : '');
+        }
+
+        if (!$this->hasAnyLink($html)) {
+            $html .= "\n\n" . $this->seoLinkParagraph($meta);
+        }
+
+        return $html;
+    }
+
+    protected function seoSupportHtml(string $name, string $type, array $meta): string
+    {
+        $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
+        $keywordList = implode(', ', array_slice($meta['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type), 0, 10));
+        $areaText = 'Mississauga, Brampton, Toronto, Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington and the wider GTA';
+
+        $intro = match ($type) {
+            'product' => "{$focus} is prepared for Canadian buyers who need reliable supply, practical product details, and clear purchasing support. BHS Supplies helps contractors, maintenance teams, facility buyers, and trade customers compare fit, availability, and value across {$areaText}.",
+            'category' => "{$focus} options help Canadian buyers compare product families, applications, availability, and trade purchasing needs in one place. This category supports sourcing for contractors, maintenance teams, businesses, and local buyers across {$areaText}.",
+            'page' => "{$focus} information is organized for Canadian customers who need clear next steps, local trust signals, and practical support from BHS Supplies across {$areaText}.",
+            default => "{$focus} is covered with Canadian search intent, buyer questions, and practical guidance for customers across {$areaText}.",
+        };
+
+        return '<h2>' . e(Str::title($focus)) . ' for Canada and GTA Buyers</h2>'
+            . '<p>' . e($intro) . '</p>'
+            . '<h3>Why Buyers Choose BHS Supplies</h3>'
+            . '<p>' . e('Customers often need fast access to product information, dependable stock, and a supplier that understands commercial, residential, and trade requirements. Because buying decisions depend on compatibility, quality, price, and delivery, this page keeps the most important selection points easy to review before ordering.') . '</p>'
+            . '<ul>'
+            . '<li>Canada-focused sourcing for local and regional buyers.</li>'
+            . '<li>Helpful support for bulk orders, trade account needs, and repeat purchasing.</li>'
+            . '<li>Useful coverage for HVAC, plumbing, electrical, hardware, and related supply searches.</li>'
+            . '<li>Clear product or category context so buyers can compare specifications and use cases.</li>'
+            . '</ul>'
+            . '<h3>Applications and Selection Notes</h3>'
+            . '<p>' . e('The right choice depends on the job site, required size, installation conditions, durability expectations, and how quickly the item is needed. Buyers should compare product details with the intended application, then confirm whether accessories, replacement parts, or compatible items are required. Additionally, repeat buyers can use trade account support to simplify future orders and keep purchasing more consistent.') . '</p>'
+            . '<h3>Local Search Coverage</h3>'
+            . '<p>' . e("This page is optimized for buyers searching in {$areaText}. It also supports trade account, pickup, quote request, and leave a review intent where those actions are natural for the customer journey.") . '</p>'
+            . '<h3>Related Canada Keywords</h3>'
+            . '<p>' . e($keywordList) . '</p>'
+            . $this->seoLinkParagraph($meta)
+            . '<h3>Buying Guidance</h3>'
+            . '<p>' . e('First, confirm the product size, application, material, and compatibility. Next, compare delivery or pickup needs with order quantity and pricing. Finally, contact BHS Supplies when you need help matching an item, opening a trade account, or planning a repeat order for your business.') . '</p>';
+    }
+
+    protected function seoLinkParagraph(array $meta): string
+    {
+        $focus = trim((string) ($meta['focus_keyword'] ?? 'products'));
+
+        return '<p>For related options, browse <a href="' . e(url('/shop')) . '">BHS Supplies products</a> or review <a href="' . e(url('/users/login')) . '">trade account access</a>. Canadian business buyers can also review general small business guidance from <a href="https://www.canada.ca/en/services/business.html" rel="nofollow noopener" target="_blank">Canada.ca</a> while comparing ' . e($focus) . ' purchasing requirements.</p>';
+    }
+
+    protected function hasAnyLink(string $html): bool
+    {
+        return (bool) preg_match('/<a\s[^>]*href=["\'][^"\']+["\']/i', $html);
+    }
+
+    protected function titleWithFocus(string $focus, string $name, string $type): string
+    {
+        $focusTitle = Str::title(trim($focus));
+        $tail = match ($type) {
+            'product' => 'Trusted Canada Supplier 2026',
+            'category' => 'Wholesale Canada 2026',
+            'page' => 'Canada Guide 2026',
+            default => 'Canada SEO Guide 2026',
+        };
+
+        $title = trim($focusTitle . ' | ' . $tail);
+        if (mb_strlen($title) > 60) {
+            $title = trim($focusTitle . ' Canada');
+        }
+        if (mb_strlen($title) < 30) {
+            $title .= ' | BHS Supplies';
+        }
+
+        return Str::limit($title, 60, '');
+    }
+
+    protected function descriptionWithFocus(string $focus, string $name, string $type): string
+    {
+        $focusTitle = Str::title(trim($focus));
+        $text = "{$focusTitle} for Mississauga, Brampton, Toronto and GTA buyers. Compare specs, trade pricing, stock, pickup options, and order from BHS Supplies.";
+
+        return $this->fitDescription($text);
+    }
+
+    protected function shortSeoText(string $name, string $type, array $meta): string
+    {
+        $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
+        return Str::limit(strip_tags($this->descriptionWithFocus($focus, $name, $type)), 240, '');
     }
 
     protected function templateTitle(string $name, string $type): string
     {
-        return match ($type) {
-            'product' => Str::limit($name . ' in Canada | ' . get_setting('website_name', config('app.name')), 60, ''),
-            'category' => Str::limit($name . ' Supplier in Canada', 60, ''),
-            'page' => Str::limit($name . ' | Canada', 60, ''),
-            default => Str::limit($name . ' Canada SEO Guide', 60, ''),
-        };
+        return $this->titleWithFocus($this->primaryCanadaKeyword($name, $type), $name, $type);
     }
 
     protected function templateDescription(string $name, string $type): string
@@ -1651,15 +1949,103 @@ class AiSeoBoardService
         return $text;
     }
 
+    protected function normalizeFocusKeyword($value, string $name, string $type): string
+    {
+        $keyword = trim(preg_replace('/\s+/', ' ', strip_tags((string) $value)));
+        if ($keyword === '') {
+            $keyword = $this->primaryCanadaKeyword($name, $type);
+        }
+
+        $keyword = preg_replace('/\s+\|\s+.*$/', '', $keyword);
+        $keyword = trim($keyword, " \t\n\r\0\x0B-_,.;:");
+
+        if (mb_strlen($keyword) > 58 || str_word_count($keyword) > 8) {
+            $words = preg_split('/\s+/', $keyword);
+            $keyword = implode(' ', array_slice($words, 0, 6));
+        }
+
+        if (mb_strlen($keyword) > 58) {
+            $keyword = mb_substr($keyword, 0, 58);
+            $lastSpace = mb_strrpos($keyword, ' ');
+            if ($lastSpace !== false && $lastSpace > 20) {
+                $keyword = mb_substr($keyword, 0, $lastSpace);
+            }
+        }
+
+        $keyword = trim($keyword, " \t\n\r\0\x0B-_,.;:");
+        if ($keyword === '') {
+            $keyword = $this->primaryCanadaKeyword($name, $type);
+        }
+
+        return Str::lower($keyword);
+    }
+
+    protected function needsFocusKeywordRefresh($value): bool
+    {
+        $value = trim((string) $value);
+        return $value === '' || mb_strlen($value) > 65 || str_word_count($value) > 9;
+    }
+
+    protected function needsMetaTitleRefresh($value, string $focus): bool
+    {
+        $value = trim((string) $value);
+        $len = mb_strlen($value);
+
+        return $value === ''
+            || $len < 30
+            || $len > 60
+            || ($focus !== '' && mb_stripos($value, $focus) === false);
+    }
+
+    protected function needsMetaDescriptionRefresh($value, string $focus): bool
+    {
+        $value = trim((string) $value);
+        $len = mb_strlen($value);
+
+        return $value === ''
+            || $len < 120
+            || $len > 160
+            || ($focus !== '' && mb_stripos($value, $focus) === false);
+    }
+
+    protected function needsSecondaryKeywordsRefresh($value): bool
+    {
+        if (is_string($value)) {
+            $value = preg_split('/[\r\n,]+/', $value);
+        }
+
+        return !is_array($value) || count(array_filter($value)) < 5;
+    }
+
+    protected function bestTitleForFocus($aiTitle, string $focus, string $name, string $type): string
+    {
+        $aiTitle = trim((string) $aiTitle);
+        $len = mb_strlen($aiTitle);
+        if ($aiTitle !== '' && $len >= 30 && $len <= 60 && mb_stripos($aiTitle, $focus) !== false) {
+            return $aiTitle;
+        }
+
+        return $this->titleWithFocus($focus, $name, $type);
+    }
+
+    protected function bestDescriptionForFocus($aiDescription, string $focus, string $name, string $type): string
+    {
+        $aiDescription = trim((string) $aiDescription);
+        if ($aiDescription !== '' && mb_stripos($aiDescription, $focus) !== false) {
+            return $this->fitDescription($aiDescription);
+        }
+
+        return $this->descriptionWithFocus($focus, $name, $type);
+    }
+
     protected function primaryCanadaKeyword(string $name, string $type): string
     {
-        $suffix = match ($type) {
-            'product' => 'Canada',
-            'category' => 'supplier Canada',
-            'page' => 'Canada',
-            default => 'Canada',
+        $keyword = match ($type) {
+            'category' => trim($name . ' supplier'),
+            default => trim($name),
         };
-        return Str::limit(Str::lower(trim($name . ' ' . $suffix)), 80, '');
+
+        return Str::limit(Str::lower($keyword), 80, '');
     }
 
     protected function canadaKeywordSet(string $name, string $type): array
@@ -1729,31 +2115,13 @@ class AiSeoBoardService
 
     protected function templateContentHtml(string $name, string $type, array $meta): string
     {
-        $keyword = $meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type);
-
-        if ($type === 'product') {
-            return '<h2>' . e($name) . ' for Canadian Buyers</h2>'
-                . '<p>' . e($name . ' is prepared for customers across Canada who need dependable supply, clear product information, and practical buying support.') . '</p>'
-                . '<h3>Key Benefits</h3><ul><li>Suitable for business, industrial, and trade purchasing needs.</li><li>Local sourcing support for Mississauga, Brampton, Toronto, Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, and Burlington.</li><li>Clear product details to help compare quality, fit, and value.</li></ul>'
-                . '<h3>Related Keywords</h3><p>' . e($keyword . ', ' . implode(', ', $this->canadaKeywordSet($name, $type))) . '</p>';
-        }
-
-        if ($type === 'category') {
-            return '<h2>' . e($name) . ' in Canada</h2>'
-                . '<p>' . e('Browse ' . $name . ' for Canadian business and industrial requirements. This category is structured to help buyers compare products, applications, and purchasing options quickly.') . '</p>'
-                . '<h3>How to Choose</h3><p>Review specifications, use case, availability, compliance needs, and long-term value before selecting the right option.</p>'
-                . '<h3>Local Supply Coverage</h3><p>Useful for buyers searching in Mississauga, Brampton, Toronto, Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington, and across the GTA.</p>';
-        }
-
-        return '<h2>' . e($name) . ' in Canada</h2>'
-            . '<p>' . e('This page explains ' . $name . ' for Canadian customers, including helpful details, trust signals, and practical next steps.') . '</p>'
-            . '<h3>What You Should Know</h3><p>Use this information to compare options, understand requirements, and choose the right solution for your needs.</p>'
-            . '<h3>Frequently Asked Questions</h3><p><strong>Is this available in Canada?</strong> Yes, this content is optimized for Canadian search intent and buyer expectations.</p>';
+        return $this->seoSupportHtml($name, $type, $meta);
     }
 
     protected function categoryIntroHtml(string $name, array $meta): string
     {
-        return '<p>' . e('Shop ' . $name . ' in Canada with a focused selection, helpful product details, and support for Canadian buyers comparing quality, availability, and value.') . '</p>';
+        $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, 'category')));
+        return '<p>' . e(Str::title($focus) . ' in Canada with focused selection, helpful product details, trade account support, and local buying coverage for Mississauga, Brampton, Toronto and the GTA.') . '</p>';
     }
 
     protected function grade(int $score): string
@@ -1786,9 +2154,10 @@ class AiSeoBoardService
         $count    = count($targets);
         $provider = $providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider', 'openai'));
 
-        // Per-entity token estimate: ~600 input + 250 output (title+desc+focus_kw)
-        $inPerEntity  = 600;
-        $outPerEntity = 250;
+        // Per-entity estimate covers title, description, keywords, content HTML,
+        // FAQs, and possible provider fallback.
+        $inPerEntity  = 900;
+        $outPerEntity = 1200;
 
         $rates = $this->providerRates($provider);
 
@@ -1876,13 +2245,13 @@ class AiSeoBoardService
     /**
      * Create a SeoFixBatch row and dispatch the worker job. Returns the batch.
      */
-    public function createBatch(array $targets, ?string $providerName = null, ?int $userId = null, ?string $label = null): SeoFixBatch
+    public function createBatch(array $targets, ?string $providerName = null, ?int $userId = null, ?string $label = null, bool $dispatch = true): SeoFixBatch
     {
         $estimate = $this->estimateBatchCost($targets, $providerName);
 
         $batch = SeoFixBatch::create([
             'project_id'         => null,
-            'label'              => $label ?: 'AI SEO Board batch — ' . now()->format('Y-m-d H:i'),
+            'label'              => $label ?: 'AI SEO Board batch - ' . now()->format('Y-m-d H:i'),
             'status'             => SeoFixBatch::STATUS_QUEUED,
             'provider'           => $estimate['provider'],
             'total'              => count($targets),
@@ -1900,7 +2269,9 @@ class AiSeoBoardService
             'created_by'         => $userId,
         ]);
 
-        AiAutoFixSeoJob::dispatch($batch->id);
+        if ($dispatch) {
+            AiAutoFixSeoJob::dispatch($batch->id);
+        }
 
         return $batch->fresh();
     }

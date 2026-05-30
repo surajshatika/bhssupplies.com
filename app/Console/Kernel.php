@@ -65,6 +65,12 @@ class Kernel extends ConsoleKernel
             ->runInBackground()
             ->appendOutputTo(storage_path('logs/seo-automation.log'));
 
+        $schedule->command('seo:process-ai-batches --limit=10 --max-batches=3')
+            ->everyFiveMinutes()
+            ->withoutOverlapping(10)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/seo-ai-batches.log'));
+
         // SEO — daily score snapshot at 02:30 (records per-entity scores)
         // SEO — weekly broken-link sweep, Monday 03:30
         $schedule->command('seo:auto-optimize-pending')

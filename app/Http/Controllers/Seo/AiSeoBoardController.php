@@ -179,9 +179,14 @@ class AiSeoBoardController extends Controller
      */
     public function bulkEstimate(Request $request): JsonResponse
     {
-        $payload  = $this->bulkPayload($request);
-        $targets  = $this->board->collectTargets($payload);
-        $estimate = $this->board->estimateBatchCost($targets, $request->input('provider'));
+        try {
+            $payload  = $this->bulkPayload($request);
+            $targets  = $this->board->collectTargets($payload);
+            $estimate = $this->board->estimateBatchCost($targets, $request->input('provider'));
+        } catch (Throwable $e) {
+            logger()->error('AI SEO Board bulk estimate failed', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
 
         $guard      = app(SeoBudgetGuard::class);
         $cap        = $guard->dailyCapUsd();
@@ -198,6 +203,7 @@ class AiSeoBoardController extends Controller
             'ai_call'         => $estimate['ai_call'],
             'sync_warning'    => $this->queueWillRunInline() && $estimate['count'] > 25,
             'queue_driver'    => config('queue.default'),
+            'cron_chunked'    => $this->queueWillRunInline(),
             'budget' => [
                 'daily_cap_usd' => $cap,
                 'spent_today'   => round($spent, 4),
@@ -209,8 +215,13 @@ class AiSeoBoardController extends Controller
 
     public function bulkRun(Request $request): JsonResponse
     {
-        $payload = $this->bulkPayload($request);
-        $targets = $this->board->collectTargets($payload);
+        try {
+            $payload = $this->bulkPayload($request);
+            $targets = $this->board->collectTargets($payload);
+        } catch (Throwable $e) {
+            logger()->error('AI SEO Board bulk run payload failed', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
 
         if (empty($targets)) {
             return response()->json(['success' => false, 'error' => 'No matching entities to fix.'], 422);
@@ -230,12 +241,20 @@ class AiSeoBoardController extends Controller
             ], 429);
         }
 
-        $batch = $this->board->createBatch(
-            $targets,
-            $request->input('provider'),
-            optional(auth()->user())->id,
-            $request->input('label')
-        );
+        $runInCronChunks = $this->queueWillRunInline();
+
+        try {
+            $batch = $this->board->createBatch(
+                $targets,
+                $request->input('provider'),
+                optional(auth()->user())->id,
+                $request->input('label'),
+                !$runInCronChunks
+            );
+        } catch (Throwable $e) {
+            logger()->error('AI SEO Board bulk run failed', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
 
         $guard->bustCache();
 
@@ -243,6 +262,7 @@ class AiSeoBoardController extends Controller
             'success'  => true,
             'batch_id' => $batch->id,
             'snapshot' => $this->batchSnapshot($batch),
+            'queued_for_cron' => $runInCronChunks,
         ]);
     }
 
@@ -310,7 +330,7 @@ class AiSeoBoardController extends Controller
             'failed'             => $batch->failed,
             'skipped'            => $batch->skipped,
             'percent'            => $batch->progressPercent(),
-            'current_label'      => $batch->current_label,
+            'current_label'      => $batch->current_label ?: ($this->queueWillRunInline() && $batch->status === SeoFixBatch::STATUS_QUEUED ? 'Queued for cron chunk processor' : null),
             'provider'           => $batch->provider,
             'estimated_cost_usd' => (float) $batch->estimated_cost_usd,
             'actual_cost_usd'    => (float) $batch->actual_cost_usd,
@@ -318,6 +338,8 @@ class AiSeoBoardController extends Controller
             'completed_at'       => optional($batch->completed_at)->toDateTimeString(),
             'is_terminal'        => $batch->isTerminal(),
             'recent_errors'      => array_slice($batch->error_log ?? [], -3),
+            'queue_driver'       => config('queue.default'),
+            'cron_chunked'       => $this->queueWillRunInline(),
         ];
     }
 

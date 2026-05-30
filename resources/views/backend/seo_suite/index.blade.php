@@ -224,6 +224,11 @@
         </span>
     </div>
     <div class="card-body">
+        @php
+            $activeBatch = $autopilot['active_batch'] ?? null;
+            $activeStats = $activeBatch ? ($activeBatch->options['seo_stats'] ?? []) : [];
+            $activeLastResults = $activeBatch ? collect($activeBatch->options['last_results'] ?? [])->take(8) : collect();
+        @endphp
         <div class="row gutters-16 mb-4">
             <div class="col-md-3 mb-3 mb-md-0">
                 <div class="advanced-metric">
@@ -428,6 +433,7 @@
                     <small class="text-muted">
                         @if(!empty($autopilot['active_batch']))
                             {{ ucfirst($autopilot['active_batch']->status) }} - {{ $autopilot['active_batch']->progressPercent() }}%
+                            <span class="d-block">{{ (int) ($activeStats['improved'] ?? 0) }} {{ translate('improved') }} / {{ (int) ($activeStats['seo_done'] ?? 0) }} {{ translate('done') }}</span>
                         @else
                             {{ translate('ready for next run') }}
                         @endif
@@ -500,12 +506,14 @@
                                 <th>{{ translate('Batch') }}</th>
                                 <th>{{ translate('Status') }}</th>
                                 <th>{{ translate('Progress') }}</th>
+                                <th>{{ translate('Impact') }}</th>
                                 <th>{{ translate('Cost') }}</th>
                                 <th>{{ translate('Created') }}</th>
                             </tr>
                         </thead>
                         <tbody>
                             @forelse(($autopilot['recent_batches'] ?? collect()) as $batch)
+                                @php $batchStats = $batch->options['seo_stats'] ?? []; @endphp
                                 <tr>
                                     <td class="small">#{{ $batch->id }}</td>
                                     <td>
@@ -514,15 +522,128 @@
                                         </span>
                                     </td>
                                     <td class="small">{{ $batch->processed }}/{{ $batch->total }} ({{ $batch->progressPercent() }}%)</td>
+                                    <td class="small">
+                                        <span class="text-success">{{ (int) ($batchStats['improved'] ?? 0) }} {{ translate('improved') }}</span>
+                                        <span class="d-block text-info">{{ (int) ($batchStats['seo_done'] ?? 0) }} {{ translate('done') }}</span>
+                                    </td>
                                     <td class="small">${{ number_format((float) $batch->actual_cost_usd, 4) }}</td>
                                     <td class="small text-muted">{{ optional($batch->created_at)->format('M d H:i') }}</td>
                                 </tr>
                             @empty
-                                <tr><td colspan="5" class="text-center text-muted py-3">{{ translate('No automation batches yet.') }}</td></tr>
+                                <tr><td colspan="6" class="text-center text-muted py-3">{{ translate('No automation batches yet.') }}</td></tr>
                             @endforelse
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+        @if($activeLastResults->isNotEmpty())
+            <div class="mt-4">
+                <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
+                    <div>
+                        <h6 class="font-weight-600 mb-0">{{ translate('Active Batch Latest URL Results') }}</h6>
+                        <small class="text-muted">{{ translate('Live batch outcomes from the current automated chunk processor.') }}</small>
+                    </div>
+                    <span class="badge badge-soft-primary">#{{ $activeBatch->id }}</span>
+                </div>
+                <div class="table-responsive border rounded">
+                    <table class="table table-sm mb-0">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>{{ translate('URL') }}</th>
+                                <th>{{ translate('Type') }}</th>
+                                <th>{{ translate('Before / After') }}</th>
+                                <th>{{ translate('Provider') }}</th>
+                                <th>{{ translate('Result') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($activeLastResults as $row)
+                                @php
+                                    $delta = (int) ($row['delta'] ?? 0);
+                                    $deltaClass = $delta > 0 ? 'success' : ($delta < 0 ? 'danger' : 'warning');
+                                @endphp
+                                <tr>
+                                    <td class="text-truncate" style="max-width:420px;">
+                                        <a href="{{ $row['url'] ?? '#' }}" target="_blank" class="small">{{ $row['title'] ?? $row['label'] ?? '-' }}</a>
+                                        <span class="d-block small text-muted">{{ $row['url'] ?? '-' }}</span>
+                                    </td>
+                                    <td><span class="badge badge-soft-info">{{ ucfirst($row['type'] ?? '-') }}</span></td>
+                                    <td>
+                                        <span class="badge badge-{{ $deltaClass }}">
+                                            {{ (int) ($row['before'] ?? 0) }}/100 -> {{ (int) ($row['after'] ?? 0) }}/100
+                                            ({{ $delta > 0 ? '+' : '' }}{{ $delta }})
+                                        </span>
+                                    </td>
+                                    <td class="small text-muted">{{ $row['provider'] ?? $row['source'] ?? '-' }}</td>
+                                    <td>
+                                        <span class="badge badge-{{ !empty($row['seo_done']) ? 'success' : 'warning' }}">
+                                            {{ !empty($row['seo_done']) ? translate('SEO Done') : translate('Still Pending') }}
+                                        </span>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        @endif
+        <div class="mt-4">
+            <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
+                <div>
+                    <h6 class="font-weight-600 mb-0">{{ translate('Last 60 Minutes SEO Score Changes') }}</h6>
+                    <small class="text-muted">{{ translate('Shows processed or rescored URLs even when they are still below the SEO-done threshold.') }}</small>
+                </div>
+                <div class="mt-2 mt-md-0">
+                    <span class="badge badge-soft-success">{{ $autopilot['score_improved_last_hour'] ?? 0 }} {{ translate('improved') }}</span>
+                    <span class="badge badge-soft-info">{{ $autopilot['score_done_last_hour'] ?? 0 }} {{ translate('SEO done') }}</span>
+                </div>
+            </div>
+            <div class="table-responsive border rounded">
+                <table class="table table-sm mb-0">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>{{ translate('URL') }}</th>
+                            <th>{{ translate('Type') }}</th>
+                            <th>{{ translate('Score Change') }}</th>
+                            <th>{{ translate('Status') }}</th>
+                            <th>{{ translate('Time') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse(($autopilot['recent_score_changes'] ?? collect()) as $row)
+                            @php
+                                $delta = $row['delta'];
+                                $deltaClass = is_null($delta) ? 'secondary' : ($delta > 0 ? 'success' : ($delta < 0 ? 'danger' : 'warning'));
+                            @endphp
+                            <tr>
+                                <td class="text-truncate" style="max-width:420px;">
+                                    <a href="{{ $row['url'] }}" target="_blank" class="small">{{ $row['title'] }}</a>
+                                    <span class="d-block small text-muted">{{ $row['url'] }}</span>
+                                </td>
+                                <td><span class="badge badge-soft-info">{{ ucfirst($row['type']) }}</span></td>
+                                <td>
+                                    <span class="badge badge-{{ $deltaClass }}">
+                                        @if(is_null($delta))
+                                            {{ $row['score_after'] }}/100
+                                        @else
+                                            {{ $row['score_before'] }}/100 -> {{ $row['score_after'] }}/100
+                                            ({{ $delta > 0 ? '+' : '' }}{{ $delta }})
+                                        @endif
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge badge-{{ !empty($row['seo_done']) ? 'success' : 'warning' }}">
+                                        {{ !empty($row['seo_done']) ? translate('SEO Done') : translate('Still Pending') }}
+                                    </span>
+                                </td>
+                                <td class="small text-muted">{{ optional($row['recorded_at'])->format('M d H:i') }}</td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="5" class="text-center text-muted py-3">{{ translate('No score changes recorded in the last 60 minutes yet.') }}</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
             </div>
         </div>
         <div class="alert alert-success mt-3 mb-0 py-2 small">

@@ -89,15 +89,19 @@
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap"></noscript>
 
     <!-- CSS — critical files load synchronously (instant render), non-critical async -->
-    @php $_cv = get_setting('current_version'); @endphp
+    @php
+        $_cv = get_setting('current_version');
+        $_customCssPath = public_path('assets/css/custom-style.css');
+        $_customCv = file_exists($_customCssPath) ? filemtime($_customCssPath) : $_cv;
+    @endphp
     <link rel="stylesheet" href="{{ static_asset('assets/css/vendors.css?v=') }}{{ $_cv }}">
     @if ($rtl == 1)
         <link rel="stylesheet" href="{{ static_asset('assets/css/bootstrap-rtl.min.css') }}">
     @endif
     <link rel="stylesheet" href="{{ static_asset('assets/css/aiz-core.css?v=') }}{{ $_cv }}">
     {{-- Non-critical overrides load async — no layout impact --}}
-    <link rel="preload" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_cv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_cv }}"></noscript>
+    <link rel="preload" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_customCv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_customCv }}"></noscript>
     @if(get_setting('homepage_select') == 'thecore')
     <link rel="preload" href="{{ static_asset('assets/css/thecore.css') }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/thecore.css') }}"></noscript>

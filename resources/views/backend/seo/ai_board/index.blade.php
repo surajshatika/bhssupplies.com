@@ -295,7 +295,7 @@
                     <div class="modal-cost-row"><span class="key">{{ translate('Estimated cost') }}</span><span class="val text-primary" id="bcCost">—</span></div>
                     <div class="alert alert-warning small mb-0 mt-3 d-none" id="bcSyncWarn">
                         <i class="las la-exclamation-triangle"></i>
-                        {{ translate('Queue is set to "sync" — this run will block your browser tab until it finishes. For large runs, configure a queue worker.') }}
+                        {{ translate('Queue is set to sync, so large bulk fixes will be processed by cron in small chunks. Keep the scheduler cron active.') }}
                     </div>
                 </div>
             </div>
@@ -460,6 +460,30 @@
     const previewEndpoint = '{{ route("admin.seo.ai_board.preview") }}';
     const applyApprovedEndpoint = '{{ route("admin.seo.ai_board.apply_approved") }}';
     let previewCtx = null; // {type, id}
+
+    function escapeHtml(value) {
+        return String(value || '').replace(/[&<>"']/g, function (char) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
+        });
+    }
+
+    function readJsonResponse(response) {
+        return response.text().then(function (text) {
+            let payload = null;
+            try {
+                payload = text ? JSON.parse(text) : {};
+            } catch (e) {
+                const clean = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240);
+                throw new Error(clean || ('Server returned non-JSON response (' + response.status + ')'));
+            }
+
+            if (!response.ok || payload.success === false) {
+                throw new Error(payload.error || payload.message || ('Request failed (' + response.status + ')'));
+            }
+
+            return payload;
+        });
+    }
 
     function openDrawer() {
         document.getElementById('fixDrawer').classList.add('open');
@@ -782,12 +806,12 @@
             headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
             body: JSON.stringify(payload)
         })
-        .then(r => r.json())
+        .then(readJsonResponse)
         .then(j => {
             document.getElementById('bulkCostLoading').classList.add('d-none');
             document.getElementById('bulkCostBody').classList.remove('d-none');
             document.getElementById('bcCount').textContent    = j.count;
-            document.getElementById('bcProvider').textContent = j.provider + (j.ai_call ? ' (AI mode)' : ' — no API key, template fallback');
+            document.getElementById('bcProvider').textContent = j.provider + (j.ai_call ? ' (AI mode)' : ' - no API key, template fallback');
             document.getElementById('bcMode').textContent     = payload.mode === 'selected' ? 'Selected rows' : 'All matching filters';
             document.getElementById('bcCost').textContent     = j.ai_call ? ('$' + (j.estimated_usd || 0).toFixed(4)) : '$0 (free)';
             document.getElementById('bcSyncWarn').classList.toggle('d-none', !j.sync_warning);
@@ -796,7 +820,7 @@
         .catch(err => {
             document.getElementById('bulkCostLoading').classList.add('d-none');
             document.getElementById('bulkCostBody').classList.remove('d-none');
-            document.getElementById('bulkCostBody').innerHTML = '<div class="alert alert-danger mb-0">' + (err.message || 'Estimate failed') + '</div>';
+            document.getElementById('bulkCostBody').innerHTML = '<div class="alert alert-danger mb-0">' + escapeHtml(err.message || 'Estimate failed') + '</div>';
         });
     }
 
@@ -828,14 +852,8 @@
             headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
             body: JSON.stringify(pendingPayload)
         })
-        .then(r => r.json())
+        .then(readJsonResponse)
         .then(j => {
-            if (!j.success) {
-                document.getElementById('bpErrors').textContent = j.error || 'Failed to start batch';
-                document.getElementById('bpErrors').classList.remove('d-none');
-                document.getElementById('bpCloseBtn').classList.remove('d-none');
-                return;
-            }
             activeBatchId = j.batch_id;
             applySnapshot(j.snapshot);
             startProgressPolling();
@@ -856,9 +874,8 @@
     function pollProgress() {
         if (!activeBatchId) return;
         fetch(bulkProgressUrlTpl + activeBatchId, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
-            .then(r => r.json())
+            .then(readJsonResponse)
             .then(j => {
-                if (!j.success) return;
                 applySnapshot(j.snapshot);
                 if (j.snapshot.is_terminal) {
                     clearInterval(progressTimer);
@@ -890,7 +907,7 @@
             const el = document.getElementById('bpErrors');
             el.classList.remove('d-none');
             el.innerHTML = '<strong>{{ translate("Recent errors") }}:</strong><br>' +
-                s.recent_errors.map(e => '<code>' + (e.msg || '') + '</code>').join('<br>');
+                s.recent_errors.map(e => '<code>' + escapeHtml(e.msg || '') + '</code>').join('<br>');
         }
     }
 
@@ -901,11 +918,7 @@
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' }
-        }).then(r => r.json()).then(j => {
-            if (j.success) {
-                applySnapshot(j.snapshot);
-            }
-        });
+        }).then(readJsonResponse).then(j => applySnapshot(j.snapshot));
     });
 
     updateBulkBar();

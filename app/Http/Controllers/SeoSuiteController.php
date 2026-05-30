@@ -106,16 +106,22 @@ class SeoSuiteController extends Controller
             return redirect()->route('admin.seo-suite.index');
         }
 
+        $runInCronChunks = config('queue.default') === 'sync';
         $batch = $board->createBatch(
             $targets,
             $request->input('provider'),
             optional(auth()->user())->id,
-            'Dashboard Canada SEO auto-fix - ' . count($targets) . ' URLs'
+            'Dashboard Canada SEO auto-fix - ' . count($targets) . ' URLs',
+            !$runInCronChunks
         );
 
         $guard->bustCache();
 
-        flash(translate('Advanced Canada SEO generation queued for ' . count($targets) . ' pending URLs. Batch #' . $batch->id))->success();
+        $message = 'Advanced Canada SEO generation queued for ' . count($targets) . ' pending URLs. Batch #' . $batch->id;
+        if ($runInCronChunks) {
+            $message .= ' will run by cron in small chunks.';
+        }
+        flash(translate($message))->success();
         return redirect()->route('admin.seo.ai_board.index', ['missing' => 'meta']);
     }
 
@@ -713,9 +719,9 @@ class SeoSuiteController extends Controller
             'seo_pagespeed_api_key'     => $request->pagespeed_api_key,
         ];
 
-        // Skip placeholder bullets (•••) — those mean "leave existing value alone".
+        // Skip masked placeholders. They mean "leave existing value alone".
         foreach ($secretPairs as $k => $v) {
-            if (is_string($v) && str_starts_with(trim($v), '•')) {
+            if ($this->isMaskedSecret($v)) {
                 unset($secretPairs[$k]);
             }
         }
@@ -973,6 +979,7 @@ class SeoSuiteController extends Controller
             ->all();
         $nextEstimate = $board->estimateBatchCost($nextTargets, $settings['default_provider'] ?? null);
         $offpageTargets = $board->offPageCampaignTargetPreview(10, ['product', 'category', 'page']);
+        $recentScoreChanges = $this->recentSeoScoreChanges(60, 12);
 
         $activeBatch = Schema::hasTable('seo_fix_batches')
             ? SeoFixBatch::query()
@@ -996,6 +1003,9 @@ class SeoSuiteController extends Controller
             'next_targets' => $nextPreview->take(10)->values(),
             'offpage_targets' => $offpageTargets,
             'offpage_ready_count' => $offpageTargets->count(),
+            'recent_score_changes' => $recentScoreChanges,
+            'score_improved_last_hour' => $recentScoreChanges->where('delta', '>', 0)->count(),
+            'score_done_last_hour' => $recentScoreChanges->where('seo_done', true)->count(),
             'pending_total' => $pendingTotal,
             'days_to_completion' => $batchSize > 0 ? (int) ceil($pendingTotal / $batchSize) : null,
             'next_run_count' => count($nextTargets),
@@ -1020,6 +1030,9 @@ class SeoSuiteController extends Controller
             'next_targets' => collect(),
             'offpage_targets' => collect(),
             'offpage_ready_count' => 0,
+            'recent_score_changes' => collect(),
+            'score_improved_last_hour' => 0,
+            'score_done_last_hour' => 0,
             'pending_total' => 0,
             'days_to_completion' => null,
             'next_run_count' => 0,
@@ -1029,6 +1042,69 @@ class SeoSuiteController extends Controller
             'spent_today' => 0,
             'remaining_today' => null,
         ];
+    }
+
+    protected function recentSeoScoreChanges(int $minutes = 60, int $limit = 12): \Illuminate\Support\Collection
+    {
+        if (!Schema::hasTable('seo_score_histories')) {
+            return collect();
+        }
+
+        $recent = SeoScoreHistory::query()
+            ->where('recorded_at', '>=', now()->subMinutes($minutes))
+            ->whereNotNull('target_type')
+            ->whereNotNull('target_id')
+            ->latest('recorded_at')
+            ->limit(300)
+            ->get();
+
+        $seen = [];
+        $rows = collect();
+
+        foreach ($recent as $history) {
+            $key = $history->target_type . '#' . $history->target_id;
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $previous = SeoScoreHistory::query()
+                ->where('target_type', $history->target_type)
+                ->where('target_id', $history->target_id)
+                ->where('id', '<>', $history->id)
+                ->where(function ($query) use ($history) {
+                    if ($history->recorded_at) {
+                        $query->whereNull('recorded_at')
+                            ->orWhere('recorded_at', '<', $history->recorded_at);
+                    }
+                })
+                ->latest('recorded_at')
+                ->latest('id')
+                ->first();
+
+            $before = $previous ? (int) $previous->score : null;
+            $after = (int) $history->score;
+            $class = (string) $history->target_type;
+            $entity = class_exists($class) ? $class::find($history->target_id) : null;
+            $titleColumn = in_array(class_basename($class), ['Page', 'Blog'], true) ? 'title' : 'name';
+
+            $rows->push([
+                'url' => $history->url,
+                'title' => $entity ? (string) ($entity->{$titleColumn} ?? $history->url) : ($history->url ?: $key),
+                'type' => class_exists($class) ? Str::lower(class_basename($class)) : (string) $history->target_type,
+                'score_before' => $before,
+                'score_after' => $after,
+                'delta' => $before === null ? null : $after - $before,
+                'seo_done' => $after >= 70,
+                'recorded_at' => $history->recorded_at,
+            ]);
+
+            if ($rows->count() >= $limit) {
+                break;
+            }
+        }
+
+        return $rows;
     }
 
     protected function fileHealth(string $label, string $path, string $icon, string $route): array
@@ -1140,33 +1216,62 @@ class SeoSuiteController extends Controller
     {
         if (env('DEMO_MODE') == 'On') return;
 
-        $pairs = array_filter($pairs, fn($value) => $value !== null && $value !== '');
+        $pairs = array_filter($pairs, fn($value) => $value !== null && $value !== '' && !$this->isMaskedSecret($value));
         if (empty($pairs)) return;
 
         $path = base_path('.env');
         if (!file_exists($path)) return;
-
-        $contents = file_get_contents($path);
-        $updated = $contents;
-
-        foreach ($pairs as $type => $val) {
-            $line = $type . '=' . $this->quoteEnvValue($val);
-            $pattern = '/^' . preg_quote($type, '/') . '=.*$/m';
-
-            if (preg_match($pattern, $updated)) {
-                $updated = preg_replace_callback($pattern, fn() => $line, $updated);
-            } else {
-                $updated = rtrim($updated, "\r\n") . PHP_EOL . $line . PHP_EOL;
-            }
+        if (!is_readable($path) || !is_writable($path)) {
+            logger()->warning('SEO settings .env update skipped: file is not readable/writable', ['path' => $path]);
+            return;
         }
 
-        if ($updated === $contents) return;
+        try {
+            $contents = file_get_contents($path);
+            if ($contents === false) {
+                logger()->warning('SEO settings .env update skipped: could not read .env', ['path' => $path]);
+                return;
+            }
 
-        file_put_contents($path, $updated, LOCK_EX);
+            $updated = $contents;
+
+            foreach ($pairs as $type => $val) {
+                $line = $type . '=' . $this->quoteEnvValue($val);
+                $pattern = '/^' . preg_quote($type, '/') . '=.*$/m';
+
+                if (preg_match($pattern, $updated)) {
+                    $updated = preg_replace_callback($pattern, fn() => $line, $updated);
+                } else {
+                    $updated = rtrim($updated, "\r\n") . PHP_EOL . $line . PHP_EOL;
+                }
+            }
+
+            if ($updated === $contents) return;
+
+            if (file_put_contents($path, $updated, LOCK_EX) === false) {
+                logger()->warning('SEO settings .env update skipped: write failed', ['path' => $path]);
+            }
+        } catch (\Throwable $e) {
+            logger()->warning('SEO settings .env update skipped', ['error' => $e->getMessage()]);
+        }
     }
 
     protected function quoteEnvValue($value): string
     {
         return '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], trim((string) $value)) . '"';
+    }
+
+    protected function isMaskedSecret($value): bool
+    {
+        if (!is_string($value)) {
+            return false;
+        }
+
+        $value = trim($value);
+        if ($value === '') {
+            return false;
+        }
+
+        return Str::startsWith($value, ['•', '●', '••', 'â€¢', '***']);
     }
 }

@@ -41,7 +41,7 @@
             @endforeach
         @endif
 
-        <a href="{{ $product_url }}" class="d-block bhs-product-img-link">
+        <a href="{{ $product_url }}" class="d-block bhs-product-img-link {{ $showHoverImage ? 'has-hover-image' : '' }}">
             <img class="lazyload bhs-product-img"
                 src="{{ $placeholderImage }}"
                 data-src="{{ $mainImage }}"

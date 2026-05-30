@@ -21,6 +21,7 @@
     $isPriorityImage = $listingIndex < 4 && !request()->ajax();
     $mainImage = get_image($product->thumbnail);
     $hoverImage = get_first_product_image($product->photos, $product->thumbnail_img);
+    $showHoverImage = (int) get_setting('perf_product_hover_images', 0) === 1 && $hoverImage !== $mainImage;
     $placeholderImage = static_asset('assets/img/placeholder.jpg');
 @endphp
 
@@ -50,16 +51,20 @@
                 loading="{{ $isPriorityImage ? 'eager' : 'lazy' }}"
                 decoding="async"
                 @if($isPriorityImage) fetchpriority="high" @endif
+                sizes="(max-width: 575px) 50vw, (max-width: 991px) 33vw, 300px"
                 width="300" height="300"
                 onerror="this.onerror=null;this.src='{{ $placeholderImage }}';">
+            @if($showHoverImage)
             <img class="lazyload pc-img pc-img-hover position-absolute"
                 src="{{ $placeholderImage }}"
                 data-src="{{ $hoverImage }}"
                 alt="{{ $product->getTranslation('name') }}"
                 loading="lazy"
                 decoding="async"
+                sizes="(max-width: 575px) 50vw, (max-width: 991px) 33vw, 300px"
                 width="300" height="300"
                 onerror="this.onerror=null;this.src='{{ $placeholderImage }}';">
+            @endif
         </a>
 
         @if ($product->auction_product == 0)

@@ -19,6 +19,7 @@
     $discountedBasePrice = format_price($discountedBasePriceRaw);
     $mainImage = get_image($product->thumbnail);
     $hoverImage = get_first_product_image($product->photos, $product->thumbnail_img);
+    $showHoverImage = (int) get_setting('perf_product_hover_images', 0) === 1 && $hoverImage !== $mainImage;
     $placeholderImage = static_asset('assets/img/placeholder.jpg');
 @endphp
 
@@ -47,16 +48,20 @@
                 alt="{{ $product->getTranslation('name') }}"
                 loading="lazy"
                 decoding="async"
+                sizes="(max-width: 575px) 50vw, (max-width: 991px) 33vw, 300px"
                 width="300" height="300"
                 onerror="this.onerror=null;this.src='{{ $placeholderImage }}';">
+            @if($showHoverImage)
             <img class="lazyload bhs-product-img bhs-product-img-hover position-absolute"
                 src="{{ $placeholderImage }}"
                 data-src="{{ $hoverImage }}"
                 alt="{{ $product->getTranslation('name') }}"
                 loading="lazy"
                 decoding="async"
+                sizes="(max-width: 575px) 50vw, (max-width: 991px) 33vw, 300px"
                 width="300" height="300"
                 onerror="this.onerror=null;this.src='{{ $placeholderImage }}';">
+            @endif
         </a>
 
         @if ($product->auction_product == 0)

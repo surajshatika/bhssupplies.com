@@ -1314,6 +1314,36 @@ if (!function_exists('app_timezone')) {
     }
 }
 
+if (!function_exists('optimized_image_url')) {
+    function optimized_image_url($url)
+    {
+        static $resolved = [];
+
+        if (empty($url) || !is_string($url) || preg_match('/^(data:|blob:)/i', $url)) {
+            return $url;
+        }
+
+        if (array_key_exists($url, $resolved)) {
+            return $resolved[$url];
+        }
+
+        if (!preg_match('/\.(jpe?g|png)(\?.*)?$/i', $url)) {
+            return $resolved[$url] = $url;
+        }
+
+        $webp_url = preg_replace('/\.(jpe?g|png)(\?.*)?$/i', '.webp$2', $url);
+        $path = parse_url($webp_url, PHP_URL_PATH);
+
+        if (!$path) {
+            return $resolved[$url] = $url;
+        }
+
+        $local_path = public_path(ltrim($path, '/'));
+
+        return $resolved[$url] = file_exists($local_path) ? $webp_url : $url;
+    }
+}
+
 //return file uploaded via uploader
 if (!function_exists('uploaded_asset')) {
     function uploaded_asset($id)
@@ -1329,7 +1359,7 @@ if (!function_exists('uploaded_asset')) {
         }
 
         if ($asset != null) {
-            return $asset->external_link == null ? my_asset($asset->file_name) : $asset->external_link;
+            return optimized_image_url($asset->external_link == null ? my_asset($asset->file_name) : $asset->external_link);
         }
         return static_asset('assets/img/placeholder.jpg');
     }
@@ -2694,7 +2724,7 @@ if (!function_exists('get_image')) {
         if ($image != null) {
             $image_url = $image->external_link == null ? my_asset($image->file_name) : $image->external_link;
         }
-        return $image_url;
+        return optimized_image_url($image_url);
     }
 }
 
@@ -2730,7 +2760,7 @@ if (!function_exists('get_first_product_image')) {
         if ($image != null) {
             $image_url = $image->external_link == null ? my_asset($image->file_name) : $image->external_link;
         }
-        return $image_url;
+        return optimized_image_url($image_url);
     }
 }
 

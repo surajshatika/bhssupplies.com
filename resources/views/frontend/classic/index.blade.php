@@ -60,7 +60,7 @@
     $lcp_slider_images = json_decode(get_setting('home_slider_images', null, $lang), true);
     $lcp_sliders = get_slider_images($lcp_slider_images);
     $lcp_image_url = ($lcp_sliders && count($lcp_sliders) > 0 && $lcp_sliders[0])
-        ? my_asset($lcp_sliders[0]->file_name)
+        ? optimized_image_url(my_asset($lcp_sliders[0]->file_name))
         : null;
 @endphp
 
@@ -97,10 +97,12 @@
                             href="{{ isset(json_decode($home_slider_links, true)[$key]) ? json_decode($home_slider_links, true)[$key] : '' }}">
                             <!-- Image -->
                             <img class="d-block w-100"
-                                src="{{ $slider ? my_asset($slider->file_name) : static_asset('assets/img/placeholder.jpg') }}"
+                                src="{{ $slider ? optimized_image_url(my_asset($slider->file_name)) : static_asset('assets/img/placeholder.jpg') }}"
                                 alt="{{ env('APP_NAME') }} — {{ $key == 0 ? 'Featured Promotions' : 'Special Offer ' . ($key + 1) }}"
                                 width="1200" height="460"
-                                {{ $key > 0 ? 'loading="lazy"' : 'fetchpriority="high"' }}
+                                sizes="(max-width: 767px) 100vw, 1200px"
+                                decoding="async"
+                                {!! $key > 0 ? 'loading="lazy"' : 'loading="eager" fetchpriority="high"' !!}
                                 onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder-rect.jpg') }}';">
                         </a>
                     </div>
@@ -193,6 +195,9 @@ $flash_deal = get_featured_flash_deal();
                         $flash_deal_product->product->slug,
                         );
                         }
+                        $flashProductImage = get_image($flash_deal_product->product->thumbnail);
+                        $flashHoverImage = get_first_product_image($flash_deal_product->product->photos, $flash_deal_product->product->thumbnail_img);
+                        $showFlashHoverImage = (int) get_setting('perf_product_hover_images', 0) === 1 && $flashHoverImage !== $flashProductImage;
                         @endphp
                         <div
                             class="h-100px h-md-200px h-lg-auto flash-deal-item position-relative text-center has-transition hov-shadow-out z-1">
@@ -202,15 +207,23 @@ $flash_deal = get_featured_flash_deal();
                                 <!-- Image -->
                                 <div class="d-block h-100 position-relative image-hover-effect">
                                     <img class="lazyload h-60px h-md-100px h-lg-140px mw-100 mx-auto has-transition product-main-image"
-                                        src="{{ get_image($flash_deal_product->product->thumbnail) }}"
+                                        src="{{ static_asset('assets/img/placeholder.jpg') }}"
+                                        data-src="{{ $flashProductImage }}"
                                         alt="{{ $flash_deal_product->product->getTranslation('name') }}"
                                         loading="lazy"
+                                        decoding="async"
+                                        width="140" height="140"
                                         onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder.jpg') }}';">
+                                    @if($showFlashHoverImage)
                                     <img class="lazyload h-60px h-md-100px h-lg-140px w-100 mx-auto has-transition product-hover-image position-absolute"
-                                        src="{{ get_first_product_image($flash_deal_product->product->thumbnail, $flash_deal_product->product->photos) }}"
+                                        src="{{ static_asset('assets/img/placeholder.jpg') }}"
+                                        data-src="{{ $flashHoverImage }}"
                                         alt="{{ $flash_deal_product->product->getTranslation('name') }}"
                                         loading="lazy"
+                                        decoding="async"
+                                        width="140" height="140"
                                         onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder.jpg') }}';">
+                                    @endif
                                 </div>
                                 <!-- Price -->
                                 <div

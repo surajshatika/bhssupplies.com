@@ -267,7 +267,7 @@ class SearchController extends Controller
             });
         }
 
-        $products = filter_products($products)->with(['taxes', 'brand', 'stocks', 'thumbnail'])->paginate(36)->appends(request()->query());
+        $products = filter_products($products)->with(['taxes', 'brand', 'stocks', 'thumbnail'])->paginate(24)->appends(request()->query());
         if ($request->ajax()) {
             return view('frontend.product_listing_products', compact('products'));
         }

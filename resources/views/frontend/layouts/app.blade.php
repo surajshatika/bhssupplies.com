@@ -179,6 +179,29 @@
         .home-category-banner::after {
             content: "{{ translate('View All') }}";
         }
+
+        @supports (content-visibility: auto) {
+            #section_featured,
+            #section_featured_preorder_products,
+            #todays_deal,
+            #section_best_selling,
+            #section_newest,
+            #auction_products,
+            #section_home_categories,
+            .home-banner-area ~ section,
+            #product-listing-row > .col:nth-child(n+9),
+            .bhs-product-card,
+            .pc-card {
+                content-visibility: auto;
+                contain-intrinsic-size: 1px 360px;
+            }
+
+            .home-banner-area,
+            .cat-hero,
+            #product-listing-row > .col:nth-child(-n+8) {
+                content-visibility: visible;
+            }
+        }
     </style>
 
 @php
@@ -190,30 +213,56 @@
 {{-- GDPR consent — must load BEFORE any analytics/marketing tags so Consent Mode v2 defaults apply --}}
 @include('frontend.partials.consent_banner')
 
+<script>
+    window.perfThirdParty = window.perfThirdParty || function (callback) {
+        var done = false;
+        function run() {
+            if (done) return;
+            done = true;
+            try { callback(); } catch (e) {}
+        }
+        ['click', 'keydown', 'touchstart', 'scroll'].forEach(function (eventName) {
+            window.addEventListener(eventName, run, {once: true, passive: true});
+        });
+        if ('requestIdleCallback' in window) {
+            requestIdleCallback(run, {timeout: 3500});
+        } else {
+            setTimeout(run, 2800);
+        }
+    };
+</script>
+
 @if (get_setting('google_analytics') == 1 && !empty($gaTrackingId))
     <!-- Global site tag (gtag.js) - Google Analytics -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id={{ $gaTrackingId }}"></script>
     <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag(){dataLayer.push(arguments);}
-        gtag('js', new Date());
-        gtag('config', '{{ $gaTrackingId }}', { 'anonymize_ip': true });
+        window.perfThirdParty(function () {
+            var gtagScript = document.createElement('script');
+            gtagScript.async = true;
+            gtagScript.src = 'https://www.googletagmanager.com/gtag/js?id={{ $gaTrackingId }}';
+            document.head.appendChild(gtagScript);
+            window.dataLayer = window.dataLayer || [];
+            window.gtag = window.gtag || function(){dataLayer.push(arguments);};
+            gtag('js', new Date());
+            gtag('config', '{{ $gaTrackingId }}', { 'anonymize_ip': true });
+        });
     </script>
 @endif
 
 @if (get_setting('facebook_pixel') == 1 && !empty($fbPixelId))
     <!-- Facebook Pixel Code -->
     <script>
-        !function(f,b,e,v,n,t,s)
-        {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
-        n.callMethod.apply(n,arguments):n.queue.push(arguments)};
-        if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
-        n.queue=[];t=b.createElement(e);t.async=!0;
-        t.src=v;s=b.getElementsByTagName(e)[0];
-        s.parentNode.insertBefore(t,s)}(window, document,'script',
-        'https://connect.facebook.net/en_US/fbevents.js');
-        fbq('init', '{{ $fbPixelId }}');
-        fbq('track', 'PageView');
+        window.perfThirdParty(function () {
+            !function(f,b,e,v,n,t,s)
+            {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+            n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+            if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+            n.queue=[];t=b.createElement(e);t.async=!0;
+            t.src=v;s=b.getElementsByTagName(e)[0];
+            s.parentNode.insertBefore(t,s)}(window, document,'script',
+            'https://connect.facebook.net/en_US/fbevents.js');
+            fbq('init', '{{ $fbPixelId }}');
+            fbq('track', 'PageView');
+        });
     </script>
     <noscript>
         <img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id={{ $fbPixelId }}&ev=PageView&noscript=1"/>

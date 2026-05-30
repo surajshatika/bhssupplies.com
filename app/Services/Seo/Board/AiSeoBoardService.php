@@ -123,7 +123,7 @@ class AiSeoBoardService
 
     public function collectPendingTargetsAcrossTypes(int $limit = 10, array $types = ['product', 'category', 'page']): array
     {
-        $limit = max(1, min(10, $limit));
+        $limit = max(1, min(100, $limit));
 
         return $this->nextAutopilotTargetPreview($limit, $types)
             ->map(fn(array $row) => ['type' => $row['type'], 'id' => (int) $row['id']])
@@ -181,7 +181,7 @@ class AiSeoBoardService
 
     public function nextAutopilotTargetPreview(int $limit = 10, array $types = ['product', 'category', 'page']): Collection
     {
-        $limit = max(1, min(20, $limit));
+        $limit = max(1, min(100, $limit));
 
         return $this->pendingAutopilotRows($limit, $types)
             ->take($limit)
@@ -513,7 +513,8 @@ class AiSeoBoardService
             $meta['meta_title']    ?? '',
             $meta['meta_description'] ?? '',
             $this->plainContent($entity, $type),
-            $this->urlFor($entity, $type)
+            $this->urlFor($entity, $type),
+            $this->buildScoreContext($entity, $type, $meta)
         );
 
         $totalWeight = array_sum(array_column($checks, 'weight'));
@@ -578,8 +579,9 @@ class AiSeoBoardService
         }
 
         if (empty($meta['meta_description'])) {
-            $patch['meta_description'] = $aiData['description']
-                ?? $this->templateDescription($name, $type);
+            $patch['meta_description'] = !empty($aiData['description'])
+                ? $this->fitDescription($aiData['description'])
+                : $this->templateDescription($name, $type);
             $applied['meta_description'] = $patch['meta_description'];
         }
 
@@ -602,25 +604,45 @@ class AiSeoBoardService
             }
         }
 
-        if (empty($meta['schema_json'])) {
-            $schema = $this->generateSchema($entity, $type, $patch + $meta);
-            if ($schema) {
-                $patch['schema_json'] = $schema;
-                $applied['schema_json'] = json_encode($schema, JSON_UNESCAPED_SLASHES);
-            }
-        }
-
-        if (!empty($patch)) {
-            $patch['last_analyzed_at'] = now();
-            $this->persistMeta($entity, $type, $patch);
-        }
-
+        // Write content BEFORE schema so FAQ visibility is known: FAQPage schema
+        // is only emitted when the matching Q&A is actually on the page.
         $contentPatch = $this->contentPatch($entity, $type, $aiData, $patch + $meta);
         if (!empty($contentPatch)) {
             $entity->forceFill($contentPatch)->save();
             foreach ($contentPatch as $field => $value) {
                 $applied[$field] = Str::limit(strip_tags((string) $value), 120);
             }
+        }
+
+        $faqVisible = $this->injectFaqContent($entity, $type, $aiData['faqs'] ?? null);
+        if ($faqVisible && empty($applied['faqs'])) {
+            $applied['faqs'] = count($this->normalizeFaqs($aiData['faqs'] ?? null) ?? []) . ' FAQ(s) added';
+        }
+
+        if (empty($meta['schema_json'])) {
+            $schemaMeta = $patch + $meta;
+            $schemaMeta['faqs']        = $faqVisible ? ($aiData['faqs'] ?? null) : null;
+            $schemaMeta['howto_steps'] = $aiData['howto_steps'] ?? null;
+            $schema = $this->generateSchema($entity, $type, $schemaMeta);
+            if ($schema) {
+                $validation = (new \App\Services\Seo\Optimization\Features\SchemaValidatorService())->validate($schema);
+                if ($validation['valid']) {
+                    $patch['schema_json'] = $schema;
+                    $applied['schema_json'] = json_encode($schema, JSON_UNESCAPED_SLASHES);
+                } else {
+                    // Never persist markup Google would reject — log and skip.
+                    logger()->warning('AI SEO Board generated invalid schema; skipped', [
+                        'type'   => $type,
+                        'id'     => $entity->getKey(),
+                        'errors' => $validation['errors'],
+                    ]);
+                }
+            }
+        }
+
+        if (!empty($patch)) {
+            $patch['last_analyzed_at'] = now();
+            $this->persistMeta($entity, $type, $patch);
         }
 
         $entity->refresh();
@@ -640,6 +662,160 @@ class AiSeoBoardService
             'score_before' => $before['score'],
             'score_after'  => $afterRow['score'],
             'source'       => $source,
+            'row'          => $afterRow,
+        ];
+    }
+
+    /**
+     * Generate AI/template SEO suggestions for an entity WITHOUT persisting —
+     * powers the "preview & edit before apply" workflow. Only proposes values
+     * for fields that are currently empty (never overwrites curated content).
+     *
+     * @return array{type:string,id:int,title:string,url:string,source:string,score_before:int,current:array,suggestions:array}
+     */
+    public function previewAiFix(string $type, int $id, ?string $providerName = null): array
+    {
+        $this->assertType($type);
+        $class  = $this->typeMap[$type]['class'];
+        $entity = $class::find($id);
+        if (!$entity) {
+            throw new \RuntimeException("Entity {$type}#{$id} not found.");
+        }
+
+        $before = $this->scoreEntity($entity, $type);
+        $meta   = $this->loadOrSynthesizeMeta($entity, $type);
+        $name   = $this->displayName($entity, $type);
+        $desc   = $this->plainContent($entity, $type);
+
+        $source = 'template';
+        $ai = SeoProviderManager::make($providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')));
+        $aiData = null;
+        if ($ai && method_exists($ai, 'isConfigured') && $ai->isConfigured()) {
+            $aiData = $this->askAiForSeoBundle($ai, $name, $desc, $type);
+            if (!empty($aiData)) {
+                $source = 'ai';
+            }
+        }
+
+        $suggestions = [];
+        if (empty($meta['meta_title'])) {
+            $suggestions['meta_title'] = $aiData['title'] ?? $this->templateTitle($name, $type);
+        }
+        if (empty($meta['meta_description'])) {
+            $suggestions['meta_description'] = !empty($aiData['description'])
+                ? $this->fitDescription($aiData['description'])
+                : $this->templateDescription($name, $type);
+        }
+        if (empty($meta['focus_keyword'])) {
+            $suggestions['focus_keyword'] = $aiData['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type);
+        }
+        if (empty($meta['secondary_keywords'])) {
+            $kw = $aiData['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type);
+            $suggestions['secondary_keywords'] = implode(', ', $kw);
+        }
+        $suggestions['schema'] = empty($meta['schema_json']); // checkbox default for "generate schema"
+
+        return [
+            'type'         => $type,
+            'id'           => $id,
+            'title'        => $name,
+            'url'          => $this->urlFor($entity, $type),
+            'source'       => $source,
+            'score_before' => $before['score'],
+            'current'      => [
+                'meta_title'       => $meta['meta_title'] ?? null,
+                'meta_description' => $meta['meta_description'] ?? null,
+                'focus_keyword'    => $meta['focus_keyword'] ?? null,
+            ],
+            'suggestions'  => $suggestions,
+        ];
+    }
+
+    /**
+     * Persist admin-approved (and possibly edited) suggestion values. Writes
+     * only fields that are still empty, so a concurrent curated edit always wins.
+     *
+     * @param array $approved keys: meta_title, meta_description, focus_keyword,
+     *                        secondary_keywords (string|array), schema (bool)
+     */
+    public function applyApprovedFix(string $type, int $id, array $approved): array
+    {
+        $this->assertType($type);
+        $class  = $this->typeMap[$type]['class'];
+        $entity = $class::find($id);
+        if (!$entity) {
+            throw new \RuntimeException("Entity {$type}#{$id} not found.");
+        }
+
+        $before = $this->scoreEntity($entity, $type);
+        $meta   = $this->loadOrSynthesizeMeta($entity, $type);
+
+        $patch = [];
+        $applied = [];
+
+        foreach (['meta_title', 'meta_description', 'focus_keyword'] as $field) {
+            if (empty($meta[$field]) && !empty($approved[$field])) {
+                $value = trim((string) $approved[$field]);
+                if ($field === 'meta_description') {
+                    $value = $this->fitDescription($value);
+                }
+                $patch[$field]   = $value;
+                $applied[$field] = $value;
+            }
+        }
+
+        if (empty($meta['secondary_keywords']) && !empty($approved['secondary_keywords'])) {
+            $list = is_array($approved['secondary_keywords'])
+                ? $approved['secondary_keywords']
+                : array_values(array_filter(array_map('trim', explode(',', (string) $approved['secondary_keywords']))));
+            if (!empty($list)) {
+                $patch['secondary_keywords']   = array_values($list);
+                $applied['secondary_keywords'] = implode(', ', $list);
+            }
+        }
+
+        if (empty($meta['og_image'])) {
+            $img = $this->fallbackImage($entity, $type);
+            if ($img) {
+                $patch['og_image']      = $img;
+                $patch['twitter_image'] = $img;
+                $applied['og_image']    = $img;
+            }
+        }
+
+        if (empty($meta['schema_json']) && !empty($approved['schema'])) {
+            $schema = $this->generateSchema($entity, $type, $patch + $meta);
+            if ($schema) {
+                $validation = (new \App\Services\Seo\Optimization\Features\SchemaValidatorService())->validate($schema);
+                if ($validation['valid']) {
+                    $patch['schema_json']   = $schema;
+                    $applied['schema_json'] = json_encode($schema, JSON_UNESCAPED_SLASHES);
+                }
+            }
+        }
+
+        if (!empty($patch)) {
+            $patch['last_analyzed_at'] = now();
+            $this->persistMeta($entity, $type, $patch);
+        }
+
+        $entity->refresh();
+        $afterScore = $this->scoreEntity($entity, $type);
+        $this->persistMeta($entity, $type, [
+            'seo_score'        => $afterScore['score'],
+            'seo_grade'        => $afterScore['grade'],
+            'analysis_checks'  => $afterScore['checks'],
+            'last_analyzed_at' => now(),
+        ]);
+        $this->recordScoreHistory($entity, $type, $afterScore);
+
+        $afterRow = $this->buildRow($entity->refresh(), $type);
+
+        return [
+            'applied'      => $applied,
+            'score_before' => $before['score'],
+            'score_after'  => $afterRow['score'],
+            'source'       => 'approved',
             'row'          => $afterRow,
         ];
     }
@@ -824,6 +1000,12 @@ class AiSeoBoardService
 
     protected function plainContent(Model $entity, string $type): string
     {
+        return trim(preg_replace('/\s+/', ' ', strip_tags($this->rawContent($entity, $type))));
+    }
+
+    /** Raw (un-stripped) HTML so structural TruSEO checks see headings/links/images. */
+    protected function rawContent(Model $entity, string $type): string
+    {
         $candidates = match ($type) {
             'product'  => [$entity->description ?? null, $entity->short_description ?? null],
             'category' => [$entity->top_description ?? null, $entity->bottom_description ?? null],
@@ -832,8 +1014,34 @@ class AiSeoBoardService
             default    => [],
         };
 
-        $text = trim(implode("\n\n", array_filter($candidates)));
-        return trim(preg_replace('/\s+/', ' ', strip_tags($text)));
+        return trim(implode("\n\n", array_filter($candidates)));
+    }
+
+    /**
+     * Build the structural context the expanded TruSEO engine consumes:
+     * raw HTML, secondary keywords, image alts, and schema/OG/canonical flags.
+     */
+    protected function buildScoreContext(Model $entity, string $type, array $meta): array
+    {
+        $rawHtml = $this->rawContent($entity, $type);
+
+        $alts = [];
+        if ($rawHtml !== '' && preg_match_all('/<img\s[^>]*alt=["\']([^"\']*)["\']/i', $rawHtml, $m)) {
+            $alts = array_values(array_filter($m[1]));
+        }
+
+        // Entity pages in this app always render a canonical via the layout,
+        // so a canonical is resolvable whenever we have a real slug/URL.
+        $hasCanonical = !empty($meta['canonical_url']) || !empty($entity->slug);
+
+        return [
+            'raw_html'           => $rawHtml,
+            'secondary_keywords' => $meta['secondary_keywords'] ?? [],
+            'image_alts'         => $alts,
+            'has_schema'         => !empty($meta['schema_json']),
+            'has_og'             => !empty($meta['og_image']) || !empty($meta['og_title']),
+            'has_canonical'      => $hasCanonical,
+        ];
     }
 
     protected function displayName(Model $entity, string $type): string
@@ -895,51 +1103,375 @@ class AiSeoBoardService
         return null;
     }
 
+    /**
+     * Build a STACKED list of schema nodes for the entity — the AIOSEO "stack
+     * multiple schema types on one page" model. Always includes the primary
+     * type + a BreadcrumbList, and adds an FAQPage / HowTo when the AI returned
+     * structured Q&A or steps. Returns a list the resolver renders as separate
+     * <script type="ld+json"> blocks.
+     */
     protected function generateSchema(Model $entity, string $type, array $meta): ?array
     {
+        $primary = match ($type) {
+            'product'  => $this->productSchema($entity, $meta),
+            'category' => $this->collectionSchema($entity, $type, $meta),
+            'page'     => $this->pageSchema($entity, $type, $meta),
+            'blog'     => $this->articleSchema($entity, $type, $meta),
+            default    => null,
+        };
+
+        if (!$primary) {
+            return null;
+        }
+
+        $stack = [$this->pruneNulls($primary)];
+
+        if ($breadcrumb = $this->breadcrumbSchema($entity, $type)) {
+            $stack[] = $breadcrumb;
+        }
+        if ($faq = $this->faqSchema($meta['faqs'] ?? null)) {
+            $stack[] = $faq;
+        }
+        if ($howto = $this->howToSchema($entity, $type, $meta)) {
+            $stack[] = $howto;
+        }
+
+        return $stack;
+    }
+
+    /** Deterministic BreadcrumbList: Home › Section › Entity. */
+    protected function breadcrumbSchema(Model $entity, string $type): ?array
+    {
+        $base = rtrim(url('/'), '/');
         $name = $this->displayName($entity, $type);
         $url  = $this->urlFor($entity, $type);
 
-        return match ($type) {
-            'product' => [
-                '@context'    => 'https://schema.org',
-                '@type'       => 'Product',
-                'name'        => $name,
-                'description' => $meta['meta_description'] ?? Str::limit($this->plainContent($entity, $type), 200, ''),
-                'image'       => $meta['og_image'] ?? null,
-                'url'         => $url,
-                'offers'      => [
-                    '@type'         => 'Offer',
-                    'price'         => $entity->unit_price ?? null,
-                    'priceCurrency' => $this->currencyCode(),
-                    'availability'  => 'https://schema.org/InStock',
-                    'url'           => $url,
-                ],
-            ],
-            'category' => [
-                '@context'    => 'https://schema.org',
-                '@type'       => 'CollectionPage',
-                'name'        => $name,
-                'description' => $meta['meta_description'] ?? null,
-                'url'         => $url,
-            ],
-            'page' => [
-                '@context'    => 'https://schema.org',
-                '@type'       => 'WebPage',
-                'name'        => $name,
-                'description' => $meta['meta_description'] ?? null,
-                'url'         => $url,
-            ],
-            'blog' => [
-                '@context'    => 'https://schema.org',
-                '@type'       => 'Article',
-                'headline'    => $name,
-                'description' => $meta['meta_description'] ?? null,
-                'image'       => $meta['og_image'] ?? null,
-                'url'         => $url,
-            ],
-            default => null,
+        $trail = [['name' => 'Home', 'url' => $base . '/']];
+
+        $section = match ($type) {
+            'product'  => ['name' => 'Shop', 'url' => $base . '/shop'],
+            'category' => ['name' => 'Categories', 'url' => $base . '/categories'],
+            'blog'     => ['name' => 'Blog', 'url' => $base . '/blog'],
+            default    => null,
         };
+        if ($section) {
+            $trail[] = $section;
+        }
+        $trail[] = ['name' => Str::limit($name, 80, ''), 'url' => $url];
+
+        $items = [];
+        foreach ($trail as $i => $crumb) {
+            $items[] = [
+                '@type'    => 'ListItem',
+                'position' => $i + 1,
+                'name'     => $crumb['name'],
+                'item'     => $crumb['url'],
+            ];
+        }
+
+        return [
+            '@context'        => 'https://schema.org',
+            '@type'           => 'BreadcrumbList',
+            'itemListElement' => $items,
+        ];
+    }
+
+    /** FAQPage from AI-provided [{question, answer}, …]. */
+    protected function faqSchema($faqs): ?array
+    {
+        if (!is_array($faqs) || empty($faqs)) {
+            return null;
+        }
+
+        $questions = [];
+        foreach ($faqs as $faq) {
+            $q = trim((string) ($faq['question'] ?? $faq['q'] ?? ''));
+            $a = trim(strip_tags((string) ($faq['answer'] ?? $faq['a'] ?? '')));
+            if ($q === '' || $a === '') {
+                continue;
+            }
+            $questions[] = [
+                '@type'          => 'Question',
+                'name'           => Str::limit($q, 200, ''),
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => Str::limit($a, 600, '')],
+            ];
+        }
+
+        if (count($questions) < 2) {
+            return null; // Google wants a genuine FAQ set, not a single Q.
+        }
+
+        return [
+            '@context'   => 'https://schema.org',
+            '@type'      => 'FAQPage',
+            'mainEntity' => $questions,
+        ];
+    }
+
+    /**
+     * Append a visible FAQ block to the entity's main content so the FAQPage
+     * schema reflects on-page content (a Google rich-results requirement).
+     * Idempotent — skips if an FAQ section already exists. Additive only;
+     * never removes curated content.
+     */
+    protected function injectFaqContent(Model $entity, string $type, $faqs): bool
+    {
+        $clean = $this->normalizeFaqs($faqs);
+        if (!$clean || count($clean) < 2) {
+            return false;
+        }
+
+        $field = match ($type) {
+            'product'  => 'description',
+            'category' => 'bottom_description',
+            'page'     => 'content',
+            'blog'     => 'description',
+            default    => null,
+        };
+        if (!$field || !Schema::hasColumn($entity->getTable(), $field)) {
+            return false;
+        }
+
+        $existing = (string) ($entity->{$field} ?? '');
+        if (stripos($existing, 'frequently asked') !== false) {
+            return true; // already visible — don't duplicate
+        }
+
+        $html = '<h2>Frequently Asked Questions</h2>';
+        foreach ($clean as $faq) {
+            $html .= '<h3>' . e($faq['question']) . '</h3><p>' . e($faq['answer']) . '</p>';
+        }
+
+        $entity->forceFill([$field => trim($existing . "\n" . $html)])->save();
+        return true;
+    }
+
+    /** Normalize AI faqs into a clean [{question, answer}] list. */
+    protected function normalizeFaqs($faqs): ?array
+    {
+        if (!is_array($faqs)) {
+            return null;
+        }
+        $clean = [];
+        foreach ($faqs as $faq) {
+            if (!is_array($faq)) {
+                continue;
+            }
+            $q = trim((string) ($faq['question'] ?? $faq['q'] ?? ''));
+            $a = trim((string) ($faq['answer'] ?? $faq['a'] ?? ''));
+            if ($q !== '' && $a !== '') {
+                $clean[] = ['question' => $q, 'answer' => $a];
+            }
+        }
+        return $clean ?: null;
+    }
+
+    /** HowTo only when the AI returned real, ordered steps — never fabricated. */
+    protected function howToSchema(Model $entity, string $type, array $meta): ?array
+    {
+        $steps = $meta['howto_steps'] ?? null;
+        if (!is_array($steps) || count($steps) < 2) {
+            return null;
+        }
+
+        $stepNodes = [];
+        foreach ($steps as $i => $step) {
+            $text = trim(strip_tags((string) (is_array($step) ? ($step['text'] ?? '') : $step)));
+            if ($text === '') {
+                continue;
+            }
+            $stepNodes[] = [
+                '@type'    => 'HowToStep',
+                'position' => $i + 1,
+                'name'     => Str::limit($text, 60, ''),
+                'text'     => Str::limit($text, 300, ''),
+            ];
+        }
+
+        if (count($stepNodes) < 2) {
+            return null;
+        }
+
+        return [
+            '@context' => 'https://schema.org',
+            '@type'    => 'HowTo',
+            'name'     => Str::limit('How to use ' . $this->displayName($entity, $type), 100, ''),
+            'step'     => $stepNodes,
+        ];
+    }
+
+    /** Rich Product schema: brand, aggregateRating, stock-aware Offer, seller. */
+    protected function productSchema(Model $entity, array $meta): array
+    {
+        $name = $this->displayName($entity, 'product');
+        $url  = $this->urlFor($entity, 'product');
+
+        $inStock = ($entity->current_stock ?? 0) > 0
+            || ($entity->stock_visibility_state ?? null) !== 'hide';
+
+        $schema = [
+            '@context'    => 'https://schema.org',
+            '@type'       => 'Product',
+            'name'        => $name,
+            'description' => $meta['meta_description'] ?? Str::limit($this->plainContent($entity, 'product'), 200, ''),
+            'image'       => $meta['og_image'] ?? $this->fallbackImage($entity, 'product'),
+            'url'         => $url,
+            'sku'         => (string) $entity->getKey(),
+            'brand'       => $this->brandNode($entity),
+            'offers'      => [
+                '@type'           => 'Offer',
+                'price'           => $entity->unit_price !== null ? number_format((float) $entity->unit_price, 2, '.', '') : null,
+                'priceCurrency'   => $this->currencyCode(),
+                'availability'    => $inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+                'itemCondition'   => 'https://schema.org/NewCondition',
+                'url'             => $url,
+                'priceValidUntil' => now()->addYear()->toDateString(),
+                'seller'          => $this->organizationNode(),
+            ],
+        ];
+
+        $rating = $this->aggregateRatingNode($entity);
+        if ($rating) {
+            $schema['aggregateRating'] = $rating;
+        }
+
+        return $schema;
+    }
+
+    protected function collectionSchema(Model $entity, string $type, array $meta): array
+    {
+        return [
+            '@context'    => 'https://schema.org',
+            '@type'       => 'CollectionPage',
+            'name'        => $this->displayName($entity, $type),
+            'description' => $meta['meta_description'] ?? null,
+            'url'         => $this->urlFor($entity, $type),
+        ];
+    }
+
+    protected function pageSchema(Model $entity, string $type, array $meta): array
+    {
+        $name = $this->displayName($entity, $type);
+        $url  = $this->urlFor($entity, $type);
+        $slug = Str::lower((string) ($entity->slug ?? ''));
+
+        // About / Contact pages carry the business identity — emit LocalBusiness.
+        if (Str::contains($slug, ['about', 'contact', 'location', 'store'])) {
+            return $this->localBusinessNode($url, $meta['meta_description'] ?? null);
+        }
+
+        return [
+            '@context'    => 'https://schema.org',
+            '@type'       => 'WebPage',
+            'name'        => $name,
+            'description' => $meta['meta_description'] ?? null,
+            'url'         => $url,
+            'publisher'   => $this->organizationNode(),
+        ];
+    }
+
+    protected function articleSchema(Model $entity, string $type, array $meta): array
+    {
+        return [
+            '@context'      => 'https://schema.org',
+            '@type'         => 'Article',
+            'headline'      => Str::limit($this->displayName($entity, $type), 110, ''),
+            'description'   => $meta['meta_description'] ?? null,
+            'image'         => $meta['og_image'] ?? null,
+            'url'           => $this->urlFor($entity, $type),
+            'datePublished' => optional($entity->created_at)->toAtomString(),
+            'dateModified'  => optional($entity->updated_at)->toAtomString(),
+            'publisher'     => $this->organizationNode(),
+        ];
+    }
+
+    protected function brandNode(Model $entity): ?array
+    {
+        try {
+            $brand = method_exists($entity, 'brand') ? $entity->brand : null;
+            if ($brand && !empty($brand->name)) {
+                return ['@type' => 'Brand', 'name' => $brand->name];
+            }
+        } catch (Throwable $e) {
+            // ignore — brand is optional
+        }
+        return null;
+    }
+
+    protected function aggregateRatingNode(Model $entity): ?array
+    {
+        $rating = (float) ($entity->rating ?? 0);
+        if ($rating <= 0) {
+            return null;
+        }
+
+        $count = 0;
+        try {
+            if (method_exists($entity, 'reviews')) {
+                $count = (int) $entity->reviews()->where('status', 1)->count();
+            }
+        } catch (Throwable $e) {
+            $count = 0;
+        }
+
+        if ($count < 1) {
+            return null;
+        }
+
+        return [
+            '@type'       => 'AggregateRating',
+            'ratingValue' => round(min(5, max(1, $rating)), 1),
+            'reviewCount' => $count,
+            'bestRating'  => 5,
+            'worstRating' => 1,
+        ];
+    }
+
+    protected function organizationNode(): array
+    {
+        return [
+            '@type' => 'Organization',
+            'name'  => get_setting('website_name', config('app.name')),
+            'url'   => rtrim(url('/'), '/'),
+        ];
+    }
+
+    protected function localBusinessNode(string $url, ?string $description): array
+    {
+        $phone = get_setting('seo_local_phone', get_setting('contact_phone', config('seo.local_business.phone')));
+
+        return $this->pruneNulls([
+            '@context'    => 'https://schema.org',
+            '@type'       => config('seo.local_business.type', 'Store'),
+            'name'        => get_setting('website_name', config('app.name')),
+            'description' => $description,
+            'url'         => $url,
+            'telephone'   => $phone ?: null,
+            'image'       => get_setting('header_logo') ? uploaded_asset(get_setting('header_logo')) : null,
+            'address'     => [
+                '@type'           => 'PostalAddress',
+                'addressLocality' => config('seo.local_business.city'),
+                'addressRegion'   => config('seo.local_business.region'),
+                'addressCountry'  => config('seo.local_business.country'),
+            ],
+            'areaServed'  => config('seo.local_business.region', 'Ontario') . ', ' . config('seo.local_business.country', 'Canada'),
+        ]);
+    }
+
+    /** Recursively drop null / empty-string values so schema validates cleanly. */
+    protected function pruneNulls(array $data): array
+    {
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                $data[$key] = $this->pruneNulls($value);
+                if ($data[$key] === []) {
+                    unset($data[$key]);
+                }
+            } elseif ($value === null || $value === '') {
+                unset($data[$key]);
+            }
+        }
+        return $data;
     }
 
     protected function currencyCode(): string
@@ -978,9 +1510,11 @@ class AiSeoBoardService
             . ($description ? "Details: \"" . Str::limit($description, 400) . "\"\n" : '')
             . "Algorithm: {$strategy}\n"
             . "Local priority: primary targets are Mississauga, Brampton, Toronto. Secondary targets are Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington. Include Trade Account and Leave a Review intent only where natural.\n"
+            . "Keyword distribution is critical: the focus keyword MUST appear in the title (first 3 words), in the meta description, and in at least one H2 of the content HTML.\n"
             . $competitorContext
+            . "Also return 3-5 genuine FAQs (question + answer) that match real buyer questions; these power FAQ rich results.\n"
             . "Return ONLY this JSON shape with no other text:\n"
-            . '{"title":"SEO title 30-60 chars","description":"meta description 120-160 chars","focus_keyword":"primary keyword phrase","secondary_keywords":["keyword 1","keyword 2","keyword 3","keyword 4","keyword 5"],"'.$contentField.'":"clean HTML with H2/H3 sections, Canada intent, benefits, and FAQ"}';
+            . '{"title":"SEO title 50-60 chars with focus keyword first","description":"meta description 150-160 chars, never under 150, focus keyword + benefit + CTA","focus_keyword":"primary keyword phrase","secondary_keywords":["keyword 1","keyword 2","keyword 3","keyword 4","keyword 5"],"'.$contentField.'":"clean HTML; focus keyword in at least one <h2>; H2/H3 sections; Canada intent; benefits; FAQ","faqs":[{"question":"...","answer":"..."}]}';
 
         try {
             $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 1000]);
@@ -1006,6 +1540,10 @@ class AiSeoBoardService
                     ? array_values(array_filter(array_map(fn($k) => Str::limit(trim((string) $k), 80, ''), $decoded['secondary_keywords'])))
                     : null,
                 'content_html' => $decoded[$contentField] ?? $decoded['content_html'] ?? null,
+                'faqs'         => $this->normalizeFaqs($decoded['faqs'] ?? null),
+                'howto_steps'  => isset($decoded['howto_steps']) && is_array($decoded['howto_steps'])
+                    ? array_values(array_filter(array_map(fn($s) => trim(strip_tags((string) (is_array($s) ? ($s['text'] ?? '') : $s))), $decoded['howto_steps'])))
+                    : null,
             ];
         } catch (Throwable $e) {
             logger()->warning('AiSeoBoard ai bundle failed', ['e' => $e->getMessage()]);
@@ -1073,12 +1611,44 @@ class AiSeoBoardService
 
     protected function templateDescription(string $name, string $type): string
     {
-        return match ($type) {
-            'product' => Str::limit('Shop ' . $name . ' in Canada with reliable supply, clear specs, competitive pricing, and expert support for Canadian buyers.', 160, ''),
-            'category' => Str::limit('Explore ' . $name . ' in Canada. Compare options, request pricing, and source dependable products for business and industrial needs.', 160, ''),
-            'page' => Str::limit('Learn about ' . $name . ' for Canadian customers with helpful details, trusted support, and clear next steps.', 160, ''),
-            default => Str::limit('Find practical Canada-focused information about ' . $name . ' with expert guidance and useful next steps.', 160, ''),
+        $site = get_setting('website_name', config('app.name'));
+        $text = match ($type) {
+            'product'  => 'Shop ' . $name . ' in Canada with reliable supply, clear specs, competitive trade pricing, and expert support for buyers in Mississauga, Brampton, Toronto and the GTA.',
+            'category' => 'Explore ' . $name . ' in Canada. Compare options, request trade pricing, and source dependable products for business and industrial needs across the GTA.',
+            'page'     => 'Learn about ' . $name . ' for Canadian customers, including helpful details, trusted support, trade account options, and clear next steps from ' . $site . '.',
+            default    => 'Find practical Canada-focused information about ' . $name . ' with expert guidance, trade support, and useful next steps from ' . $site . '.',
         };
+
+        return $this->fitDescription($text);
+    }
+
+    /**
+     * Keep a meta description inside Google's 150–160 char sweet spot: pad short
+     * copy with a natural suffix, hard-trim anything over 160 on a word boundary.
+     */
+    protected function fitDescription(string $text, int $min = 150, int $max = 160): string
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $text));
+
+        if (mb_strlen($text) < $min) {
+            foreach ([' Fast Canada-wide shipping and trade accounts available.', ' Trusted Canadian supplier with bulk and trade pricing.', ' Order online or request a quote today.'] as $suffix) {
+                if (mb_strlen($text) >= $min) {
+                    break;
+                }
+                $text = rtrim($text, '.') . '.' . $suffix;
+            }
+        }
+
+        if (mb_strlen($text) > $max) {
+            $text = mb_substr($text, 0, $max);
+            $lastSpace = mb_strrpos($text, ' ');
+            if ($lastSpace !== false && $lastSpace > $min - 15) {
+                $text = mb_substr($text, 0, $lastSpace);
+            }
+            $text = rtrim($text, " ,.;:") . '.';
+        }
+
+        return $text;
     }
 
     protected function primaryCanadaKeyword(string $name, string $type): string
@@ -1352,9 +1922,12 @@ class AiSeoBoardService
      */
     protected function providerRates(string $provider): array
     {
+        // Rates priced against the model each provider is actually configured to
+        // call in config/seo.php — keep these aligned when the model env changes.
         return match (strtolower($provider)) {
             'openai', 'chatgpt' => ['in_usd_per_1m' => 0.15,  'out_usd_per_1m' => 0.60,  'note' => 'gpt-4o-mini'],
-            'claude', 'anthropic' => ['in_usd_per_1m' => 1.00,  'out_usd_per_1m' => 5.00, 'note' => 'claude-haiku 4.5'],
+            // config/seo.php defaults claude → claude-sonnet-4-6 ($3 in / $15 out).
+            'claude', 'anthropic' => ['in_usd_per_1m' => 3.00,  'out_usd_per_1m' => 15.00, 'note' => 'claude-sonnet-4-6'],
             'gemini', 'google'  => ['in_usd_per_1m' => 0.075, 'out_usd_per_1m' => 0.30,  'note' => 'gemini-1.5-flash'],
             'grok', 'xai'       => ['in_usd_per_1m' => 0.50,  'out_usd_per_1m' => 1.50,  'note' => 'grok-3-mini'],
             default             => ['in_usd_per_1m' => 0.20,  'out_usd_per_1m' => 0.80,  'note' => 'fallback estimate'],

@@ -4,12 +4,15 @@ namespace App\Services\PerformanceOptimizer;
 
 use App\Models\PerformanceOptimizer\CacheRule;
 use App\Models\PerformanceOptimizer\OptimizationLog;
+use App\Models\Category;
 use App\Models\Currency;
+use App\Models\Product;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class PageCacheService
 {
@@ -28,9 +31,23 @@ class PageCacheService
         'checkout',
         'order-confirmed',
         // Authentication
+        'login',
+        'logout',
+        'register',
+        'registration',
+        'password',
+        'password/reset',
+        'password/email',
+        'forgot-password',
+        'reset-password',
+        'confirm-password',
+        'email/verify',
+        'email/resend',
+        'refresh-csrf',
         'users/login',
         'users/registration',
         'seller/login',
+        'seller/registration',
         'deliveryboy/login',
         'social-login',
         'account-deletion',
@@ -95,10 +112,8 @@ class PageCacheService
 
         // Hard-coded bypass — user-specific / transactional pages are never cached.
         $path = ltrim($request->path(), '/');
-        foreach (self::NEVER_CACHE_PREFIXES as $prefix) {
-            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
-                return false;
-            }
+        if ($this->isNeverCachePath($path)) {
+            return false;
         }
 
         // Admin-configured path excludes (supports prefix match + simple wildcard via fnmatch)
@@ -155,11 +170,8 @@ class PageCacheService
             $warnings[] = 'Memcached extension is missing; file cache fallback is active.';
         }
 
-        foreach (self::NEVER_CACHE_PREFIXES as $prefix) {
-            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
-                $reasons[] = "Path is protected by the never-cache list: {$prefix}.";
-                break;
-            }
+        if ($matchedNeverCache = $this->matchedNeverCachePrefix($path)) {
+            $reasons[] = "Path is protected by the never-cache list: {$matchedNeverCache}.";
         }
 
         foreach ($this->excludedPaths() as $ex) {
@@ -517,16 +529,17 @@ class PageCacheService
         $base       = rtrim(url('/'), '/');
         $baseHost   = (string) parse_url($base, PHP_URL_HOST);
         $sitemapUrl = $base . '/sitemap.xml';
-        $urls       = [$base];
+        $urls       = $this->defaultWarmUrls($base);
         $warmed     = 0;
         $failed     = 0;
         $attempted  = 0;
         $verifyTls  = !str_contains($base, 'localhost') && !str_contains($base, '127.0.0.1');
+        $timeout    = max(10, min(45, (int) $this->setting('perf_cache_warm_timeout_seconds', 45)));
 
         try {
             $http = $verifyTls
-                ? Http::connectTimeout(2)->timeout(6)
-                : Http::connectTimeout(2)->timeout(6)->withoutVerifying();
+                ? Http::connectTimeout(3)->timeout($timeout)
+                : Http::connectTimeout(3)->timeout($timeout)->withoutVerifying();
             $response = $http->get($sitemapUrl);
             if ($response->successful()) {
                 preg_match_all('/<loc>(.*?)<\/loc>/s', $response->body(), $matches);
@@ -546,9 +559,11 @@ class PageCacheService
             $attempted++;
             try {
                 $http = $verifyTls
-                    ? Http::connectTimeout(2)->timeout(6)
-                    : Http::connectTimeout(2)->timeout(6)->withoutVerifying();
-                $resp = $http->get($u);
+                    ? Http::connectTimeout(3)->timeout($timeout)
+                    : Http::connectTimeout(3)->timeout($timeout)->withoutVerifying();
+                $resp = $http
+                    ->withHeaders(['User-Agent' => 'BHS-Performance-Optimizer-Warm/1.1'])
+                    ->get($u);
                 if ($resp->successful() && $this->isHtmlWarmResponse($resp)) {
                     if ($this->driver === 'litespeed' || $this->store($u, $resp->body())) {
                         $warmed++;
@@ -592,6 +607,61 @@ class PageCacheService
         ];
     }
 
+    protected function defaultWarmUrls(string $base): array
+    {
+        return Cache::remember('perf_default_warm_urls', 300, function () use ($base) {
+            $urls = [$base];
+
+            try {
+                $categoryQuery = Category::query()
+                    ->select('slug')
+                    ->whereNotNull('slug')
+                    ->where('slug', '!=', '')
+                    ->orderByDesc('id')
+                    ->limit(8);
+
+                if (Schema::hasColumn('categories', 'published')) {
+                    $categoryQuery->where('published', 1);
+                }
+
+                foreach ($categoryQuery->pluck('slug') as $slug) {
+                    $urls[] = route('products.category', $slug);
+                }
+            } catch (\Throwable $e) {
+                Log::debug('[PerfOptimizer] category warm seed failed: ' . $e->getMessage());
+            }
+
+            try {
+                $productQuery = Product::query()
+                    ->select('slug')
+                    ->whereNotNull('slug')
+                    ->where('slug', '!=', '')
+                    ->orderByDesc('id')
+                    ->limit(10);
+
+                if (Schema::hasColumn('products', 'published')) {
+                    $productQuery->where('published', 1);
+                }
+                if (Schema::hasColumn('products', 'approved')) {
+                    $productQuery->where('approved', 1);
+                }
+                if (Schema::hasColumn('products', 'auction_product')) {
+                    $productQuery->where(function ($query) {
+                        $query->whereNull('auction_product')->orWhere('auction_product', 0);
+                    });
+                }
+
+                foreach ($productQuery->pluck('slug') as $slug) {
+                    $urls[] = route('product', $slug);
+                }
+            } catch (\Throwable $e) {
+                Log::debug('[PerfOptimizer] product warm seed failed: ' . $e->getMessage());
+            }
+
+            return array_values(array_unique($urls));
+        });
+    }
+
     protected function isWarmableUrl(string $url, string $baseHost): bool
     {
         $url = trim($url);
@@ -608,11 +678,7 @@ class PageCacheService
         }
 
         $path = ltrim((string) parse_url($url, PHP_URL_PATH), '/');
-        foreach (self::NEVER_CACHE_PREFIXES as $prefix) {
-            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
-                return false;
-            }
-        }
+        if ($this->isNeverCachePath($path)) return false;
 
         foreach ($this->excludedPaths() as $ex) {
             if ($ex !== '' && (str_starts_with($path, $ex) || fnmatch($ex, $path))) {
@@ -636,6 +702,22 @@ class PageCacheService
     {
         $contentType = strtolower((string) $response->header('Content-Type', ''));
         return $contentType === '' || str_contains($contentType, 'text/html');
+    }
+
+    public function isNeverCachePath(string $path): bool
+    {
+        return $this->matchedNeverCachePrefix($path) !== null;
+    }
+
+    protected function matchedNeverCachePrefix(string $path): ?string
+    {
+        $path = ltrim($path, '/');
+        foreach (self::NEVER_CACHE_PREFIXES as $prefix) {
+            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
+                return $prefix;
+            }
+        }
+        return null;
     }
 
     /**

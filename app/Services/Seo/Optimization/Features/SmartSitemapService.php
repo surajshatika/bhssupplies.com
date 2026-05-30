@@ -146,19 +146,27 @@ class SmartSitemapService extends AbstractSeoService
         // ── Products (use /product/{slug} route) ─────────────────────────
         if (Schema::hasTable('products')) {
             try {
+                // Dynamic priority: better-optimised products are crawled first.
+                $scores = $this->entityScores(\App\Models\Product::class);
+
                 \App\Models\Product::where('published', 1)->where('approved', 1)
-                    ->select('slug', 'updated_at')
+                    ->select('id', 'slug', 'updated_at', 'thumbnail_img')
                     ->orderBy('updated_at', 'desc')
-                    ->chunk(500, function ($products) use ($base, &$groups) {
+                    ->chunk(500, function ($products) use ($base, &$groups, $scores) {
                         foreach ($products as $p) {
-                            if (!empty($p->slug)) {
-                                $groups['products'][] = [
-                                    'loc'        => $base . '/product/' . $p->slug,
-                                    'priority'   => '0.9',
-                                    'changefreq' => 'weekly',
-                                    'lastmod'    => optional($p->updated_at)->toDateString() ?? now()->toDateString(),
-                                ];
+                            if (empty($p->slug)) {
+                                continue;
                             }
+                            $entry = [
+                                'loc'        => $base . '/product/' . $p->slug,
+                                'priority'   => $this->priorityFromScore($scores[$p->id] ?? null, '0.9'),
+                                'changefreq' => 'weekly',
+                                'lastmod'    => optional($p->updated_at)->toDateString() ?? now()->toDateString(),
+                            ];
+                            if ($img = $this->resolveImageUrl($p->thumbnail_img)) {
+                                $entry['images'] = [$img];
+                            }
+                            $groups['products'][] = $entry;
                         }
                     });
             } catch (\Throwable $e) {}
@@ -258,11 +266,65 @@ class SmartSitemapService extends AbstractSeoService
             $lines[] = '    <lastmod>' . ($url['lastmod'] ?? now()->toDateString()) . '</lastmod>';
             $lines[] = '    <changefreq>' . ($url['changefreq'] ?? 'weekly') . '</changefreq>';
             $lines[] = '    <priority>' . ($url['priority'] ?? '0.5') . '</priority>';
+            foreach ($url['images'] ?? [] as $img) {
+                $lines[] = '    <image:image>';
+                $lines[] = '      <image:loc>' . htmlspecialchars($img) . '</image:loc>';
+                $lines[] = '    </image:image>';
+            }
             $lines[] = '  </url>';
         }
 
         $lines[] = '</urlset>';
         return implode("\n", $lines);
+    }
+
+    /** Map of entity id → cached TruSEO score for dynamic <priority>. */
+    protected function entityScores(string $modelClass): array
+    {
+        if (!Schema::hasTable('seo_meta')) {
+            return [];
+        }
+        try {
+            return \App\Models\SeoMeta::query()
+                ->where('model_type', $modelClass)
+                ->whereNotNull('seo_score')
+                ->pluck('seo_score', 'model_id')
+                ->map(fn($s) => (float) $s)
+                ->all();
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    /** Higher SEO score → higher crawl priority; falls back to the type default. */
+    protected function priorityFromScore(?float $score, string $default): string
+    {
+        if ($score === null) {
+            return $default;
+        }
+        return match (true) {
+            $score >= 80 => '1.0',
+            $score >= 60 => '0.9',
+            $score >= 40 => '0.8',
+            default      => '0.6',
+        };
+    }
+
+    /** Resolve a product image (upload id or URL) to an absolute URL. */
+    protected function resolveImageUrl($value): ?string
+    {
+        if (empty($value)) {
+            return null;
+        }
+        if (is_string($value) && filter_var($value, FILTER_VALIDATE_URL)) {
+            return $value;
+        }
+        try {
+            $url = uploaded_asset($value);
+            return $url && filter_var($url, FILTER_VALIDATE_URL) ? $url : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     protected function buildSitemapIndex(string $base): string

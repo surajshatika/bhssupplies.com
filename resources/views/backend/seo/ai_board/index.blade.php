@@ -52,9 +52,17 @@
             <p class="text-muted mb-0 small">{{ translate('Scan every product, category, page and blog post — see what is missing and let AI fill the gaps.') }}</p>
         </div>
         <div class="col-md-5 text-md-right mt-3 mt-md-0">
-            <button type="button" class="btn btn-success btn-sm js-bulk-trigger" data-mode="filtered">
-                <i class="las la-magic"></i> {{ translate('AI Fix All Filtered') }}
-            </button>
+            <div class="d-inline-flex align-items-center" style="gap:.35rem;">
+                <select id="bulkLimit" class="form-control form-control-sm" style="width:auto;" title="{{ translate('How many matching URLs to fix in this run') }}">
+                    <option value="100">100 {{ translate('per run') }}</option>
+                    <option value="250">250 {{ translate('per run') }}</option>
+                    <option value="500" selected>500 {{ translate('per run') }}</option>
+                    <option value="1000">1000 {{ translate('per run') }}</option>
+                </select>
+                <button type="button" class="btn btn-success btn-sm js-bulk-trigger" data-mode="filtered">
+                    <i class="las la-magic"></i> {{ translate('AI Fix All Filtered') }}
+                </button>
+            </div>
             <a href="{{ route('admin.seo.ai_board.index', ['type' => $type]) }}" class="btn btn-soft-secondary btn-sm ml-1">
                 <i class="las la-sync"></i> {{ translate('Refresh') }}
             </a>
@@ -222,11 +230,19 @@
                                     <span class="text-success small">{{ translate('No critical issues') }}</span>
                                 @endif
                             </td>
-                            <td class="text-right">
+                            <td class="text-right text-nowrap">
+                                <button class="btn btn-soft-primary btn-sm js-preview-btn"
+                                        data-type="{{ $row['type'] }}"
+                                        data-id="{{ $row['id'] }}"
+                                        data-title="{{ $row['title'] }}"
+                                        title="{{ translate('Preview & edit AI suggestions before applying') }}">
+                                    <i class="las la-eye"></i> {{ translate('Preview') }}
+                                </button>
                                 <button class="btn btn-primary btn-sm js-fix-btn"
                                         data-type="{{ $row['type'] }}"
                                         data-id="{{ $row['id'] }}"
-                                        data-title="{{ $row['title'] }}">
+                                        data-title="{{ $row['title'] }}"
+                                        title="{{ translate('Generate and apply in one click') }}">
                                     <i class="las la-magic"></i> {{ translate('AI Fix') }}
                                 </button>
                             </td>
@@ -351,9 +367,88 @@
                 </span>
             </div>
             <div id="fixDrawerApplied"></div>
+
+            {{-- Live SERP + social previews (pure client-side, no extra API call) --}}
+            <div id="fixDrawerPreviews" class="mt-4 d-none">
+                <div class="preview-label"><i class="lab la-google mr-1"></i>{{ translate('Google preview') }}</div>
+                <div class="serp-card">
+                    <div class="serp-url" id="pvSerpUrl"></div>
+                    <div class="serp-title" id="pvSerpTitle"></div>
+                    <div class="serp-desc" id="pvSerpDesc"></div>
+                </div>
+
+                <div class="preview-label mt-3"><i class="lab la-facebook mr-1"></i>{{ translate('Social share preview') }}</div>
+                <div class="social-card">
+                    <div class="social-img" id="pvSocialImg"></div>
+                    <div class="social-meta">
+                        <div class="social-host" id="pvSocialHost"></div>
+                        <div class="social-title" id="pvSocialTitle"></div>
+                        <div class="social-desc" id="pvSocialDesc"></div>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <a href="#" id="pvGoogleTest" target="_blank" rel="noopener" class="btn btn-sm btn-soft-info">
+                        <i class="las la-vial mr-1"></i>{{ translate('Test rich results with Google') }}
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        {{-- Preview & Edit form (shown for the Preview flow) --}}
+        <div id="previewForm" class="d-none">
+            <p class="mb-1"><strong id="previewTitle"></strong></p>
+            <div class="mb-3">
+                <span class="badge badge-soft-secondary mr-1" id="previewSource"></span>
+                <span class="badge badge-soft-info">{{ translate('Current score') }}: <span id="previewScore"></span></span>
+            </div>
+            <div class="alert alert-soft-info small py-2">
+                <i class="las la-info-circle mr-1"></i>{{ translate('Edit any suggestion below, then Apply. Only empty fields are written — curated values are never overwritten.') }}
+            </div>
+
+            <div class="form-group" id="pf-title-group">
+                <label class="field-label mb-1">{{ translate('Meta title') }} <small class="text-muted">(<span id="pf-title-count">0</span>/60)</small></label>
+                <input type="text" id="pf-title" class="form-control form-control-sm" maxlength="70">
+            </div>
+            <div class="form-group" id="pf-desc-group">
+                <label class="field-label mb-1">{{ translate('Meta description') }} <small class="text-muted">(<span id="pf-desc-count">0</span>/160)</small></label>
+                <textarea id="pf-desc" class="form-control form-control-sm" rows="3" maxlength="320"></textarea>
+            </div>
+            <div class="form-group" id="pf-focus-group">
+                <label class="field-label mb-1">{{ translate('Focus keyword') }}</label>
+                <input type="text" id="pf-focus" class="form-control form-control-sm">
+            </div>
+            <div class="form-group" id="pf-secondary-group">
+                <label class="field-label mb-1">{{ translate('Secondary keywords') }} <small class="text-muted">{{ translate('(comma separated)') }}</small></label>
+                <textarea id="pf-secondary" class="form-control form-control-sm" rows="2"></textarea>
+            </div>
+            <div class="form-check mb-3" id="pf-schema-group">
+                <input class="form-check-input" type="checkbox" id="pf-schema" checked>
+                <label class="form-check-label small" for="pf-schema">{{ translate('Generate structured data (schema) for this page') }}</label>
+            </div>
+
+            <button type="button" class="btn btn-success btn-block" id="pf-apply">
+                <i class="las la-check mr-1"></i>{{ translate('Apply approved values') }}
+                <span id="pf-apply-spinner" class="spinner-border spinner-border-sm ml-1 d-none"></span>
+            </button>
         </div>
     </div>
 </div>
+
+<style>
+.preview-label { font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; font-weight:600; margin-bottom:.35rem; }
+.serp-card { border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; background:#fff; font-family:Arial,sans-serif; }
+.serp-url { color:#202124; font-size:12px; line-height:1.3; }
+.serp-title { color:#1a0dab; font-size:18px; line-height:1.3; margin:2px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.serp-desc { color:#4d5156; font-size:13px; line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.social-card { border:1px solid #dadde1; border-radius:8px; overflow:hidden; background:#fff; }
+.social-img { height:140px; background:#eceff3 center/cover no-repeat; display:flex; align-items:center; justify-content:center; color:#9aa0a6; font-size:12px; }
+.social-meta { padding:10px 12px; background:#f2f3f5; }
+.social-host { color:#606770; font-size:11px; text-transform:uppercase; letter-spacing:.03em; }
+.social-title { color:#1d2129; font-size:15px; font-weight:600; line-height:1.3; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.social-desc { color:#606770; font-size:12px; line-height:1.4; margin-top:2px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.serp-title.too-long, .social-title.too-long { color:#b91c1c; }
+</style>
 
 @endsection
 
@@ -362,6 +457,9 @@
 (function () {
     const csrf = '{{ csrf_token() }}';
     const fixEndpoint = '{{ route("admin.seo.ai_board.fix") }}';
+    const previewEndpoint = '{{ route("admin.seo.ai_board.preview") }}';
+    const applyApprovedEndpoint = '{{ route("admin.seo.ai_board.apply_approved") }}';
+    let previewCtx = null; // {type, id}
 
     function openDrawer() {
         document.getElementById('fixDrawer').classList.add('open');
@@ -373,6 +471,7 @@
         document.querySelector('.fix-drawer-backdrop').classList.remove('open');
         document.getElementById('fixDrawerError').classList.add('d-none');
         document.getElementById('fixDrawerResult').classList.add('d-none');
+        document.getElementById('previewForm').classList.add('d-none');
     }
 
     function showLoading(title) {
@@ -380,6 +479,8 @@
         document.getElementById('fixDrawerLoading').classList.remove('d-none');
         document.getElementById('fixDrawerError').classList.add('d-none');
         document.getElementById('fixDrawerResult').classList.add('d-none');
+        document.getElementById('fixDrawerPreviews').classList.add('d-none');
+        document.getElementById('previewForm').classList.add('d-none');
     }
 
     function showError(msg) {
@@ -395,6 +496,8 @@
         document.getElementById('fixDrawerSource').textContent = data.source === 'ai' ? 'AI generated' : 'Template fallback';
         document.getElementById('fixScoreBefore').textContent = data.score_before;
         document.getElementById('fixScoreAfter').textContent  = data.score_after;
+
+        renderPreviews(data.row || {});
 
         const apEl = document.getElementById('fixDrawerApplied');
         apEl.innerHTML = '';
@@ -414,6 +517,79 @@
             panel.appendChild(row);
         }
         apEl.appendChild(panel);
+    }
+
+    function renderPreviews(row) {
+        const wrap = document.getElementById('fixDrawerPreviews');
+        if (!row || (!row.meta_title && !row.title)) { wrap.classList.add('d-none'); return; }
+        wrap.classList.remove('d-none');
+
+        const title = row.meta_title || row.title || '';
+        const desc  = row.meta_description || '{{ translate('Add a meta description to improve click-through from search results.') }}';
+        const url   = row.url || '{{ url('/') }}';
+        let host = url, path = '';
+        try { const u = new URL(url); host = u.hostname.replace(/^www\./, ''); path = u.pathname.replace(/\//g, ' › ').replace(/\s›\s$/, ''); } catch (e) {}
+
+        // Google SERP
+        document.getElementById('pvSerpUrl').textContent   = host + path;
+        const st = document.getElementById('pvSerpTitle');
+        st.textContent = title;
+        st.classList.toggle('too-long', title.length > 60);
+        document.getElementById('pvSerpDesc').textContent  = desc;
+
+        // Social card
+        const img = document.getElementById('pvSocialImg');
+        if (row.og_image) { img.style.backgroundImage = 'url("' + row.og_image + '")'; img.textContent = ''; }
+        else { img.style.backgroundImage = 'none'; img.textContent = '{{ translate('No OG image set') }}'; }
+        document.getElementById('pvSocialHost').textContent = host;
+        const st2 = document.getElementById('pvSocialTitle');
+        st2.textContent = title;
+        st2.classList.toggle('too-long', title.length > 70);
+        document.getElementById('pvSocialDesc').textContent = desc;
+
+        // Test-with-Google deep link
+        document.getElementById('pvGoogleTest').href = 'https://search.google.com/test/rich-results?url=' + encodeURIComponent(url);
+    }
+
+    function showPreviewForm(data) {
+        document.getElementById('fixDrawerLoading').classList.add('d-none');
+        document.getElementById('fixDrawerResult').classList.add('d-none');
+        document.getElementById('fixDrawerError').classList.add('d-none');
+        document.getElementById('previewForm').classList.remove('d-none');
+
+        previewCtx = { type: data.type, id: data.id };
+        const s = data.suggestions || {};
+        const cur = data.current || {};
+
+        document.getElementById('previewTitle').textContent = data.title || '';
+        document.getElementById('previewSource').textContent = data.source === 'ai' ? 'AI generated' : 'Template fallback';
+        document.getElementById('previewScore').textContent = data.score_before;
+
+        // Show a field only when a suggestion exists (i.e. the field is empty/missing).
+        toggleField('pf-title-group', 'pf-title', s.meta_title, cur.meta_title);
+        toggleField('pf-desc-group', 'pf-desc', s.meta_description, cur.meta_description);
+        toggleField('pf-focus-group', 'pf-focus', s.focus_keyword, cur.focus_keyword);
+        toggleField('pf-secondary-group', 'pf-secondary', s.secondary_keywords, null);
+
+        document.getElementById('pf-schema-group').classList.toggle('d-none', !('schema' in s));
+        document.getElementById('pf-schema').checked = !!s.schema;
+
+        updateCount('pf-title', 'pf-title-count');
+        updateCount('pf-desc', 'pf-desc-count');
+    }
+
+    function toggleField(groupId, inputId, suggestion, current) {
+        const group = document.getElementById(groupId);
+        const has = suggestion !== undefined && suggestion !== null && suggestion !== '';
+        group.classList.toggle('d-none', !has);
+        if (has) {
+            document.getElementById(inputId).value = suggestion;
+        }
+    }
+
+    function updateCount(inputId, countId) {
+        const el = document.getElementById(countId);
+        if (el) el.textContent = (document.getElementById(inputId).value || '').length;
     }
 
     function refreshRow(row) {
@@ -441,6 +617,62 @@
     }
 
     document.querySelectorAll('.js-close-drawer').forEach(el => el.addEventListener('click', closeDrawer));
+
+    // ── PREVIEW & EDIT FLOW ───────────────────────────────────────────────────
+    document.querySelectorAll('.js-preview-btn').forEach(btn => btn.addEventListener('click', function () {
+        showLoading(this.dataset.title);
+        document.getElementById('fixDrawerLoading').querySelector('p').textContent = '{{ translate("Generating AI suggestions to review…") }}';
+        openDrawer();
+
+        fetch(previewEndpoint, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+            body: JSON.stringify({ type: this.dataset.type, id: this.dataset.id })
+        })
+        .then(r => r.json().then(j => ({ status: r.status, json: j })))
+        .then(({ status, json }) => {
+            if (!json.success) { showError(json.error || 'Preview failed (HTTP ' + status + ')'); return; }
+            showPreviewForm(json.data);
+        })
+        .catch(err => showError(err.message || 'Network error'));
+    }));
+
+    document.getElementById('pf-title').addEventListener('input', () => updateCount('pf-title', 'pf-title-count'));
+    document.getElementById('pf-desc').addEventListener('input', () => updateCount('pf-desc', 'pf-desc-count'));
+
+    document.getElementById('pf-apply').addEventListener('click', function () {
+        if (!previewCtx) return;
+        const spinner = document.getElementById('pf-apply-spinner');
+        this.disabled = true; spinner.classList.remove('d-none');
+
+        const payload = {
+            type: previewCtx.type,
+            id: previewCtx.id,
+            meta_title: document.getElementById('pf-title').value,
+            meta_description: document.getElementById('pf-desc').value,
+            focus_keyword: document.getElementById('pf-focus').value,
+            secondary_keywords: document.getElementById('pf-secondary').value,
+            schema: document.getElementById('pf-schema').checked ? 1 : 0,
+        };
+
+        fetch(applyApprovedEndpoint, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json().then(j => ({ status: r.status, json: j })))
+        .then(({ status, json }) => {
+            this.disabled = false; spinner.classList.add('d-none');
+            if (!json.success) { showError(json.error || 'Apply failed (HTTP ' + status + ')'); return; }
+            document.getElementById('previewForm').classList.add('d-none');
+            document.getElementById('fixDrawerResult').classList.remove('d-none');
+            showResult(json.data);
+            refreshRow(json.data.row);
+        })
+        .catch(err => { this.disabled = false; spinner.classList.add('d-none'); showError(err.message || 'Network error'); });
+    });
 
     document.querySelectorAll('.js-fix-btn').forEach(btn => btn.addEventListener('click', function () {
         const type = this.dataset.type;
@@ -530,7 +762,9 @@
             }
             pendingPayload = { mode: 'selected', targets: targets };
         } else {
-            pendingPayload = Object.assign({ mode: 'filtered' }, currentFilters);
+            const limitEl = document.getElementById('bulkLimit');
+            const limit = limitEl ? parseInt(limitEl.value, 10) : 500;
+            pendingPayload = Object.assign({ mode: 'filtered', limit: limit }, currentFilters);
         }
 
         openCostModal(pendingPayload);

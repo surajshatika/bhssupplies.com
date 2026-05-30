@@ -53,6 +53,7 @@ class Zender implements SendSms {
         curl_setopt($ch, CURLOPT_POST, 1);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $args);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
         // Response
         $response = curl_exec($ch);
         curl_close($ch);

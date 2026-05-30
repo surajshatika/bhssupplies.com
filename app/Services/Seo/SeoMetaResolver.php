@@ -67,9 +67,20 @@ class SeoMetaResolver
         $ogImage     = $meta['og_image']         ?? $inline['og_image']         ?? $defaults['og_image'];
         $twImage     = $meta['twitter_image']    ?? $inline['og_image']         ?? $defaults['og_image'];
 
+        // schema_json may hold a single schema node {…} OR a stacked list of
+        // nodes [{…},{…}] (Product + BreadcrumbList + FAQPage). Flatten either
+        // shape into individual <script type="ld+json"> blocks.
         $schemas = [];
         if (!empty($meta['schema_json']) && is_array($meta['schema_json'])) {
-            $schemas[] = $meta['schema_json'];
+            if (array_is_list($meta['schema_json'])) {
+                foreach ($meta['schema_json'] as $node) {
+                    if (is_array($node) && !empty($node)) {
+                        $schemas[] = $node;
+                    }
+                }
+            } else {
+                $schemas[] = $meta['schema_json'];
+            }
         }
         if (!empty($meta['breadcrumbs_json']) && is_array($meta['breadcrumbs_json'])) {
             $schemas[] = $meta['breadcrumbs_json'];

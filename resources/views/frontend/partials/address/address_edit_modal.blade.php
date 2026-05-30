@@ -67,6 +67,10 @@
                         </option>
                     @endforeach
                 </select>
+                <input type="text" class="form-control mb-3 rounded-0 d-none checkout-manual-city" name="city_name" placeholder="{{ translate('Enter your city') }}" disabled>
+                <button type="button" class="btn btn-link p-0 mb-3 fs-13 js-toggle-manual-city" data-select-name="city_id" data-input-name="city_name">
+                    {{ translate('City not listed? Enter manually') }}
+                </button>
             </div>
         </div>
 
@@ -86,7 +90,7 @@
             </div>
         </div>
         
-        @if (get_setting('google_map') == 1)
+        @if (get_setting('google_map') == 1 && empty($checkoutMapDisabled))
             <!-- Google Map -->
             <div class="row mt-3 mb-3">
                 <input id="edit_searchInput" class="controls" type="text" placeholder="Enter a location">

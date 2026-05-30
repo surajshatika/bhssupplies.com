@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AddressController;
 use App\Http\Controllers\AizUploadController;
+use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\VerificationController;
 use App\Http\Controllers\PaymentInformationController;
@@ -101,7 +102,9 @@ Route::controller(AizUploadController::class)->group(function () {
 });
 
 Route::group(['middleware' => ['prevent-back-history','handle-demo-login']], function () {
-    Auth::routes(['verify' => true]);
+    Auth::routes(['verify' => true, 'reset' => false]);
+    Route::get('/password/reset', [ForgotPasswordController::class, 'showLinkRequestForm'])->name('password.request');
+    Route::post('/password/email', [ForgotPasswordController::class, 'sendResetLinkEmail'])->name('password.email');
 });
 
 // Login
@@ -116,11 +119,10 @@ Route::controller(LoginController::class)->group(function () {
 });
 
 Route::controller(VerificationController::class)->group(function () {
-    Route::get('/email/resend', 'resend')->name('verification.resend');
     Route::get('/verification-confirmation/{code}', 'verification_confirmation')->name('email.verification.confirmation');
 });
 
-Route::resource('shops', ShopController::class)->middleware('handle-demo-login');
+Route::resource('shops', ShopController::class)->only(['create', 'store'])->middleware('handle-demo-login');
 Route::controller(ShopController::class)->group(function () {
     Route::get('/shop/registration/verification', 'verifyRegEmailorPhone')->name('shop-reg.verification');
     Route::post('/shop/registration/verification-code-send', 'sendRegVerificationCode')->name('shop-reg.verification_code_send');
@@ -295,7 +297,7 @@ Route::controller(CompareController::class)->group(function () {
 });
 
 // Subscribe
-Route::resource('subscribers', SubscriberController::class);
+Route::resource('subscribers', SubscriberController::class)->only(['store']);
 
 Route::group(['middleware' => ['user', 'verified', 'unbanned']], function () {
 
@@ -339,7 +341,7 @@ Route::group(['prefix' => 'checkout'], function () {
 Route::group(['middleware' => ['customer', 'verified', 'unbanned']], function () {
 
     // Purchase History
-    Route::resource('purchase_history', PurchaseHistoryController::class);
+    Route::resource('purchase_history', PurchaseHistoryController::class)->except(['destroy']);
     Route::controller(PurchaseHistoryController::class)->group(function () {
         Route::get('/purchase_history/details/{id}', 'purchase_history_details')->name('purchase_history.details');
         Route::get('/purchase_history/destroy/{id}', 'order_cancel')->name('purchase_history.destroy');
@@ -376,7 +378,7 @@ Route::group(['middleware' => ['customer', 'verified', 'unbanned']], function ()
     Route::post('/customer-packages/purchase', [CustomerPackageController::class, 'purchase_package'])->name('customer_packages.purchase');
 
     // Customer Product
-    Route::resource('customer_products', CustomerProductController::class);
+    Route::resource('customer_products', CustomerProductController::class)->except(['edit', 'destroy']);
     Route::controller(CustomerProductController::class)->group(function () {
         Route::get('/customer_products/{id}/edit', 'edit')->name('customer_products.edit');
         Route::post('/customer_products/published', 'updatePublished')->name('customer_products.published');
@@ -405,10 +407,10 @@ Route::group(['middleware' => ['auth']], function () {
     Route::get('invoice/{order_id}', [InvoiceController::class, 'invoice_download'])->name('invoice.download');
     Route::get('/invoice-print/{order_id}', [InvoiceController::class, 'invoice_print'])->name('invoice.print');
     // Reviews
-    Route::resource('/reviews', ReviewController::class);
+    Route::resource('/reviews', ReviewController::class)->only(['store']);
 
     // Product Conversation
-    Route::resource('conversations', ConversationController::class);
+    Route::resource('conversations', ConversationController::class)->except(['destroy']);
     Route::controller(ConversationController::class)->group(function () {
         Route::get('/conversations/destroy/{id}', 'destroy')->name('conversations.destroy');
         Route::post('conversations/refresh', 'refresh')->name('conversations.refresh');
@@ -420,7 +422,7 @@ Route::group(['middleware' => ['auth']], function () {
     Route::resource('messages', MessageController::class);
 
     //Address
-    Route::resource('addresses', AddressController::class);
+    Route::resource('addresses', AddressController::class)->only(['store', 'edit']);
     Route::controller(AddressController::class)->group(function () {
         // Route::post('/get-states', 'getStates')->name('get-state');
         // Route::post('/get-cities', 'getCities')->name('get-city');
@@ -458,12 +460,12 @@ Route::controller(VoguepayController::class)->group(function () {
 //Iyzico
 Route::any('/iyzico/payment/callback/{payment_type}/{amount?}/{payment_method?}/{combined_order_id?}/{customer_package_id?}/{seller_package_id?}', [IyzicoController::class, 'callback'])->name('iyzico.callback');
 
-Route::get('/customer-products/admin', [IyzicoController::class, 'initPayment'])->name('profile.edit');
+Route::get('/customer-products/admin', [IyzicoController::class, 'initPayment'])->name('iyzico.customer_products_admin');
 
 //payhere below
 Route::controller(PayhereController::class)->group(function () {
     Route::get('/payhere/checkout/testing', 'checkout_testing')->name('payhere.checkout.testing');
-    Route::get('/payhere/wallet/testing', 'wallet_testing')->name('payhere.checkout.testing');
+    Route::get('/payhere/wallet/testing', 'wallet_testing')->name('payhere.wallet.testing');
     Route::get('/payhere/customer_package/testing', 'customer_package_testing')->name('payhere.customer_package.testing');
 
     Route::any('/payhere/checkout/notify', 'checkout_notify')->name('payhere.checkout.notify');

@@ -52,6 +52,7 @@ class PerformanceCacheController extends Controller
     {
         if ($r = $this->demoBlock()) return $r;
         $n = $this->service->clearAll();
+        $this->forgetDashboardCaches();
         flash(translate('Page cache cleared.') . " {$n} " . translate('pages.'))->success();
         return back();
     }
@@ -65,6 +66,7 @@ class PerformanceCacheController extends Controller
 
         try {
             $result = $this->service->warmFromSitemap($max);
+            $this->forgetDashboardCaches();
             $message = translate('Cache warm completed.') . " {$result['warmed']} / {$result['attempted']} "
                 . translate('URLs warmed.') . " {$result['failed']} " . translate('failed.');
 
@@ -113,6 +115,7 @@ class PerformanceCacheController extends Controller
         }
 
         try { Cache::forget('business_settings'); } catch (\Throwable $e) {}
+        $this->forgetDashboardCaches();
 
         if (empty($failed)) {
             flash(translate('Laravel cache cleared (cache + config + view + route).'))->success();
@@ -186,6 +189,7 @@ class PerformanceCacheController extends Controller
         if (in_array($driver, ['file', 'redis', 'memcached'], true)) {
             $n = $this->service->clearAll();
             $lines[] = translate('Page cache cleared') . ": {$n} " . translate('pages');
+            $this->forgetDashboardCaches();
         }
 
         // 2. LiteSpeed Cache — always attempt when driver=litespeed, harmless otherwise
@@ -406,5 +410,19 @@ class PerformanceCacheController extends Controller
         }
 
         return $headers;
+    }
+
+    protected function forgetDashboardCaches(): void
+    {
+        foreach (['perf_dashboard_stats', 'perf_dashboard_recent_logs', 'perf_default_warm_urls'] as $key) {
+            try {
+                Cache::forget($key);
+            } catch (Throwable $e) {
+                Log::debug('Performance optimizer cache forget failed', [
+                    'key' => $key,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 }

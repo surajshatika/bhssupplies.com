@@ -1,7 +1,9 @@
 @php
-    $cart_added = [];
-    $carts = get_user_cart();
-    if (count($carts) > 0) { $cart_added = $carts->pluck('product_id')->toArray(); }
+    if (!isset($cart_added)) {
+        $cart_added = [];
+        $carts = get_user_cart();
+        if (count($carts) > 0) { $cart_added = $carts->pluck('product_id')->toArray(); }
+    }
     $product_url = route('product', $product->slug);
     if ($product->auction_product == 1) { $product_url = route('auction-product', $product->slug); }
     $stockQty = 0;
@@ -10,9 +12,16 @@
     $attributes = is_string($product->attributes) ? json_decode($product->attributes, true) : $product->attributes;
     $hasOptions = (is_array($colors) && count($colors) > 0) || (is_array($attributes) && count($attributes) > 0);
     $firstSku = optional($product->stocks->first())->sku ?: $product->sku ?? null;
-    $discountPercent = discount_in_percentage($product);
-    $basePrice = home_base_price($product);
-    $discountedBasePrice = home_discounted_base_price($product);
+    $basePriceRaw = home_base_price($product, false);
+    $discountedBasePriceRaw = home_discounted_base_price($product, false);
+    $discountPercent = $basePriceRaw > 0 ? round((($basePriceRaw - $discountedBasePriceRaw) * 100) / $basePriceRaw) : 0;
+    $basePrice = format_price($basePriceRaw);
+    $discountedBasePrice = format_price($discountedBasePriceRaw);
+    $listingIndex = isset($listingIndex) ? (int) $listingIndex : 99;
+    $isPriorityImage = $listingIndex < 4 && !request()->ajax();
+    $mainImage = get_image($product->thumbnail);
+    $hoverImage = get_first_product_image($product->photos, $product->thumbnail_img);
+    $placeholderImage = static_asset('assets/img/placeholder.jpg');
 @endphp
 
 <div class="pc-card h-100 d-flex flex-column">
@@ -34,18 +43,23 @@
         @endif
 
         <a href="{{ $product_url }}" class="d-block pc-img-link">
-            <img class="lazyload pc-img"
-                src="{{ get_image($product->thumbnail) }}"
+            <img class="{{ $isPriorityImage ? '' : 'lazyload' }} pc-img"
+                src="{{ $isPriorityImage ? $mainImage : $placeholderImage }}"
+                @if(!$isPriorityImage) data-src="{{ $mainImage }}" @endif
                 alt="{{ $product->getTranslation('name') }}"
-                loading="lazy"
+                loading="{{ $isPriorityImage ? 'eager' : 'lazy' }}"
+                decoding="async"
+                @if($isPriorityImage) fetchpriority="high" @endif
                 width="300" height="300"
-                onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder.jpg') }}';">
+                onerror="this.onerror=null;this.src='{{ $placeholderImage }}';">
             <img class="lazyload pc-img pc-img-hover position-absolute"
-                src="{{ get_first_product_image($product->photos, $product->thumbnail_img) }}"
+                src="{{ $placeholderImage }}"
+                data-src="{{ $hoverImage }}"
                 alt="{{ $product->getTranslation('name') }}"
                 loading="lazy"
+                decoding="async"
                 width="300" height="300"
-                onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder.jpg') }}';">
+                onerror="this.onerror=null;this.src='{{ $placeholderImage }}';">
         </a>
 
         @if ($product->auction_product == 0)

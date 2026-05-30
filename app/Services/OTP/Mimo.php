@@ -10,7 +10,8 @@ class Mimo implements SendSms{
     {
         $token = MimoUtility::getToken();
 
-        MimoUtility::sendMessage($text, $to, $token);
+        $response = MimoUtility::sendMessage($text, $to, $token);
         MimoUtility::logout($token);
+        return $response;
     }
 }

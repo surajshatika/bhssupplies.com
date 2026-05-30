@@ -1057,9 +1057,14 @@
                             data-items="4" data-xl-items="4"
                             data-lg-items="3" data-md-items="3" data-sm-items="2" data-xs-items="2"
                             data-arrows="true" data-infinite="false">
+                            @php
+                                $cart_added = [];
+                                $carts = get_user_cart();
+                                if (count($carts) > 0) { $cart_added = $carts->pluck('product_id')->toArray(); }
+                            @endphp
                             @foreach ($related_products as $key => $related_product)
                                 <div class="carousel-box px-2 py-2">
-                                    @include('frontend.'.get_setting('homepage_select').'.partials.product_box_1', ['product' => $related_product])
+                                    @include('frontend.'.get_setting('homepage_select').'.partials.product_box_1', ['product' => $related_product, 'cart_added' => $cart_added])
                                 </div>
                             @endforeach
                         </div>

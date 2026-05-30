@@ -7,6 +7,7 @@
 */
 
 use App\Http\Controllers\SupportChatController;
+use App\Http\Controllers\SupportBoardController;
 
 // ── Admin ────────────────────────────────────────────────────────────────────
 Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin']], function () {
@@ -46,6 +47,7 @@ Route::get('/admin/support-board/gemini-test', function () {
 
 // ── Frontend AJAX ────────────────────────────────────────────────────────────
 Route::middleware('web')->group(function () {
+    Route::get('/support-board/tickets', [SupportBoardController::class, 'tickets'])->name('support_board.tickets');
     Route::post('/support/chat/start',  [SupportChatController::class, 'startChat'])->name('support_board.chat_start');
     Route::post('/support/chat/send',   [SupportChatController::class, 'sendMessage'])->name('support_board.chat_send');
     Route::get('/support/chat/poll',    [SupportChatController::class, 'pollMessages'])->name('support_board.chat_poll');

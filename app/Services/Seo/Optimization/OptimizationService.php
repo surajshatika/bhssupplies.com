@@ -39,6 +39,7 @@ class OptimizationService extends AbstractSeoService
         $map = [
             'page_speed' => 'analyzePageSpeed',
             'technical_audit' => 'runTechnicalAudit',
+            'technical_health' => 'runTechnicalAudit',
             'competitor_gap' => 'detectCompetitorGap',
             'sitemap' => 'generateSitemap',
             'robots' => 'optimizeRobotsTxt',
@@ -110,37 +111,32 @@ class OptimizationService extends AbstractSeoService
     public function runTechnicalAudit(array $payload)
     {
         $url = $this->normalizeUrl(data_get($payload, 'url', url('/')));
-        $statusCode = 200;
-        $responseTime = null;
 
-        try {
-            $start = microtime(true);
-            $response = Http::timeout(20)->get($url);
-            $statusCode = $response->status();
-            $responseTime = round((microtime(true) - $start) * 1000, 2);
-        } catch (\Throwable $exception) {
-            $statusCode = 0;
+        // Real, measurement-based checks (TTFB, render-blocking, unsafe links,
+        // plaintext emails, mixed content, image weight, ads.txt, CWV, …).
+        $health = app(\App\Services\Seo\Optimization\Features\TechnicalHealthService::class)->run(['url' => $url]);
+
+        // Surface Core Web Vitals as a compact block for the dashboard.
+        $cwv = [];
+        foreach ($health['checks'] as $c) {
+            if (in_array($c['id'] ?? '', ['ttfb', 'fcp', 'lcp', 'cls'], true)) {
+                $cwv[$c['id']] = ['value' => $c['value'], 'status' => $c['status'], 'message' => $c['message']];
+            }
         }
 
-        $checks = [
-            ['label' => 'URL resolves', 'status' => $statusCode >= 200 && $statusCode < 400 ? 'pass' : 'warning'],
-            ['label' => 'Response under 1 second', 'status' => $responseTime !== null && $responseTime < 1000 ? 'pass' : 'warning'],
-            ['label' => 'Sitemap available', 'status' => File::exists(base_path('sitemap.xml')) ? 'pass' : 'warning'],
-            ['label' => 'robots.txt available', 'status' => File::exists(public_path('robots.txt')) || File::exists(base_path('robots.txt')) ? 'pass' : 'warning'],
-            ['label' => 'HTTPS canonical path', 'status' => Str::startsWith($url, 'https://') ? 'pass' : 'warning'],
-            ['label' => 'Schema baseline', 'status' => 'pass'],
-            ['label' => 'Thin content risk', 'status' => $this->wordCount(data_get($payload, 'content', '')) >= 250 ? 'pass' : 'warning'],
-        ];
-        $score = $this->scoreFromChecks($checks);
-
         return [
-            'url' => $url,
-            'status_code' => $statusCode,
-            'response_time_ms' => $responseTime,
-            'checks' => $checks,
-            'score' => $score,
-            'grade' => $this->gradeFromScore($score),
-            'provider' => $this->providerName,
+            'url'              => $health['url'],
+            'status_code'     => $health['fetched'] ? 200 : 0,
+            'response_time_ms'=> $health['load_seconds'] !== null ? (int) round($health['load_seconds'] * 1000) : null,
+            'ttfb_seconds'    => $health['ttfb_seconds'],
+            'load_seconds'    => $health['load_seconds'],
+            'page_bytes'      => $health['page_bytes'],
+            'core_web_vitals' => $cwv,
+            'checks'          => $health['checks'],
+            'summary'         => $health['summary'],
+            'score'           => $health['score'],
+            'grade'           => $health['grade'],
+            'provider'        => 'measured',
         ];
     }
 

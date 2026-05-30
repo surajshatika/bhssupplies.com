@@ -15,6 +15,8 @@ use Illuminate\Http\Request;
 use App\Models\Cart;
 use App\Models\State;
 use App\Models\User;
+use Illuminate\Support\Facades\Schema;
+
 class AddressController extends Controller
 {
     public function addresses()
@@ -30,7 +32,9 @@ class AddressController extends Controller
         $address->country_id = $request->country_id;
         $address->state_id = $request->state_id;
         $address->city_id = $request->city_id;
-        $address->area_id = $request->area_id;
+        if ($this->addressesHaveArea()) {
+            $address->area_id = $request->area_id;
+        }
         $address->postal_code = $request->postal_code;
         $address->phone = $request->phone;
         $address->save();
@@ -52,7 +56,9 @@ class AddressController extends Controller
             $address->state_id = $request->state_id ?? $address->state_id;
         }
         $address->city_id = $request->city_id;
-        $address->area_id = $request->area_id;
+        if ($this->addressesHaveArea()) {
+            $address->area_id = $request->area_id;
+        }
         $address->postal_code = $request->postal_code;
         $address->phone = $request->phone;
         $address->save();
@@ -265,7 +271,14 @@ class AddressController extends Controller
 
     public function getCitiesByCountry($country_id,Request $request)
     {
-        $city_query = City::where('status', 1)->where('country_id',$country_id);
+        $city_query = City::where('status', 1);
+        if (Schema::hasColumn('cities', 'country_id')) {
+            $city_query->where('country_id', $country_id);
+        } else {
+            $city_query->whereIn('state_id', function ($query) use ($country_id) {
+                $query->select('id')->from('states')->where('country_id', $country_id);
+            });
+        }
         if ($request->name != "" || $request->name != null) {
             $city_query->where('name', 'like', '%' . $request->name . '%');
         }
@@ -291,5 +304,10 @@ class AddressController extends Controller
         }
         $areas = $area_query->get();
         return new AreasCollection($areas);
+    }
+
+    protected function addressesHaveArea(): bool
+    {
+        return Schema::hasColumn('addresses', 'area_id');
     }
 }

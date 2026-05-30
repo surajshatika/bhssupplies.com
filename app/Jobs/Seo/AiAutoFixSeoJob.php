@@ -31,7 +31,7 @@ class AiAutoFixSeoJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 900;   // 15 min per job dispatch
+    public int $timeout = 1800;  // 30 min — enough for a 100-URL run with AI calls
     public int $tries   = 1;     // we handle entity-level retries ourselves
 
     public function __construct(public int $batchId)

@@ -8,6 +8,7 @@
         ['route' => 'admin.seo.ai_board.index', 'icon' => 'la-brain', 'label' => 'AI Board'],
         ['route' => 'admin.seo.monitoring.index', 'icon' => 'la-heartbeat', 'label' => 'Monitoring'],
         ['route' => 'admin.seo-suite.ai_assistant', 'icon' => 'la-robot', 'label' => 'Assistant'],
+        ['route' => 'admin.seo-suite.ai_writing_page', 'icon' => 'la-pen-nib', 'label' => 'Writer'],
         ['route' => 'admin.seo-suite.keyword_tracker', 'icon' => 'la-chart-line', 'label' => 'Keywords'],
         ['route' => 'admin.seo-suite.search_stats', 'icon' => 'la-chart-bar', 'label' => 'Stats'],
         ['route' => 'admin.seo-suite.webmaster', 'icon' => 'la-tools', 'label' => 'Webmaster'],

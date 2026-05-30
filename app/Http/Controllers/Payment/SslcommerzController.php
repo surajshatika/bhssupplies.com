@@ -17,8 +17,6 @@ use App\Models\User;
 use Session;
 use Auth;
 
-session_start();
-
 class SslcommerzController extends Controller
 {
    public function pay(Request $request)

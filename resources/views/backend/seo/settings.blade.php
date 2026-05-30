@@ -418,9 +418,20 @@
                 </div>
                 <div class="form-group">
                     <label>{{ translate('Auto SEO URLs Per Run') }}</label>
-                    <input type="number" min="1" max="10" class="form-control" name="auto_seo_batch_size"
-                        value="{{ $settings['auto_seo_batch_size'] ?? '10' }}">
-                    <small class="text-muted">{{ translate('Recommended: 5-10. The system only selects pending/non-SEO URLs unless you manually run another tool.') }}</small>
+                    <div class="input-group">
+                        <input type="number" min="1" max="100" step="1" class="form-control" name="auto_seo_batch_size"
+                            value="{{ $settings['auto_seo_batch_size'] ?? '10' }}" list="autoSeoBatchPresets">
+                        <datalist id="autoSeoBatchPresets">
+                            <option value="10"><option value="20"><option value="50"><option value="100">
+                        </datalist>
+                        <div class="input-group-append">
+                            <span class="input-group-text">{{ translate('URLs / run') }}</span>
+                        </div>
+                    </div>
+                    <small class="text-muted">
+                        {{ translate('Set 10, 20, 50, or up to 100. The master automation runs hourly, so this is roughly your per-hour throughput (e.g. 100 = up to ~100 URLs/hour).') }}
+                        {{ translate('Your daily AI budget cap is the real safety limit — at ~$0.0002/URL even 100/run stays well under it.') }}
+                    </small>
                 </div>
                 <div class="form-group row mb-2">
                     <label class="col-9 col-form-label small">
@@ -439,6 +450,25 @@
                     <input type="number" min="1" max="10" class="form-control" name="auto_offpage_batch_size"
                         value="{{ $settings['auto_offpage_batch_size'] ?? '3' }}">
                     <small class="text-muted">{{ translate('Recommended: 2-3. These are AI campaign plans and outreach templates, not spam auto-posted links.') }}</small>
+                </div>
+
+                <hr>
+                <div class="form-group row align-items-center mb-2">
+                    <label class="col-9 mb-0">{{ translate('Real-Time Sitemap Refresh') }}
+                        <span class="d-block text-muted">{{ translate('Regenerate XML sitemaps (with image tags + score-based priority) within ~5 min of publishing/updating a page. Off by default; the scheduler still refreshes them regularly.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="auto_sitemap_realtime" value="1" @if(!empty($settings['auto_sitemap_realtime'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Scheduled Sitemap Refresh Interval (hours)') }}</label>
+                    <input type="number" min="1" max="24" class="form-control" name="auto_sitemap_interval_hours"
+                        value="{{ $settings['auto_sitemap_interval_hours'] ?? '3' }}">
+                    <small class="text-muted">{{ translate('How often the hourly automation rebuilds the on-disk sitemaps. Recommended: 3-6.') }}</small>
                 </div>
                 <div class="form-group">
                     <label>{{ translate('Competitor Websites to Outrank') }}</label>

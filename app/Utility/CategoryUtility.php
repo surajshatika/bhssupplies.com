@@ -3,6 +3,7 @@
 namespace App\Utility;
 
 use App\Models\Category;
+use Illuminate\Support\Facades\Cache;
 
 class CategoryUtility
 {
@@ -47,9 +48,11 @@ class CategoryUtility
     /*when with trashed is true id will get even the deleted items*/
     public static function children_ids($id, $with_trashed = false)
     {
-        $children = CategoryUtility::flat_children($id, $with_trashed = false);
+        return Cache::remember('category_children_ids_v2_' . (int) $id . '_' . (int) $with_trashed, 86400, function () use ($id, $with_trashed) {
+            $children = CategoryUtility::flat_children($id, $with_trashed);
 
-        return !empty($children) ? array_column($children, 'id') : array();
+            return !empty($children) ? array_column($children, 'id') : array();
+        });
     }
 
     public static function category_tree_ids($category, $category_ids)

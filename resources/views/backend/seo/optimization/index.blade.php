@@ -78,7 +78,7 @@
         'post_index_status' => 'admin.seo-suite.index_status',
         'indexnow'       => 'admin.seo-suite.indexnow',
         'webmaster_tools'=> 'admin.seo-suite.webmaster',
-        'ai_writing_assistant' => 'admin.seo-suite.ai_assistant',
+        'ai_writing_assistant' => 'admin.seo-suite.ai_writing_page',
         'ai_image_generator'   => 'admin.seo-suite.ai_images',
         'ai_assistant'         => 'admin.seo-suite.ai_assistant',
         'link_assistant'       => 'admin.seo-suite.link_assistant',

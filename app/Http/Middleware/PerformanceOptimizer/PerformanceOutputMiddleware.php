@@ -25,6 +25,8 @@ use Illuminate\Http\Request;
  *
  * Runs only when:
  *  - perf_status == 1
+ *  - perf_cms_fast_mode != 1
+ *  - at least one runtime HTML rewrite feature is explicitly enabled
  *  - admin / API / non-HTML responses are skipped
  *  - response is 200 OK and Content-Type is text/html
  */
@@ -87,6 +89,8 @@ class PerformanceOutputMiddleware
         }
 
         if ((int) $this->setting('perf_status', 1) !== 1) return false;
+        if ((int) $this->setting('perf_cms_fast_mode', 1) === 1) return false;
+        if (!$this->hasRuntimeFeaturesEnabled()) return false;
 
         // Skip HTML fragments — only process full documents
         $body = (string) $response->getContent();
@@ -118,7 +122,7 @@ class PerformanceOutputMiddleware
         }
 
         // Force font-display: swap
-        if ((int) $this->setting('perf_fonts_swap_status', 1) === 1) {
+        if ((int) $this->setting('perf_fonts_swap_status', 0) === 1) {
             $injects[] = $this->fonts->renderFontDisplaySwap();
         }
 
@@ -136,7 +140,7 @@ class PerformanceOutputMiddleware
 
     protected function processImages(string $html, ?string $lcpSrc = null): string
     {
-        $lazy   = (int) $this->setting('perf_image_lazyload', 1) === 1;
+        $lazy   = (int) $this->setting('perf_image_lazyload', 0) === 1;
         $serveWebp = (int) $this->setting('perf_image_serve_webp_auto', 0) === 1;
         $imageCdn  = (int) $this->setting('perf_image_cdn_status', 0) === 1;
         $cdnUrl    = rtrim($this->setting('perf_image_cdn_url', ''), '/');
@@ -390,6 +394,23 @@ class PerformanceOutputMiddleware
         }
 
         return $html;
+    }
+
+    protected function hasRuntimeFeaturesEnabled(): bool
+    {
+        if ((int) $this->setting('perf_image_lazyload', 0) === 1) return true;
+        if ((int) $this->setting('perf_image_serve_webp_auto', 0) === 1) return true;
+        if ((int) $this->setting('perf_image_cdn_status', 0) === 1 && trim($this->setting('perf_image_cdn_url', '')) !== '') return true;
+        if ((int) $this->setting('perf_fonts_preload_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_fonts_swap_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_js_defer_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_js_delay_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_script_manager_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_vitals_collect_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_lcp_preload_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_html_minify_status', 0) === 1) return true;
+        if (trim($this->setting('perf_critical_css', '')) !== '') return true;
+        return false;
     }
 
     protected function setting(string $key, $default = null): string

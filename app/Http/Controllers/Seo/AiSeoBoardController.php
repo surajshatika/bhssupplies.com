@@ -77,6 +77,65 @@ class AiSeoBoardController extends Controller
         }
     }
 
+    /** Generate suggestions without writing — for the preview & edit drawer. */
+    public function preview(Request $request): JsonResponse
+    {
+        $request->validate([
+            'type' => 'required|in:product,category,page,blog',
+            'id'   => 'required|integer|min:1',
+        ]);
+
+        try {
+            $data = $this->board->previewAiFix(
+                $request->input('type'),
+                (int) $request->input('id'),
+                $request->input('provider')
+            );
+
+            return response()->json(['success' => true, 'data' => $data]);
+        } catch (Throwable $e) {
+            logger()->error('AI SEO Board preview failed', [
+                'type' => $request->input('type'), 'id' => $request->input('id'), 'error' => $e->getMessage(),
+            ]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
+    }
+
+    /** Persist admin-approved (possibly edited) suggestion values. */
+    public function applyApproved(Request $request): JsonResponse
+    {
+        $request->validate([
+            'type'               => 'required|in:product,category,page,blog',
+            'id'                 => 'required|integer|min:1',
+            'meta_title'         => 'nullable|string|max:255',
+            'meta_description'   => 'nullable|string|max:500',
+            'focus_keyword'      => 'nullable|string|max:191',
+            'secondary_keywords' => 'nullable|string|max:1000',
+            'schema'             => 'nullable|boolean',
+        ]);
+
+        try {
+            $result = $this->board->applyApprovedFix(
+                $request->input('type'),
+                (int) $request->input('id'),
+                [
+                    'meta_title'         => $request->input('meta_title'),
+                    'meta_description'   => $request->input('meta_description'),
+                    'focus_keyword'      => $request->input('focus_keyword'),
+                    'secondary_keywords' => $request->input('secondary_keywords'),
+                    'schema'             => $request->boolean('schema'),
+                ]
+            );
+
+            return response()->json(['success' => true, 'data' => $result]);
+        } catch (Throwable $e) {
+            logger()->error('AI SEO Board apply-approved failed', [
+                'type' => $request->input('type'), 'id' => $request->input('id'), 'error' => $e->getMessage(),
+            ]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
+    }
+
     public function rescore(Request $request): JsonResponse
     {
         $request->validate([

@@ -163,11 +163,11 @@ if (!function_exists('filter_products')) {
 if (!function_exists('get_cached_products')) {
     function get_cached_products($category_id = null, $limit = 12)
     {
-        return Cache::remember('products-category-v2-' . $category_id . '-' . $limit, 86400, function () use ($category_id, $limit) {
+        return Cache::remember('products-category-v3-' . $category_id . '-' . $limit, 86400, function () use ($category_id, $limit) {
             $subIds = \App\Models\Category::where('parent_id', $category_id)->pluck('id')->toArray();
             $allIds = array_merge([$category_id], $subIds);
             return filter_products(Product::whereIn('category_id', $allIds))
-                ->with(['brand', 'stocks'])
+                ->with(['brand', 'stocks', 'taxes', 'thumbnail'])
                 ->latest()
                 ->take($limit)
                 ->get();
@@ -1681,7 +1681,7 @@ if (!function_exists('calculateCommissionAffilationClubPoint')) {
             (new AffiliateController)->processAffiliatePoints($order);
         }
 
-        if (addon_is_activated('club_point')) {
+        if (addon_is_activated('club_point') && class_exists(ClubPointController::class)) {
             if ($order->user != null) {
                 (new ClubPointController)->processClubPoints($order);
             }
@@ -1772,12 +1772,19 @@ if (!function_exists('get_admin')) {
 if (!function_exists('get_slider_images')) {
     function get_slider_images($ids)
     {
-        $slider_query = Upload::query();
-        $sliders = $slider_query->whereIn('id', $ids);
-        foreach ($ids as $id) {
-            $sliders->orderByRaw("id!=?", [$id]);
+        $ids = array_values(array_filter((array) $ids));
+        if (empty($ids)) {
+            return collect();
         }
-        return $sliders->get();
+
+        return Cache::remember('slider_images_' . md5(json_encode($ids)), 86400, function () use ($ids) {
+            $slider_query = Upload::query();
+            $sliders = $slider_query->whereIn('id', $ids);
+            foreach ($ids as $id) {
+                $sliders->orderByRaw("id!=?", [$id]);
+            }
+            return $sliders->get();
+        });
     }
 }
 
@@ -1796,11 +1803,13 @@ if (!function_exists('get_featured_flash_deal')) {
 if (!function_exists('get_flash_deal_products')) {
     function get_flash_deal_products($flash_deal_id)
     {
-        $flash_deal_product_query = FlashDealProduct::query();
-        $flash_deal_product_query->where('flash_deal_id', $flash_deal_id);
-        $flash_deal_products = $flash_deal_product_query->with('product')->orderBy('id', 'desc')->limit(10)->get();
-
-        return $flash_deal_products;
+        return Cache::remember('flash_deal_products_' . $flash_deal_id, 300, function () use ($flash_deal_id) {
+            return FlashDealProduct::where('flash_deal_id', $flash_deal_id)
+                ->with(['product.taxes', 'product.thumbnail', 'product.stocks', 'product.brand'])
+                ->orderBy('id', 'desc')
+                ->limit(10)
+                ->get();
+        });
     }
 }
 
@@ -1960,10 +1969,10 @@ if (!function_exists('get_product_max_unit_price')) {
 if (!function_exists('get_featured_products')) {
     function get_featured_products()
     {
-        return Cache::remember('featured_products_v2', 3600, function () {
+        return Cache::remember('featured_products_v3', 3600, function () {
             $product_query = Product::query();
             return filter_products($product_query->where('featured', '1'))
-                ->with(['brand', 'stocks'])
+                ->with(['brand', 'stocks', 'taxes', 'thumbnail'])
                 ->latest()
                 ->limit(12)
                 ->get();
@@ -1974,14 +1983,18 @@ if (!function_exists('get_featured_products')) {
 if (!function_exists('get_best_selling_products')) {
     function get_best_selling_products($limit, $user_id = null)
     {
-        $product_query = Product::query();
-        if ($user_id) {
-            $product_query = $product_query->where('user_id', $user_id);
-        }
-        return filter_products($product_query->orderBy('num_of_sale', 'desc'))
-            ->with(['brand', 'stocks'])
-            ->limit($limit)
-            ->get();
+        $cacheKey = 'best_selling_products_v4_' . ((int) $limit) . '_' . ($user_id ?: 'all');
+
+        return Cache::remember($cacheKey, 3600, function () use ($limit, $user_id) {
+            $product_query = Product::query();
+            if ($user_id) {
+                $product_query = $product_query->where('user_id', $user_id);
+            }
+            return filter_products($product_query->orderBy('num_of_sale', 'desc'))
+                ->with(['brand', 'stocks', 'taxes', 'thumbnail'])
+                ->limit($limit)
+                ->get();
+        });
     }
 }
 
@@ -1990,15 +2003,19 @@ if (!function_exists('get_best_selling_products')) {
 if (!function_exists('get_todays_deal_products')) {
     function get_todays_deal_products($limit, $user_id = null)
     {
-        $product_query = Product::query();
-        if ($user_id) {
-            $product_query = $product_query->where('user_id', $user_id);
-        }
-        return filter_products($product_query->where('todays_deal', '1'))
-            ->with(['brand', 'stocks'])
-            ->orderBy('id', 'desc')
-            ->limit($limit)
-            ->get();
+        $cacheKey = 'todays_deal_products_v4_' . ((int) $limit) . '_' . ($user_id ?: 'all');
+
+        return Cache::remember($cacheKey, 1800, function () use ($limit, $user_id) {
+            $product_query = Product::query();
+            if ($user_id) {
+                $product_query = $product_query->where('user_id', $user_id);
+            }
+            return filter_products($product_query->where('todays_deal', '1'))
+                ->with(['brand', 'stocks', 'taxes', 'thumbnail'])
+                ->orderBy('id', 'desc')
+                ->limit($limit)
+                ->get();
+        });
     }
 }
 
@@ -2073,13 +2090,15 @@ if (!function_exists('get_similiar_classified_products')) {
 if (!function_exists('get_home_page_classified_products')) {
     function get_home_page_classified_products($limit = '')
     {
-        $classified_product_query = CustomerProduct::query()->with('user', 'thumbnail');
-        $classified_product_query->isActiveAndApproval();
-        if ($limit) {
-            $classified_product_query->take($limit);
-        }
+        return Cache::remember('home_page_classified_products_v2_' . ($limit ?: 'all'), 3600, function () use ($limit) {
+            $classified_product_query = CustomerProduct::query()->with('user', 'thumbnail');
+            $classified_product_query->isActiveAndApproval();
+            if ($limit) {
+                $classified_product_query->take($limit);
+            }
 
-        return $classified_product_query->get();
+            return $classified_product_query->get();
+        });
     }
 }
 
@@ -2173,9 +2192,14 @@ if (!function_exists('get_all_brands')) {
 if (!function_exists('get_brands')) {
     function get_brands($brand_ids)
     {
-        $brand_query = Brand::query();
-        $brands = $brand_query->whereIn('id', $brand_ids)->get();
-        return $brands;
+        $brand_ids = array_values(array_filter((array) $brand_ids));
+        if (empty($brand_ids)) {
+            return collect();
+        }
+
+        return Cache::remember('frontend_brands_' . md5(json_encode($brand_ids)), 86400, function () use ($brand_ids) {
+            return Brand::whereIn('id', $brand_ids)->get();
+        });
     }
 }
 
@@ -2204,13 +2228,14 @@ if (!function_exists('get_brands_by_products')) {
 if (!function_exists('get_category')) {
     function get_category($category_ids)
     {
-        $category_query = Category::query();
-        $category_query->with('coverImage');
+        $category_ids = array_values(array_filter((array) $category_ids));
+        if (empty($category_ids)) {
+            return collect();
+        }
 
-        $category_query->whereIn('id', $category_ids);
-
-        $categories = $category_query->get();
-        return $categories;
+        return Cache::remember('frontend_categories_v3_' . md5(json_encode($category_ids)), 86400, function () use ($category_ids) {
+            return Category::with('coverImage')->whereIn('id', $category_ids)->get();
+        });
     }
 }
 
@@ -2227,8 +2252,12 @@ if (!function_exists('get_single_category')) {
 if (!function_exists('get_level_zero_categories')) {
     function get_level_zero_categories()
     {
-        $categories_query = Category::query()->with(['coverImage', 'catIcon']);
-        return $categories_query->where('level', 0)->orderBy('order_level', 'desc')->get();
+        return Cache::remember('level_zero_categories_v3', 86400, function () {
+            return Category::with(['coverImage', 'catIcon'])
+                ->where('level', 0)
+                ->orderBy('order_level', 'desc')
+                ->get();
+        });
     }
 }
 
@@ -2308,8 +2337,12 @@ if (!function_exists('get_user_wishlist')) {
 if (!function_exists('get_best_sellers')) {
     function get_best_sellers($limit = '')
     {
-        return Cache::remember('best_selers', 86400, function () use ($limit) {
-            return Shop::where('verification_status', 1)->orderBy('num_of_sale', 'desc')->take($limit)->get();
+        return Cache::remember('best_sellers_v2_' . ($limit ?: 'all'), 86400, function () use ($limit) {
+            $query = Shop::where('verification_status', 1)->orderBy('num_of_sale', 'desc');
+            if ($limit) {
+                $query->take($limit);
+            }
+            return $query->get();
         });
     }
 }
@@ -3329,16 +3362,18 @@ function youtubeVideoId($url)
 
 if (!function_exists('get_all_sale_alert_products')) {
     function get_all_sale_alert_products() {
-        return CustomSaleAlert::with('product')->get()->map(function($alert) {
-            if (!$alert->product) return null; 
+        return Cache::remember('custom_sale_alert_products_frontend', 1800, function () {
+            return CustomSaleAlert::with('product')->get()->map(function($alert) {
+                if (!$alert->product) return null;
 
-            return [
-                'id' => $alert->product->id,
-                'title' => $alert->product->getTranslation('name'),
-                'image' => uploaded_asset($alert->product->thumbnail_img),
-                'url'  => route('product',  $alert->product->slug),
-            ];
-        })->filter();
+                return [
+                    'id' => $alert->product->id,
+                    'title' => $alert->product->getTranslation('name'),
+                    'image' => uploaded_asset($alert->product->thumbnail_img),
+                    'url'  => route('product',  $alert->product->slug),
+                ];
+            })->filter()->values();
+        });
     }
 }
 
@@ -3718,12 +3753,14 @@ if (!function_exists('get_same_seller_products')) {
 if (!function_exists('get_related_products_by_category')) {
     function get_related_products_by_category($category_id, $limit = 20)
     {
-        $products = Product::isApprovedPublished()->whereHas('categories', function ($query) use ($category_id) {
-                        $query->where('category_id', $category_id);
-                    })
-                    ->take($limit)
-                    ->get();
-        return $products;
+        return Cache::remember('related_products_by_category_v2_' . $category_id . '_' . $limit, 1800, function () use ($category_id, $limit) {
+            return Product::isApprovedPublished()->whereHas('categories', function ($query) use ($category_id) {
+                    $query->where('category_id', $category_id);
+                })
+                ->with(['brand', 'stocks', 'taxes', 'thumbnail'])
+                ->take($limit)
+                ->get();
+        });
     }
 }
 

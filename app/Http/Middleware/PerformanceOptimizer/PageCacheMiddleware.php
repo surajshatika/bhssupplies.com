@@ -21,7 +21,11 @@ class PageCacheMiddleware
     public function handle(Request $request, Closure $next)
     {
         if ((int) get_setting('perf_status', 1) !== 1) {
-            return $next($request);
+            $response = $next($request);
+            if ($this->cache->isNeverCachePath(ltrim($request->path(), '/'))) {
+                $this->markNoStore($response);
+            }
+            return $response;
         }
 
         $driver = (string) get_setting('perf_page_cache_driver', 'file');
@@ -35,6 +39,7 @@ class PageCacheMiddleware
                 $ttlMinutes = $this->cache->ttlMinutesFor($request);
                 $ttlSeconds = $ttlMinutes * 60;
                 $response->setContent($this->cache->prepareHtmlForSharedCache((string) $response->getContent()));
+                $this->stripPublicCacheCookies($response);
                 // LSCache header — tells LiteSpeed server to cache this page
                 $response->headers->set('X-LiteSpeed-Cache-Control', "public,max-age={$ttlSeconds}");
                 $response->headers->set('X-LiteSpeed-Vary', 'value=cookie[currency_code],value=cookie[locale_code]');
@@ -54,6 +59,9 @@ class PageCacheMiddleware
         // ── File / Redis driver (existing behaviour) ──────────────────────────
         if (!$this->cache->shouldCache($request)) {
             $response = $next($request);
+            if ($this->cache->isNeverCachePath(ltrim($request->path(), '/'))) {
+                $this->markNoStore($response);
+            }
             // Expose BYPASS header on GET HTML responses so admins can verify cache-rule wiring
             if ((int) get_setting('perf_page_cache_status', 0) === 1
                 && $request->isMethod('GET')
@@ -154,6 +162,30 @@ class PageCacheMiddleware
         }
 
         return true;
+    }
+
+    protected function markNoStore($response): void
+    {
+        if (!isset($response->headers)) {
+            return;
+        }
+
+        $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        $response->headers->set('Pragma', 'no-cache');
+        $response->headers->set('Expires', '0');
+        $response->headers->set('X-Performance-Cache', 'BYPASS');
+        $response->headers->set('X-LiteSpeed-Cache-Control', 'no-cache');
+    }
+
+    protected function stripPublicCacheCookies($response): void
+    {
+        if (!isset($response->headers)) {
+            return;
+        }
+
+        // Cacheable public pages should not emit visitor-specific cookies.
+        // Cached HTML uses a CSRF placeholder and refreshes the real token via /refresh-csrf.
+        $response->headers->remove('Set-Cookie');
     }
 
     protected function isLiteSpeedCacheable($response): bool

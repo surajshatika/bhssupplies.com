@@ -35,6 +35,23 @@ class AutomationRunCommand extends Command
             '--dry-run' => $dryRun ?: null,
         ]));
 
+        // Keep the on-disk sitemaps fresh (new products, image tags, dynamic
+        // priorities) without waiting for the weekly snapshot.
+        if ($this->isDue('sitemap', (int) get_setting('seo_auto_sitemap_interval_hours', 3), $forceAll, $dryRun)) {
+            if ($dryRun) {
+                $this->line('> regenerate XML sitemaps (due, skipped in dry run)');
+            } else {
+                try {
+                    $result = app(\App\Services\Seo\Optimization\Features\SmartSitemapService::class)
+                        ->handle(['persist' => true, 'split' => true, 'base_url' => url('/')]);
+                    $this->info('Sitemaps regenerated: ' . ($result['url_count'] ?? 0) . ' URLs.');
+                } catch (\Throwable $e) {
+                    $this->warn('Sitemap regeneration failed: ' . $e->getMessage());
+                }
+                $this->markRan('sitemap', false);
+            }
+        }
+
         if ($this->isDue('technical_refresh', 6, $forceAll, $dryRun)) {
             $this->callSeoCommand('seo:auto-technical-refresh', [
                 '--sample' => 80,

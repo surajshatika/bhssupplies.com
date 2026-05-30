@@ -80,14 +80,14 @@ Route::group(['namespace' => 'App\Http\Controllers\Seller', 'prefix' => 'seller'
     });
     
     // Note
-    Route::resource('note', NoteController::class);
+    Route::resource('note', NoteController::class)->except(['edit']);
     Route::controller(NoteController::class)->group(function () {
         Route::get('/note/edit/{id}', 'edit')->name('note.edit');
         Route::get('note/delete/{note}', 'destroy')->name('note.delete');
     });
 
     //Coupon
-    Route::resource('coupon', CouponController::class);
+    Route::resource('coupon', CouponController::class)->except(['destroy']);
     Route::controller(CouponController::class)->group(function () {
         Route::post('/coupon/get_form', 'get_coupon_form')->name('coupon.get_coupon_form');
         Route::post('/coupon/get_form_edit', 'get_coupon_form_edit')->name('coupon.get_coupon_form_edit');
@@ -127,7 +127,7 @@ Route::group(['namespace' => 'App\Http\Controllers\Seller', 'prefix' => 'seller'
     });
 
     //Payments
-    Route::resource('payments', PaymentController::class);
+    Route::resource('payments', PaymentController::class)->only(['index']);
 
     // Profile Settings
     Route::controller(ProfileController::class)->group(function () {
@@ -136,7 +136,7 @@ Route::group(['namespace' => 'App\Http\Controllers\Seller', 'prefix' => 'seller'
     });
 
     // Address
-    Route::resource('addresses', AddressController::class);
+    Route::resource('addresses', AddressController::class)->only(['store', 'edit']);
     Route::controller(AddressController::class)->group(function () {
         Route::post('/get-states', 'getStates')->name('get-state');
         Route::post('/get-cities', 'getCities')->name('get-city');
@@ -187,17 +187,19 @@ Route::group(['namespace' => 'App\Http\Controllers\Seller', 'prefix' => 'seller'
 
     });
 
-    Route::controller(GSTController::class)->group(function () {
-        Route::get('/gst-configuration', 'configure_index')->name('gst.configconfiguration');
-        Route::post('/gst-docs-update', 'update_documents')->name('update_gst_docs');
-        Route::get('/product-hsn-gst-assign', 'hsn_gst_assign')->name('products.hsn-gst.assigns');
-        Route::get('/wholesale-product-hsn-gst-assign', 'wholesale_hsn_gst_assign')->name('products.wholesale-hsn-gst.assigns');
-        Route::get('/auction-product-hsn-gst-assign', 'auction_hsn_gst_assign')->name('products.auction-hsn-gst.assigns');
-        Route::get('/preorder-product-hsn-gst-assign', 'preorder_hsn_gst_assign')->name('products.preorder-hsn-gst.assigns');
-        Route::post('/products-hsn-gst-single-update', 'updateHsnGstRate')->name('products.single-hsn-gst.update');
-        Route::post('/bulk-product-gst-assign', 'updateBulkHsnGstRate')->name('products.bulk-product-gst-assign');
-        Route::get('/products/gst/products/{type}', 'get_filter_products')->name('products.gst.filter');
-    });
+    if (class_exists(GSTController::class)) {
+        Route::controller(GSTController::class)->group(function () {
+            Route::get('/gst-configuration', 'configure_index')->name('gst.configconfiguration');
+            Route::post('/gst-docs-update', 'update_documents')->name('update_gst_docs');
+            Route::get('/product-hsn-gst-assign', 'hsn_gst_assign')->name('products.hsn-gst.assigns');
+            Route::get('/wholesale-product-hsn-gst-assign', 'wholesale_hsn_gst_assign')->name('products.wholesale-hsn-gst.assigns');
+            Route::get('/auction-product-hsn-gst-assign', 'auction_hsn_gst_assign')->name('products.auction-hsn-gst.assigns');
+            Route::get('/preorder-product-hsn-gst-assign', 'preorder_hsn_gst_assign')->name('products.preorder-hsn-gst.assigns');
+            Route::post('/products-hsn-gst-single-update', 'updateHsnGstRate')->name('products.single-hsn-gst.update');
+            Route::post('/bulk-product-gst-assign', 'updateBulkHsnGstRate')->name('products.bulk-product-gst-assign');
+            Route::get('/products/gst/products/{type}', 'get_filter_products')->name('products.gst.filter');
+        });
+    }
 
 });
 

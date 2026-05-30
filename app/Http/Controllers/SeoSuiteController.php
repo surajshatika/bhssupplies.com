@@ -338,17 +338,28 @@ class SeoSuiteController extends Controller
 
     // ── AI Writing Assistant ────────────────────────────────────────────────────
 
+    public function aiWriting()
+    {
+        $settings = $this->loadSettings();
+        $modes    = AiWritingAssistantService::modes();
+
+        return view('backend.seo_suite.ai_writing', compact('settings', 'modes'));
+    }
+
     public function aiWritingAssistant(Request $request)
     {
         $request->validate(['task' => 'required|string']);
 
         $result = app(AiWritingAssistantService::class)->handle([
-            'task'         => $request->input('task'),
-            'content'      => $request->input('content', ''),
-            'keyword'      => $request->input('keyword', ''),
-            'tone'         => $request->input('tone', 'professional'),
-            'length'       => $request->input('length', 'medium'),
-            'content_type' => $request->input('content_type', 'product_description'),
+            'task'            => $request->input('task'),
+            'content'         => $request->input('content', ''),
+            'keyword'         => $request->input('keyword', ''),
+            'tone'            => $request->input('tone', 'professional'),
+            'length'          => $request->input('length', 'medium'),
+            'content_type'    => $request->input('content_type', 'product_description'),
+            'target_language' => $request->input('target_language', 'French'),
+            'email_type'      => $request->input('email_type', 'newsletter'),
+            'provider'        => $request->input('provider'),
         ]);
 
         return response()->json($result);
@@ -359,7 +370,14 @@ class SeoSuiteController extends Controller
     public function aiImageGenerator()
     {
         $settings = $this->loadSettings();
-        return view('backend.seo_suite.ai_image_generator', compact('settings'));
+        $styles   = AiImageGeneratorService::styles();
+
+        $history = collect();
+        if (\Illuminate\Support\Facades\Schema::hasTable('seo_generated_images')) {
+            $history = \App\Models\SeoGeneratedImage::query()->latest()->limit(12)->get();
+        }
+
+        return view('backend.seo_suite.ai_image_generator', compact('settings', 'styles', 'history'));
     }
 
     public function generateAiImage(Request $request)
@@ -370,13 +388,64 @@ class SeoSuiteController extends Controller
             'keyword'       => $request->input('keyword'),
             'style'         => $request->input('style', 'professional product photo'),
             'size'          => $request->input('size', '1024x1024'),
-            'count'         => (int) $request->input('count', 1),
+            'quality'       => $request->input('quality', 'standard'),
             'purpose'       => $request->input('purpose', 'product'),
             'custom_prompt' => $request->input('custom_prompt'),
             'save_local'    => (bool) $request->input('save_local', false),
         ]);
 
         return response()->json($result);
+    }
+
+    /**
+     * Apply a generated image as the Open Graph / Twitter image for an entity.
+     * Saves the image into the media library first (if not already) so the URL
+     * is permanent, then writes it to seo_meta.
+     */
+    public function applyImageAsOg(Request $request)
+    {
+        $request->validate([
+            'type'      => 'required|in:product,category,page,blog',
+            'id'        => 'required|integer|min:1',
+            'upload_id' => 'nullable|integer',
+            'image_url' => 'nullable|string',
+        ]);
+
+        $class = [
+            'product'  => \App\Models\Product::class,
+            'category' => \App\Models\Category::class,
+            'page'     => \App\Models\Page::class,
+            'blog'     => \App\Models\Blog::class,
+        ][$request->input('type')];
+
+        $entity = $class::find((int) $request->input('id'));
+        if (!$entity) {
+            return response()->json(['success' => false, 'error' => 'Entity not found.'], 404);
+        }
+
+        // Prefer a permanent media-library URL over the (expiring) provider URL.
+        $imageUrl = null;
+        if ($request->filled('upload_id')) {
+            $imageUrl = uploaded_asset((int) $request->input('upload_id'));
+        } elseif ($request->filled('image_url')) {
+            $imageUrl = $request->input('image_url');
+            if (\Illuminate\Support\Str::contains($imageUrl, ['oaidalleapi', 'blob.core', 'openai'])) {
+                // Provider URL expires — persist it into the media library.
+                $media = app(AiImageGeneratorService::class)->saveToMediaLibrary($imageUrl);
+                $imageUrl = $media['url'] ?? $imageUrl;
+            }
+        }
+
+        if (!$imageUrl) {
+            return response()->json(['success' => false, 'error' => 'No image provided.'], 422);
+        }
+
+        \App\Models\SeoMeta::updateOrCreate(
+            ['model_type' => $class, 'model_id' => $entity->getKey(), 'lang' => config('app.locale', 'en')],
+            ['og_image' => $imageUrl, 'twitter_image' => $imageUrl]
+        );
+
+        return response()->json(['success' => true, 'image_url' => $imageUrl]);
     }
 
     // ── Keyword Rank Tracker ────────────────────────────────────────────────────
@@ -613,9 +682,14 @@ class SeoSuiteController extends Controller
             'seo_auto_indexnow'             => $request->boolean('auto_indexnow') ? 1 : 0,
             'seo_auto_optimization_enabled' => $request->boolean('auto_optimization_enabled') ? 1 : 0,
             'seo_auto_seo_enabled'          => $request->boolean('auto_seo_enabled') ? 1 : 0,
-            'seo_auto_seo_batch_size'       => min(10, max(1, (int) $request->input('auto_seo_batch_size', 10))),
+            'seo_auto_seo_batch_size'       => min(100, max(1, (int) $request->input('auto_seo_batch_size', 10))),
             'seo_auto_offpage_enabled'      => $request->boolean('auto_offpage_enabled') ? 1 : 0,
             'seo_auto_offpage_batch_size'   => min(10, max(1, (int) $request->input('auto_offpage_batch_size', 3))),
+
+            // Automated sitemap regeneration
+            'seo_auto_sitemap_realtime'       => $request->boolean('auto_sitemap_realtime') ? 1 : 0,
+            'seo_auto_sitemap_interval_hours' => min(24, max(1, (int) $request->input('auto_sitemap_interval_hours', 3))),
+
             'seo_competitor_urls'           => $request->competitor_urls,
             'seo_daily_budget_usd'          => $request->daily_budget_usd,
             'seo_ai_rate_per_min'           => $request->ai_rate_per_min,
@@ -736,6 +810,8 @@ class SeoSuiteController extends Controller
             'auto_seo_batch_size'    => (int) get_setting('seo_auto_seo_batch_size', 10),
             'auto_offpage_enabled'   => (int) get_setting('seo_auto_offpage_enabled', 1),
             'auto_offpage_batch_size'=> (int) get_setting('seo_auto_offpage_batch_size', 3),
+            'auto_sitemap_realtime'  => (int) get_setting('seo_auto_sitemap_realtime', 0),
+            'auto_sitemap_interval_hours' => (int) get_setting('seo_auto_sitemap_interval_hours', 3),
             'competitor_urls'        => get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', '')),
             'daily_budget_usd'       => get_setting('seo_daily_budget_usd', 5),
             'ai_rate_per_min'        => get_setting('seo_ai_rate_per_min', 30),

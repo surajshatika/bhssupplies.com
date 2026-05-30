@@ -43,9 +43,10 @@ return [
     'local_business' => [
         'name' => env('SEO_LOCAL_BUSINESS_NAME'),
         'type' => env('SEO_LOCAL_BUSINESS_TYPE', 'Store'),
-        'city' => env('SEO_LOCAL_CITY', 'Noida'),
-        'region' => env('SEO_LOCAL_REGION', 'Uttar Pradesh'),
-        'country' => env('SEO_LOCAL_COUNTRY', 'India'),
+        'city' => env('SEO_LOCAL_CITY', 'Mississauga'),
+        'region' => env('SEO_LOCAL_REGION', 'Ontario'),
+        'country' => env('SEO_LOCAL_COUNTRY', 'Canada'),
+        'phone' => env('SEO_LOCAL_PHONE', '+1 647 456 2244'),
     ],
 
     'indexnow' => [
@@ -96,7 +97,7 @@ return [
         'optimization' => [
             'page_speed'          => 'Page Speed Analyzer & Fixer',
             'technical_refresh'   => 'Automated Technical Refresh',
-            'technical_audit'     => 'Technical SEO Audit',
+            'technical_audit'     => 'Technical SEO Audit (live measured)',
             'competitor_gap'      => 'Competitor Keyword Gap Analyzer',
             'smart_sitemap'       => 'Smart XML Sitemap Generator',
             'video_sitemap'       => 'Video SEO Sitemap',

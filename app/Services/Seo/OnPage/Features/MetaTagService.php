@@ -14,7 +14,7 @@ class MetaTagService extends AbstractSeoService
         $content = $payload['content'] ?? '';
 
         $prompt = <<<PROMPT
-You are an SEO specialist. Generate optimized meta title and meta description for the following page.
+You are an SEO specialist. Generate optimized meta tags for the following page.
 
 URL: {$url}
 Page Title: {$title}
@@ -22,10 +22,11 @@ Focus Keyword: {$keyword}
 Content Summary: {$content}
 
 Rules:
-- Meta title: 50–60 characters, include focus keyword near the start
-- Meta description: 150–160 characters, include focus keyword, compelling CTA
-- Provide 3 alternatives for both title and description
-- Return valid JSON only
+- Meta title: 50–60 characters, focus keyword in the FIRST 3 words, add a power word (Best, Trusted, Wholesale) where natural.
+- Meta description: 150–160 characters (never under 150), include the focus keyword once, a benefit, and a clear CTA.
+- Suggest one H1 and two H2 subheadings that each contain the focus keyword or a close variant — this fixes "keywords not distributed across headings".
+- Provide 3 alternatives for both title and description.
+- Return valid JSON only.
 
 JSON schema:
 {
@@ -35,6 +36,8 @@ JSON schema:
     { "title": "", "description": "" },
     { "title": "", "description": "" }
   ],
+  "suggested_h1": "",
+  "suggested_h2": ["", ""],
   "keyword_placement_tips": ""
 }
 PROMPT;
@@ -42,6 +45,8 @@ PROMPT;
         return $this->askForJson($prompt, 'You are an expert SEO content strategist.', [
             'primary'      => ['title' => $title, 'description' => ''],
             'alternatives' => [],
+            'suggested_h1' => '',
+            'suggested_h2' => [],
             'keyword_placement_tips' => '',
         ]);
     }

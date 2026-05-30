@@ -979,7 +979,11 @@ class SeoSuiteController extends Controller
             ->all();
         $nextEstimate = $board->estimateBatchCost($nextTargets, $settings['default_provider'] ?? null);
         $offpageTargets = $board->offPageCampaignTargetPreview(10, ['product', 'category', 'page']);
-        $recentScoreChanges = $this->recentSeoScoreChanges(60, 12);
+        $recentScoreActivity = $this->recentSeoScoreActivity(60, 300);
+        $recentScoreChanges = $recentScoreActivity
+            ->filter(fn(array $row) => ((int) ($row['delta'] ?? 0) > 0) || !empty($row['seo_done']))
+            ->take(12)
+            ->values();
 
         $activeBatch = Schema::hasTable('seo_fix_batches')
             ? SeoFixBatch::query()
@@ -1006,6 +1010,9 @@ class SeoSuiteController extends Controller
             'recent_score_changes' => $recentScoreChanges,
             'score_improved_last_hour' => $recentScoreChanges->where('delta', '>', 0)->count(),
             'score_done_last_hour' => $recentScoreChanges->where('seo_done', true)->count(),
+            'score_rescored_no_change_last_hour' => $recentScoreActivity
+                ->filter(fn(array $row) => (int) ($row['delta'] ?? 0) === 0 && empty($row['seo_done']))
+                ->count(),
             'pending_total' => $pendingTotal,
             'days_to_completion' => $batchSize > 0 ? (int) ceil($pendingTotal / $batchSize) : null,
             'next_run_count' => count($nextTargets),
@@ -1033,6 +1040,7 @@ class SeoSuiteController extends Controller
             'recent_score_changes' => collect(),
             'score_improved_last_hour' => 0,
             'score_done_last_hour' => 0,
+            'score_rescored_no_change_last_hour' => 0,
             'pending_total' => 0,
             'days_to_completion' => null,
             'next_run_count' => 0,
@@ -1044,7 +1052,7 @@ class SeoSuiteController extends Controller
         ];
     }
 
-    protected function recentSeoScoreChanges(int $minutes = 60, int $limit = 12): \Illuminate\Support\Collection
+    protected function recentSeoScoreActivity(int $minutes = 60, int $limit = 300): \Illuminate\Support\Collection
     {
         if (!Schema::hasTable('seo_score_histories')) {
             return collect();

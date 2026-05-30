@@ -184,6 +184,22 @@
             content: "{{ translate('View All') }}";
         }
 
+        .bhs-product-img-link.has-hover-image:hover .bhs-product-img:first-child,
+        .pc-card:hover .pc-img-link.has-hover-image .pc-img:not(.pc-img-hover),
+        .image-hover-effect:not(.has-hover-image):hover .product-main-image {
+            opacity: 1 !important;
+        }
+
+        .image-hover-effect:not(.has-hover-image):hover .product-hover-image {
+            opacity: 0 !important;
+        }
+
+        .bhs-product-img-hover,
+        .pc-img-hover,
+        .product-hover-image {
+            pointer-events: none;
+        }
+
         @supports (content-visibility: auto) {
             #section_featured,
             #section_featured_preorder_products,

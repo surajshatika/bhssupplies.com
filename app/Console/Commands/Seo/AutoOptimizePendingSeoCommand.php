@@ -35,7 +35,9 @@ class AutoOptimizePendingSeoCommand extends Command
             ->first();
 
         if ($activeBatch && !$this->option('dry-run')) {
-            $this->info('Another SEO automation batch is still active: #' . $activeBatch->id . ' (' . $activeBatch->status . ').');
+            $this->info('No new SEO batch created because active batch #' . $activeBatch->id . ' is still ' . $activeBatch->status . '.');
+            $this->line('Active batch progress: ' . (int) $activeBatch->processed . '/' . (int) $activeBatch->total . ' (' . $activeBatch->progressPercent() . '%).');
+            $this->line('The master automation runner will process active batches next via seo:process-ai-batches.');
             return self::SUCCESS;
         }
 
@@ -60,8 +62,16 @@ class AutoOptimizePendingSeoCommand extends Command
         $this->info('Provider: ' . $estimate['provider'] . ' | Estimated cost: $' . number_format($estimate['usd'], 4));
 
         if ($this->option('dry-run')) {
+            $this->line('Dry-run preview. Priority is queue urgency, not the current SEO score.');
             foreach ($targetRows as $target) {
-                $this->line('- ' . $target['type'] . '#' . $target['id'] . ' [' . ($target['priority_score'] ?? 0) . '/100] ' . implode(', ', $target['priority_reasons'] ?? []));
+                $this->line(sprintf(
+                    '- %s#%d | priority %d/100 | current SEO %d/100 | issues: %s',
+                    $target['type'],
+                    (int) $target['id'],
+                    (int) ($target['priority_score'] ?? 0),
+                    (int) ($target['score'] ?? 0),
+                    implode(', ', $target['priority_reasons'] ?? [])
+                ));
             }
             return self::SUCCESS;
         }

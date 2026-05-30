@@ -37,7 +37,8 @@ class AutoGenerateOffPageSeoCommand extends Command
         $targets = $board->offPageCampaignTargetPreview($limit, ['product', 'category', 'page']);
 
         if ($targets->isEmpty()) {
-            $this->info('No SEO-ready URLs found for off-page campaign generation. Run on-page autopilot first.');
+            $this->info('No SEO-ready URLs found for off-page campaign generation.');
+            $this->line('This is expected until on-page autopilot creates URLs with meta, focus keyword, schema, and SEO score 70+.');
             return self::SUCCESS;
         }
 

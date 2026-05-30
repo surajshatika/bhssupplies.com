@@ -227,6 +227,7 @@
         @php
             $activeBatch = $autopilot['active_batch'] ?? null;
             $activeStats = $activeBatch ? ($activeBatch->options['seo_stats'] ?? []) : [];
+            $activeStatsTracked = !empty($activeStats['last_checked_at']);
             $activeLastResults = $activeBatch ? collect($activeBatch->options['last_results'] ?? [])->take(8) : collect();
         @endphp
         <div class="row gutters-16 mb-4">
@@ -433,7 +434,15 @@
                     <small class="text-muted">
                         @if(!empty($autopilot['active_batch']))
                             {{ ucfirst($autopilot['active_batch']->status) }} - {{ $autopilot['active_batch']->progressPercent() }}%
-                            <span class="d-block">{{ (int) ($activeStats['improved'] ?? 0) }} {{ translate('improved') }} / {{ (int) ($activeStats['seo_done'] ?? 0) }} {{ translate('done') }}</span>
+                            @if($activeStatsTracked)
+                                <span class="d-block">
+                                    {{ (int) ($activeStats['improved'] ?? 0) }} {{ translate('improved') }}
+                                    / {{ (int) ($activeStats['seo_done'] ?? 0) }} {{ translate('done') }}
+                                    / {{ (int) ($activeStats['no_gain'] ?? 0) }} {{ translate('no gain') }}
+                                </span>
+                            @else
+                                <span class="d-block">{{ translate('Impact tracking starts on next chunk') }}</span>
+                            @endif
                         @else
                             {{ translate('ready for next run') }}
                         @endif
@@ -513,7 +522,10 @@
                         </thead>
                         <tbody>
                             @forelse(($autopilot['recent_batches'] ?? collect()) as $batch)
-                                @php $batchStats = $batch->options['seo_stats'] ?? []; @endphp
+                                @php
+                                    $batchStats = $batch->options['seo_stats'] ?? [];
+                                    $batchStatsTracked = !empty($batchStats['last_checked_at']);
+                                @endphp
                                 <tr>
                                     <td class="small">#{{ $batch->id }}</td>
                                     <td>
@@ -523,8 +535,15 @@
                                     </td>
                                     <td class="small">{{ $batch->processed }}/{{ $batch->total }} ({{ $batch->progressPercent() }}%)</td>
                                     <td class="small">
-                                        <span class="text-success">{{ (int) ($batchStats['improved'] ?? 0) }} {{ translate('improved') }}</span>
-                                        <span class="d-block text-info">{{ (int) ($batchStats['seo_done'] ?? 0) }} {{ translate('done') }}</span>
+                                        @if($batchStatsTracked)
+                                            <span class="text-success">{{ (int) ($batchStats['improved'] ?? 0) }} {{ translate('improved') }}</span>
+                                            <span class="d-block text-info">{{ (int) ($batchStats['seo_done'] ?? 0) }} {{ translate('done') }}</span>
+                                            @if((int) ($batchStats['no_gain'] ?? 0) > 0)
+                                                <span class="d-block text-muted">{{ (int) ($batchStats['no_gain'] ?? 0) }} {{ translate('no gain') }}</span>
+                                            @endif
+                                        @else
+                                            <span class="text-muted">{{ translate('not tracked yet') }}</span>
+                                        @endif
                                     </td>
                                     <td class="small">${{ number_format((float) $batch->actual_cost_usd, 4) }}</td>
                                     <td class="small text-muted">{{ optional($batch->created_at)->format('M d H:i') }}</td>
@@ -591,12 +610,13 @@
         <div class="mt-4">
             <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
                 <div>
-                    <h6 class="font-weight-600 mb-0">{{ translate('Last 60 Minutes SEO Score Changes') }}</h6>
-                    <small class="text-muted">{{ translate('Shows processed or rescored URLs even when they are still below the SEO-done threshold.') }}</small>
+                    <h6 class="font-weight-600 mb-0">{{ translate('Last 60 Minutes Real SEO Improvements') }}</h6>
+                    <small class="text-muted">{{ translate('Shows only URLs where score increased or reached the SEO-done threshold.') }}</small>
                 </div>
                 <div class="mt-2 mt-md-0">
                     <span class="badge badge-soft-success">{{ $autopilot['score_improved_last_hour'] ?? 0 }} {{ translate('improved') }}</span>
                     <span class="badge badge-soft-info">{{ $autopilot['score_done_last_hour'] ?? 0 }} {{ translate('SEO done') }}</span>
+                    <span class="badge badge-soft-secondary">{{ $autopilot['score_rescored_no_change_last_hour'] ?? 0 }} {{ translate('rescored no change') }}</span>
                 </div>
             </div>
             <div class="table-responsive border rounded">
@@ -640,7 +660,7 @@
                                 <td class="small text-muted">{{ optional($row['recorded_at'])->format('M d H:i') }}</td>
                             </tr>
                         @empty
-                            <tr><td colspan="5" class="text-center text-muted py-3">{{ translate('No score changes recorded in the last 60 minutes yet.') }}</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted py-3">{{ translate('No real score improvements in the last 60 minutes. No-change rescans are counted above but hidden from this table.') }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>

@@ -9,6 +9,8 @@ class AutomationRunCommand extends Command
 {
     protected $signature = 'seo:automation-run
                             {--onpage-limit= : Pending URLs to optimize this run}
+                            {--batch-limit=10 : Active AI SEO URLs to process per batch}
+                            {--max-batches=3 : Active AI SEO batches to process}
                             {--provider= : AI provider override}
                             {--force-all : Run interval-gated automation immediately}
                             {--dry-run : Show what would run without changing data}';
@@ -24,6 +26,8 @@ class AutomationRunCommand extends Command
 
         $provider = $this->option('provider');
         $onpageLimit = $this->option('onpage-limit') ?: get_setting('seo_auto_seo_batch_size', 10);
+        $batchLimit = max(1, min(50, (int) $this->option('batch-limit')));
+        $maxBatches = max(1, min(10, (int) $this->option('max-batches')));
         $forceAll = (bool) $this->option('force-all');
         $dryRun = (bool) $this->option('dry-run');
 
@@ -34,6 +38,12 @@ class AutomationRunCommand extends Command
             '--provider' => $provider,
             '--dry-run' => $dryRun ?: null,
         ]));
+
+        $this->callSeoCommand('seo:process-ai-batches', [
+            '--limit' => $batchLimit,
+            '--max-batches' => $maxBatches,
+            '--dry-run' => $dryRun ?: null,
+        ]);
 
         // Keep the on-disk sitemaps fresh (new products, image tags, dynamic
         // priorities) without waiting for the weekly snapshot.
@@ -112,7 +122,13 @@ class AutomationRunCommand extends Command
     protected function callSeoCommand(string $command, array $arguments = []): void
     {
         $arguments = array_filter($arguments, fn($value) => $value !== null && $value !== false && $value !== '');
-        $this->line('> php artisan ' . $command);
+        $printedArgs = collect($arguments)
+            ->map(function ($value, $key) {
+                return is_bool($value) ? (string) $key : $key . '=' . $value;
+            })
+            ->implode(' ');
+
+        $this->line('> php artisan ' . $command . ($printedArgs ? ' ' . $printedArgs : ''));
         $this->call($command, $arguments);
     }
 

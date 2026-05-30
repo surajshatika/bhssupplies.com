@@ -53,7 +53,7 @@
                 onerror="this.onerror=null;this.src='{{ $placeholderImage }}';">
             @if($showHoverImage)
             <img class="lazyload bhs-product-img bhs-product-img-hover position-absolute"
-                src="{{ $placeholderImage }}"
+                src="{{ $mainImage }}"
                 data-src="{{ $hoverImage }}"
                 alt="{{ $product->getTranslation('name') }}"
                 loading="lazy"

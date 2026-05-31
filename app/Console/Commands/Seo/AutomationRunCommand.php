@@ -30,20 +30,21 @@ class AutomationRunCommand extends Command
         $maxBatches = max(1, min(10, (int) $this->option('max-batches')));
         $forceAll = (bool) $this->option('force-all');
         $dryRun = (bool) $this->option('dry-run');
+        $hasFailures = false;
 
         $this->info('SEO automation run started' . ($dryRun ? ' (dry run)' : '') . '.');
 
-        $this->callSeoCommand('seo:auto-optimize-pending', array_filter([
+        $hasFailures = $this->callSeoCommand('seo:auto-optimize-pending', array_filter([
             '--limit' => $onpageLimit,
             '--provider' => $provider,
             '--dry-run' => $dryRun ?: null,
-        ]));
+        ])) !== self::SUCCESS || $hasFailures;
 
-        $this->callSeoCommand('seo:process-ai-batches', [
+        $hasFailures = $this->callSeoCommand('seo:process-ai-batches', [
             '--limit' => $batchLimit,
             '--max-batches' => $maxBatches,
             '--dry-run' => $dryRun ?: null,
-        ]);
+        ]) !== self::SUCCESS || $hasFailures;
 
         // Keep the on-disk sitemaps fresh (new products, image tags, dynamic
         // priorities) without waiting for the weekly snapshot.
@@ -55,36 +56,49 @@ class AutomationRunCommand extends Command
                     $result = app(\App\Services\Seo\Optimization\Features\SmartSitemapService::class)
                         ->handle(['persist' => true, 'split' => true, 'base_url' => url('/')]);
                     $this->info('Sitemaps regenerated: ' . ($result['url_count'] ?? 0) . ' URLs.');
+                    $this->markRan('sitemap', false);
                 } catch (\Throwable $e) {
                     $this->warn('Sitemap regeneration failed: ' . $e->getMessage());
+                    $hasFailures = true;
                 }
-                $this->markRan('sitemap', false);
             }
         }
 
         if ($this->isDue('technical_refresh', 6, $forceAll, $dryRun)) {
-            $this->callSeoCommand('seo:auto-technical-refresh', [
+            $exitCode = $this->callSeoCommand('seo:auto-technical-refresh', [
                 '--sample' => 80,
                 '--dry-run' => $dryRun ?: null,
             ]);
-            $this->markRan('technical_refresh', $dryRun);
+            if ($exitCode === self::SUCCESS) {
+                $this->markRan('technical_refresh', $dryRun);
+            } else {
+                $hasFailures = true;
+            }
         }
 
         if ($this->isDue('offpage_campaign', (int) get_setting('seo_auto_offpage_interval_hours', 6), $forceAll, $dryRun)) {
-            $this->callSeoCommand('seo:auto-offpage-campaign', array_filter([
+            $exitCode = $this->callSeoCommand('seo:auto-offpage-campaign', array_filter([
                 '--limit' => get_setting('seo_auto_offpage_batch_size', 3),
                 '--provider' => $provider,
                 '--dry-run' => $dryRun ?: null,
             ]));
-            $this->markRan('offpage_campaign', $dryRun);
+            if ($exitCode === self::SUCCESS) {
+                $this->markRan('offpage_campaign', $dryRun);
+            } else {
+                $hasFailures = true;
+            }
         }
 
         if ($this->isDue('search_console', 6, $forceAll, $dryRun)) {
             if ($dryRun) {
                 $this->line('> php artisan seo:sync-search-console (due, skipped in dry run)');
             } else {
-                $this->callSeoCommand('seo:sync-search-console', ['--days' => 7]);
-                $this->markRan('search_console', false);
+                $exitCode = $this->callSeoCommand('seo:sync-search-console', ['--days' => 7]);
+                if ($exitCode === self::SUCCESS) {
+                    $this->markRan('search_console', false);
+                } else {
+                    $hasFailures = true;
+                }
             }
         }
 
@@ -92,8 +106,12 @@ class AutomationRunCommand extends Command
             if ($dryRun) {
                 $this->line('> php artisan seo:check-keyword-ranks (due, skipped in dry run)');
             } else {
-                $this->callSeoCommand('seo:check-keyword-ranks', ['--limit' => 50]);
-                $this->markRan('keyword_ranks', false);
+                $exitCode = $this->callSeoCommand('seo:check-keyword-ranks', ['--limit' => 50]);
+                if ($exitCode === self::SUCCESS) {
+                    $this->markRan('keyword_ranks', false);
+                } else {
+                    $hasFailures = true;
+                }
             }
         }
 
@@ -101,8 +119,12 @@ class AutomationRunCommand extends Command
             if ($dryRun) {
                 $this->line('> php artisan seo:pagespeed (due, skipped in dry run)');
             } else {
-                $this->callSeoCommand('seo:pagespeed', ['--strategy' => 'mobile']);
-                $this->markRan('pagespeed', false);
+                $exitCode = $this->callSeoCommand('seo:pagespeed', ['--strategy' => 'mobile']);
+                if ($exitCode === self::SUCCESS) {
+                    $this->markRan('pagespeed', false);
+                } else {
+                    $hasFailures = true;
+                }
             }
         }
 
@@ -110,16 +132,25 @@ class AutomationRunCommand extends Command
             if ($dryRun) {
                 $this->line('> php artisan seo:check-broken-links (due, skipped in dry run)');
             } else {
-                $this->callSeoCommand('seo:check-broken-links', ['--limit' => 400, '--per-entity' => 10]);
-                $this->markRan('broken_links', false);
+                $exitCode = $this->callSeoCommand('seo:check-broken-links', ['--limit' => 400, '--per-entity' => 10]);
+                if ($exitCode === self::SUCCESS) {
+                    $this->markRan('broken_links', false);
+                } else {
+                    $hasFailures = true;
+                }
             }
         }
 
-        $this->info('SEO automation run finished.');
+        if ($hasFailures) {
+            $this->warn('SEO automation run finished with failures.');
+            return self::FAILURE;
+        }
+
+        $this->info('SEO automation run finished successfully.');
         return self::SUCCESS;
     }
 
-    protected function callSeoCommand(string $command, array $arguments = []): void
+    protected function callSeoCommand(string $command, array $arguments = []): int
     {
         $arguments = array_filter($arguments, fn($value) => $value !== null && $value !== false && $value !== '');
         $printedArgs = collect($arguments)
@@ -129,7 +160,18 @@ class AutomationRunCommand extends Command
             ->implode(' ');
 
         $this->line('> php artisan ' . $command . ($printedArgs ? ' ' . $printedArgs : ''));
-        $this->call($command, $arguments);
+        try {
+            $exitCode = $this->call($command, $arguments);
+        } catch (\Throwable $e) {
+            $this->error($command . ' failed: ' . $e->getMessage());
+            return self::FAILURE;
+        }
+
+        if ($exitCode !== self::SUCCESS) {
+            $this->warn($command . ' exited with code ' . $exitCode . '.');
+        }
+
+        return $exitCode;
     }
 
     protected function isDue(string $key, int $intervalHours, bool $forceAll, bool $dryRun): bool

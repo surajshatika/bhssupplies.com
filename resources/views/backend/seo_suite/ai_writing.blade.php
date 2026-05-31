@@ -140,6 +140,51 @@
     const endpoint = '{{ route("admin.seo-suite.ai_writing") }}';
     const $ = id => document.getElementById(id);
 
+    function safeHref(value) {
+        const raw = String(value == null ? '' : value).trim();
+        if (!raw) return '';
+        try {
+            const url = new URL(raw, window.location.href);
+            return ['http:', 'https:', 'mailto:'].includes(url.protocol) ? url.href : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function sanitizeHtml(value) {
+        const template = document.createElement('template');
+        template.innerHTML = String(value == null ? '' : value);
+        const allowedTags = new Set([
+            'A', 'B', 'BLOCKQUOTE', 'BR', 'CODE', 'EM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+            'HR', 'I', 'LI', 'OL', 'P', 'PRE', 'S', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TFOOT',
+            'TH', 'THEAD', 'TR', 'U', 'UL'
+        ]);
+
+        Array.from(template.content.querySelectorAll('*')).forEach(function(el) {
+            if (!allowedTags.has(el.tagName)) {
+                el.replaceWith(...Array.from(el.childNodes));
+                return;
+            }
+
+            Array.from(el.attributes).forEach(function(attr) {
+                const keepTableSpan = ['TD', 'TH'].includes(el.tagName) && ['colspan', 'rowspan'].includes(attr.name);
+                const keepLinkAttr = el.tagName === 'A' && ['href', 'title', 'target'].includes(attr.name);
+                if (!keepTableSpan && !keepLinkAttr) el.removeAttribute(attr.name);
+            });
+
+            if (el.tagName === 'A') {
+                const href = safeHref(el.getAttribute('href'));
+                if (href) el.setAttribute('href', href);
+                else el.removeAttribute('href');
+
+                if (el.getAttribute('target') === '_blank') el.setAttribute('rel', 'noopener noreferrer');
+                else el.removeAttribute('target');
+            }
+        });
+
+        return template.innerHTML;
+    }
+
     // Show/hide mode-specific inputs.
     function syncModeInputs() {
         const task = $('wa-task').value;
@@ -200,7 +245,7 @@
         const out = $('wa-output');
         out.classList.remove('d-none');
         lastFormat = data.format || 'text';
-        if (lastFormat === 'html') { out.innerHTML = data.result || ''; }
+        if (lastFormat === 'html') { out.innerHTML = sanitizeHtml(data.result); }
         else { out.textContent = data.result || ''; }
 
         const meta = $('wa-out-meta');

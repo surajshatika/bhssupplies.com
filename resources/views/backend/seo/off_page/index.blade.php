@@ -28,10 +28,16 @@
 <div class="row gutters-16 mb-4">
     @foreach($features as $key => $label)
     <div class="col-xl-4 col-lg-4 col-md-6 mb-3">
-        <div class="card h-100 shadow-sm border-0 tool-card" onclick="openToolModal('{{ $key }}', '{{ addslashes($label) }}')" style="cursor: pointer; transition: transform 0.2s;">
-            <div class="card-body text-center d-flex flex-column justify-content-center">
-                <i class="las la-bullhorn las-3x text-success mb-2"></i>
-                <h6 class="font-weight-600 mb-0">{{ $label }}</h6>
+        <div class="card h-100 tool-card seo-tool-tile" onclick="openToolModal('{{ $key }}', '{{ addslashes($label) }}')" style="cursor: pointer;">
+            <div class="card-body d-flex align-items-center px-3 py-3">
+                <div class="seo-tool-icon success mr-3">
+                    <i class="las la-bullhorn la-lg text-success"></i>
+                </div>
+                <div class="flex-grow-1" style="min-width: 0;">
+                    <h6 class="font-weight-600 mb-1">{{ $label }}</h6>
+                    <span class="small text-muted">{{ translate('Configure and run') }}</span>
+                </div>
+                <i class="las la-angle-right text-muted ml-2"></i>
             </div>
         </div>
     </div>
@@ -142,12 +148,6 @@
 
 @section('script')
 <script>
-    $('.tool-card').on('mouseenter', function() {
-        $(this).addClass('shadow-lg').css('transform', 'translateY(-3px)');
-    }).on('mouseleave', function() {
-        $(this).removeClass('shadow-lg').css('transform', 'translateY(0)');
-    });
-
     function openToolModal(featureKey, sectionLabel) {
         $('#toolFeatureInput').val(featureKey);
         $('#toolModalLabel').text(sectionLabel);

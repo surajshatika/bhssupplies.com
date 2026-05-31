@@ -27,15 +27,17 @@ class PostIndexStatusService extends AbstractSeoService
             $results[] = $this->checkIndexStatus($url, $apiKey, $cx);
         }
 
-        $indexed   = count(array_filter($results, fn($r) => $r['indexed']));
-        $notIndexed = count($results) - $indexed;
+        $indexed    = count(array_filter($results, fn($r) => $r['status'] === 'indexed'));
+        $notIndexed = count(array_filter($results, fn($r) => $r['status'] === 'not_indexed'));
+        $errors     = count(array_filter($results, fn($r) => !empty($r['error'])));
 
         $prompt = "SEO Index Status Report for {$domain}:\n"
             . "- Total checked: " . count($results) . "\n"
             . "- Indexed: {$indexed}\n"
-            . "- Not indexed: {$notIndexed}\n\n"
+            . "- Not indexed: {$notIndexed}\n"
+            . "- Check errors: {$errors}\n\n"
             . "List of not-indexed URLs: " . json_encode(array_column(
-                array_filter($results, fn($r) => !$r['indexed']), 'url'
+                array_filter($results, fn($r) => $r['status'] === 'not_indexed'), 'url'
             ), JSON_PRETTY_PRINT) . "\n\n"
             . "Provide recommendations to get these pages indexed faster.";
 
@@ -45,6 +47,7 @@ class PostIndexStatusService extends AbstractSeoService
             'total'      => count($results),
             'indexed'    => $indexed,
             'not_indexed'=> $notIndexed,
+            'errors'     => $errors,
             'results'    => $results,
             'ai_advice'  => $aiAdvice,
             'api_available' => !empty($apiKey && $cx),
@@ -53,10 +56,9 @@ class PostIndexStatusService extends AbstractSeoService
 
     protected function checkIndexStatus(string $url, ?string $apiKey, ?string $cx): array
     {
-        $indexed = false;
-        $method  = 'cache_check';
-
         if ($apiKey && $cx) {
+            $method = 'google_search_api';
+
             try {
                 $response = Http::timeout(10)
                     ->withOptions(['verify' => config('seo.ssl_verify', true)])
@@ -69,22 +71,58 @@ class PostIndexStatusService extends AbstractSeoService
                 if ($response->successful()) {
                     $total = $response->json('searchInformation.totalResults', '0');
                     $indexed = (int) $total > 0;
-                    $method = 'google_search_api';
+
+                    return $this->indexStatusResult($url, $indexed, $method);
                 }
-            } catch (\Throwable $e) {}
-        } else {
-            // Fallback: check via Google cache URL
-            try {
-                $cacheUrl = 'https://webcache.googleusercontent.com/search?q=cache:' . urlencode($url);
-                $response = Http::timeout(8)->withOptions(['verify' => false])->get($cacheUrl);
-                $indexed  = $response->successful() && !str_contains($response->body(), 'Error 404');
-            } catch (\Throwable $e) {}
+
+                return $this->indexStatusError(
+                    $url,
+                    $method,
+                    'Google Search API HTTP ' . $response->status() . ': '
+                        . $response->json('error.message', 'Request failed.')
+                );
+            } catch (\Throwable $e) {
+                return $this->indexStatusError($url, $method, $e->getMessage());
+            }
         }
 
+        // Fallback: check via Google cache URL
+        $method = 'cache_check';
+
+        try {
+            $cacheUrl = 'https://webcache.googleusercontent.com/search?q=cache:' . urlencode($url);
+            $response = Http::timeout(8)->get($cacheUrl);
+
+            if (!$response->successful()) {
+                return $this->indexStatusError($url, $method, 'Google cache check HTTP ' . $response->status() . '.');
+            }
+
+            return $this->indexStatusResult($url, !str_contains($response->body(), 'Error 404'), $method);
+        } catch (\Throwable $e) {
+            return $this->indexStatusError($url, $method, $e->getMessage());
+        }
+    }
+
+    protected function indexStatusResult(string $url, bool $indexed, string $method): array
+    {
         return [
             'url'      => $url,
             'indexed'  => $indexed,
+            'status'   => $indexed ? 'indexed' : 'not_indexed',
             'method'   => $method,
+            'error'    => null,
+            'checked_at' => now()->toDateTimeString(),
+        ];
+    }
+
+    protected function indexStatusError(string $url, string $method, string $error): array
+    {
+        return [
+            'url'        => $url,
+            'indexed'    => false,
+            'status'     => 'api_error',
+            'method'     => $method,
+            'error'      => $error,
             'checked_at' => now()->toDateTimeString(),
         ];
     }

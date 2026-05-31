@@ -4,19 +4,24 @@ namespace App\Services\Seo\Optimization\Features;
 
 use App\Services\Seo\Support\AbstractSeoService;
 use App\Models\SeoScoreHistory;
+use App\Services\Seo\SearchConsole\GoogleSearchConsoleService;
 use Illuminate\Support\Facades\Http;
 
 class SearchStatisticsService extends AbstractSeoService
 {
     public function handle(array $payload): array
     {
-        $siteUrl = $payload['site_url'] ?? get_setting('seo_search_console_site', url('/'));
-        $days    = (int) ($payload['days'] ?? 28);
-        $token   = get_setting('seo_search_console_token') ?? env('GOOGLE_SEARCH_CONSOLE_TOKEN');
+        $searchConsole = app(GoogleSearchConsoleService::class);
+        $siteUrl       = $payload['site_url'] ?? $searchConsole->siteUrl() ?? url('/');
+        $days          = (int) ($payload['days'] ?? 28);
+        $legacyToken   = get_setting('seo_search_console_token') ?? env('GOOGLE_SEARCH_CONSOLE_TOKEN');
+        $gscConnected  = $searchConsole->isConfigured() || !empty($legacyToken);
 
         $gscData = [];
-        if ($token) {
-            $gscData = $this->fetchGscData($siteUrl, $token, $days);
+        if ($searchConsole->isConfigured()) {
+            $gscData = $this->fetchOAuthGscData($searchConsole, $days);
+        } elseif ($legacyToken) {
+            $gscData = $this->fetchGscData($siteUrl, $legacyToken, $days);
         }
 
         $localStats = $this->buildLocalStats($days);
@@ -41,8 +46,20 @@ class SearchStatisticsService extends AbstractSeoService
             'gsc_data'    => $gscData,
             'top_pages'   => $topPages,
             'ai_analysis' => $aiAnalysis,
-            'gsc_connected' => !empty($token),
+            'gsc_connected' => $gscConnected,
         ];
+    }
+
+    protected function fetchOAuthGscData(GoogleSearchConsoleService $searchConsole, int $days): array
+    {
+        $result = $searchConsole->fetchPerformance(
+            now()->subDays($days)->format('Y-m-d'),
+            now()->format('Y-m-d'),
+            ['query'],
+            25
+        );
+
+        return $result['success'] ? $result['rows'] : [];
     }
 
     protected function fetchGscData(string $siteUrl, string $token, int $days): array

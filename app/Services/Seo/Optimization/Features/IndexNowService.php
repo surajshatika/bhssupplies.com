@@ -21,6 +21,10 @@ class IndexNowService extends AbstractSeoService
             return ['error' => 'No URLs provided for IndexNow submission.'];
         }
 
+        if (!$this->generateKeyFile($apiKey)) {
+            return ['error' => 'IndexNow key file could not be published.'];
+        }
+
         $results = [];
         $endpoint = 'https://' . config('seo.indexnow.host', 'api.indexnow.org') . '/IndexNow';
 
@@ -51,8 +55,6 @@ class IndexNowService extends AbstractSeoService
             }
         }
 
-        $this->generateKeyFile($apiKey);
-
         return [
             'submitted'     => count($urls),
             'key'           => $apiKey,
@@ -67,9 +69,9 @@ class IndexNowService extends AbstractSeoService
         return substr(md5(uniqid('indexnow', true)), 0, 32);
     }
 
-    protected function generateKeyFile(string $apiKey): void
+    protected function generateKeyFile(string $apiKey): bool
     {
-        file_put_contents(public_path($apiKey . '.txt'), $apiKey);
+        return file_put_contents(public_path($apiKey . '.txt'), $apiKey, LOCK_EX) !== false;
     }
 
     protected function getIndexNowKey(): ?string

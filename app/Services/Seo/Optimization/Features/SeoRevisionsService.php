@@ -34,7 +34,7 @@ class SeoRevisionsService extends AbstractSeoService
             'score'       => $payload['score'] ?? 0,
             'grade'       => $payload['grade'] ?? 'N/A',
             'notes'       => $payload['notes'] ?? '',
-            'snapshot'    => json_encode($payload),
+            'metrics'     => $payload,
         ];
 
         try {
@@ -43,9 +43,13 @@ class SeoRevisionsService extends AbstractSeoService
                 'score'       => (int) $data['score'],
                 'grade'       => $data['grade'],
                 'recorded_at' => now(),
-                'snapshot'    => $data['snapshot'],
+                'metrics'     => $data['metrics'],
             ]);
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) {
+            logger()->warning('SEO revision save failed', ['error' => $e->getMessage()]);
+
+            return ['saved' => false, 'data' => $data, 'error' => 'SEO revision could not be saved.'];
+        }
 
         return ['saved' => true, 'data' => $data];
     }
@@ -59,7 +63,7 @@ class SeoRevisionsService extends AbstractSeoService
             $revisions = SeoScoreHistory::where('url', $url)
                 ->orderByDesc('recorded_at')
                 ->limit($limit)
-                ->get(['url', 'score', 'grade', 'recorded_at', 'snapshot'])
+                ->get(['url', 'score', 'grade', 'recorded_at', 'metrics'])
                 ->toArray();
         } catch (\Throwable $e) {
             $revisions = [];

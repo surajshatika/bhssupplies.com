@@ -13,14 +13,23 @@ class LinkAssistantService extends AbstractSeoService
         $content      = $payload['content'] ?? '';
         $siteUrl      = $payload['site_url'] ?? url('/');
         $linkType     = $payload['link_type'] ?? 'both'; // internal, external, both
+        $linkType     = in_array($linkType, ['internal', 'external', 'both'], true) ? $linkType : 'both';
 
         $opportunities = $this->findLinkOpportunities($keyword, $content, $siteUrl);
+        if ($linkType === 'internal') {
+            $opportunities['external'] = [];
+        } elseif ($linkType === 'external') {
+            $opportunities['internal'] = [];
+        }
 
         $prompt = "You are a link building and internal linking expert. Analyze this page:\n"
             . "URL: {$url}\n"
             . "Target Keyword: {$keyword}\n"
+            . "Requested link type: {$linkType}\n"
             . "Content preview: " . substr($content, 0, 500) . "\n\n"
             . "Found internal linking opportunities: " . json_encode(array_slice($opportunities['internal'], 0, 10)) . "\n\n"
+            . "Found external linking opportunities: " . json_encode(array_slice($opportunities['external'], 0, 10)) . "\n\n"
+            . "Focus your recommendations on the requested link type.\n"
             . "Provide:\n"
             . "1. Internal linking strategy for this page (5 specific suggestions with anchor text)\n"
             . "2. External authority link opportunities (5 sites to get links from)\n"
@@ -33,6 +42,7 @@ class LinkAssistantService extends AbstractSeoService
         return [
             'url'              => $url,
             'keyword'          => $keyword,
+            'link_type'        => $linkType,
             'opportunities'    => $opportunities,
             'ai_suggestions'   => $aiSuggestions,
             'total_found'      => count($opportunities['internal']) + count($opportunities['external']),

@@ -38,6 +38,7 @@ class OptimizationService extends AbstractSeoService
     {
         $map = [
             'page_speed' => 'analyzePageSpeed',
+            'technical_refresh' => 'runTechnicalAudit',
             'technical_audit' => 'runTechnicalAudit',
             'technical_health' => 'runTechnicalAudit',
             'competitor_gap' => 'detectCompetitorGap',

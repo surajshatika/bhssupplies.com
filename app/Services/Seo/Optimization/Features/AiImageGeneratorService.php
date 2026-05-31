@@ -11,6 +11,8 @@ use Illuminate\Support\Str;
 
 class AiImageGeneratorService extends AbstractSeoService
 {
+    protected const MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024;
+
     /** Style presets → prompt suffixes (AIOSEO-style style selector). */
     public static function styles(): array
     {
@@ -135,17 +137,47 @@ class AiImageGeneratorService extends AbstractSeoService
     public function saveToMediaLibrary(string $sourceUrl): ?array
     {
         try {
-            $bytes = Http::timeout(45)->withOptions(['verify' => config('seo.ssl_verify', true)])->get($sourceUrl)->body();
-            if ($bytes === '' || $bytes === null) {
+            $response = Http::timeout(45)
+                ->withOptions(['verify' => config('seo.ssl_verify', true)])
+                ->get($sourceUrl);
+
+            if (!$response->successful()) {
+                logger()->warning('AI image download failed', ['status' => $response->status()]);
+                return null;
+            }
+
+            $contentType = strtolower(trim(explode(';', (string) $response->header('Content-Type'))[0]));
+            if ($contentType !== 'image/png') {
+                logger()->warning('AI image download rejected: invalid content type', ['content_type' => $contentType]);
+                return null;
+            }
+
+            $contentLength = (int) $response->header('Content-Length', 0);
+            if ($contentLength > self::MAX_DOWNLOAD_BYTES) {
+                logger()->warning('AI image download rejected: content length exceeds limit', ['bytes' => $contentLength]);
+                return null;
+            }
+
+            $bytes     = $response->body();
+            $byteCount = strlen($bytes);
+            if ($byteCount === 0 || $byteCount > self::MAX_DOWNLOAD_BYTES) {
+                logger()->warning('AI image download rejected: invalid body size', ['bytes' => $byteCount]);
+                return null;
+            }
+
+            if (!str_starts_with($bytes, "\x89PNG\r\n\x1a\n")) {
+                logger()->warning('AI image download rejected: body is not PNG data');
                 return null;
             }
 
             $filename = Str::random(40) . '.png';
             $dir      = public_path('uploads/all');
-            if (!is_dir($dir)) {
-                @mkdir($dir, 0777, true);
+            if (!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) {
+                return null;
             }
-            file_put_contents($dir . DIRECTORY_SEPARATOR . $filename, $bytes);
+            if (file_put_contents($dir . DIRECTORY_SEPARATOR . $filename, $bytes, LOCK_EX) !== $byteCount) {
+                return null;
+            }
 
             $upload = new Upload();
             $upload->file_original_name = 'ai-seo-image';
@@ -153,7 +185,7 @@ class AiImageGeneratorService extends AbstractSeoService
             $upload->user_id   = optional(auth()->user())->id;
             $upload->extension = 'png';
             $upload->type      = 'image';
-            $upload->file_size = round(strlen($bytes) / 1024, 2) . ' kb';
+            $upload->file_size = round($byteCount / 1024, 2) . ' kb';
             $upload->save();
 
             return ['id' => $upload->id, 'url' => uploaded_asset($upload->id)];

@@ -105,9 +105,9 @@
 .optimization-action.medium { border-left-color: #36b9cc; }
 .optimization-action.low { border-left-color: #858796; }
 .automation-command { border: 1px dashed #cfd7e6; border-radius: 8px; background: #f8fafc; padding: 10px 12px; font-size: .78rem; word-break: break-all; }
-.tool-filter-btn.active { color: #fff !important; background: #4e73df !important; border-color: #4e73df !important; }
+.tool-filter-btn.active { color: #fff !important; background: #146c7e !important; border-color: #146c7e !important; }
 .tool-card { border: 1px solid #edf0f5 !important; }
-.tool-card:hover { transform: translateY(-3px); box-shadow: 0 6px 18px rgba(31,45,61,.1) !important; }
+.tool-card:hover { transform: translateY(-2px); box-shadow: 0 7px 18px rgba(23,33,43,.08) !important; }
 </style>
 
 <div class="mm-hero mm-hero--seo mb-3">
@@ -407,7 +407,7 @@
     <div class="card-body">
         <div class="row gutters-16">
             @foreach($group['tools'] as $featureKey => $tool)
-            <div class="col-xl-2 col-lg-3 col-md-4 col-6 mb-3 seo-tool-item"
+            <div class="col-xl-3 col-lg-4 col-md-6 mb-3 seo-tool-item"
                  data-tool-group="{{ \Illuminate\Support\Str::slug($groupName) }}"
                  data-tool-text="{{ strtolower($featureKey . ' ' . $tool['label'] . ' ' . $tool['desc']) }}">
                 @if(isset($directActions[$featureKey]) && in_array($featureKey, $postActionFeatures))
@@ -415,12 +415,15 @@
                 <form action="{{ route($directActions[$featureKey]) }}" method="POST" class="h-100">
                     @csrf
                     <button type="submit" class="btn btn-block h-100 p-0 border-0 bg-transparent text-left w-100">
-                        <div class="card h-100 shadow-sm border-0 tool-card tool-card-direct text-center"
-                             style="cursor:pointer; transition:all 0.2s;" title="{{ $tool['desc'] }}">
-                            <div class="card-body d-flex flex-column justify-content-center py-3 px-2">
-                                <i class="las {{ $tool['icon'] }} la-2x text-{{ $group['color'] }} mb-2"></i>
-                                <h6 class="font-weight-600 mb-1" style="font-size:0.78rem; line-height:1.3;">{{ $tool['label'] }}</h6>
-                                <p class="text-muted mb-0" style="font-size:0.68rem; line-height:1.3;">{{ $tool['desc'] }}</p>
+                        <div class="card h-100 tool-card seo-tool-tile tool-card-direct"
+                             style="cursor:pointer;" title="{{ $tool['desc'] }}">
+                            <div class="card-body d-flex align-items-center py-3 px-3">
+                                <span class="seo-tool-icon mr-3"><i class="las {{ $tool['icon'] }} text-{{ $group['color'] }}"></i></span>
+                                <span class="text-left flex-grow-1" style="min-width:0;">
+                                    <strong class="d-block mb-1" style="font-size:.78rem;line-height:1.3;">{{ $tool['label'] }}</strong>
+                                    <small class="text-muted d-block" style="line-height:1.3;">{{ $tool['desc'] }}</small>
+                                </span>
+                                <i class="las la-angle-right text-muted ml-2"></i>
                             </div>
                         </div>
                     </button>
@@ -428,25 +431,31 @@
                 @elseif(isset($directActions[$featureKey]))
                 {{-- Direct GET link --}}
                 <a href="{{ route($directActions[$featureKey]) }}" class="h-100 d-block text-decoration-none">
-                    <div class="card h-100 shadow-sm border-0 tool-card text-center"
-                         style="cursor:pointer; transition:all 0.2s;" title="{{ $tool['desc'] }}">
-                        <div class="card-body d-flex flex-column justify-content-center py-3 px-2">
-                            <i class="las {{ $tool['icon'] }} la-2x text-{{ $group['color'] }} mb-2"></i>
-                            <h6 class="font-weight-600 mb-1" style="font-size:0.78rem; line-height:1.3;">{{ $tool['label'] }}</h6>
-                            <p class="text-muted mb-0" style="font-size:0.68rem; line-height:1.3;">{{ $tool['desc'] }}</p>
+                    <div class="card h-100 tool-card seo-tool-tile"
+                         style="cursor:pointer;" title="{{ $tool['desc'] }}">
+                        <div class="card-body d-flex align-items-center py-3 px-3">
+                            <span class="seo-tool-icon mr-3"><i class="las {{ $tool['icon'] }} text-{{ $group['color'] }}"></i></span>
+                            <span class="text-left flex-grow-1" style="min-width:0;">
+                                <strong class="d-block mb-1" style="font-size:.78rem;line-height:1.3;">{{ $tool['label'] }}</strong>
+                                <small class="text-muted d-block" style="line-height:1.3;">{{ $tool['desc'] }}</small>
+                            </span>
+                            <i class="las la-angle-right text-muted ml-2"></i>
                         </div>
                     </div>
                 </a>
                 @else
                 {{-- Modal trigger --}}
-                <div class="card h-100 shadow-sm border-0 tool-card text-center"
-                     style="cursor:pointer; transition:all 0.2s;"
+                <div class="card h-100 tool-card seo-tool-tile"
+                     style="cursor:pointer;"
                      title="{{ $tool['desc'] }}"
                      onclick="openToolModal('{{ $featureKey }}', '{{ addslashes($tool['label']) }}', '{{ addslashes($tool['desc']) }}')">
-                    <div class="card-body d-flex flex-column justify-content-center py-3 px-2">
-                        <i class="las {{ $tool['icon'] }} la-2x text-{{ $group['color'] }} mb-2"></i>
-                        <h6 class="font-weight-600 mb-1" style="font-size:0.78rem; line-height:1.3;">{{ $tool['label'] }}</h6>
-                        <p class="text-muted mb-0" style="font-size:0.68rem; line-height:1.3;">{{ $tool['desc'] }}</p>
+                    <div class="card-body d-flex align-items-center py-3 px-3">
+                        <span class="seo-tool-icon mr-3"><i class="las {{ $tool['icon'] }} text-{{ $group['color'] }}"></i></span>
+                        <span class="text-left flex-grow-1" style="min-width:0;">
+                            <strong class="d-block mb-1" style="font-size:.78rem;line-height:1.3;">{{ $tool['label'] }}</strong>
+                            <small class="text-muted d-block" style="line-height:1.3;">{{ $tool['desc'] }}</small>
+                        </span>
+                        <i class="las la-angle-right text-muted ml-2"></i>
                     </div>
                 </div>
                 @endif
@@ -621,13 +630,6 @@
 @section('script')
 <script>
 $(function() {
-    // Tool card hover effects
-    $(document).on('mouseenter', '.tool-card', function() {
-        $(this).addClass('shadow').css({'transform':'translateY(-3px)', 'border-color':'rgba(0,0,0,.15)'});
-    }).on('mouseleave', '.tool-card', function() {
-        $(this).removeClass('shadow').css({'transform':'translateY(0)', 'border-color':''});
-    });
-
     function filterOptimizationTools() {
         var activeGroup = $('.tool-filter-btn.active').data('tool-filter') || 'all';
         var query = ($('#optimizationToolSearch').val() || '').toLowerCase();

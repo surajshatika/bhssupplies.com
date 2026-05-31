@@ -77,7 +77,7 @@
             </div>
             <div>
                 <h2>{{ translate('AI SEO Suite') }}</h2>
-                <p>{{ $project->name }} — {{ $project->base_url }}</p>
+                <p>{{ $project->name }} - {{ $project->base_url }}</p>
                 <div class="mt-2 d-flex flex-wrap" style="gap:.4rem;">
                     <span class="mm-chip"><i class="las la-robot"></i> {{ count($providers) }} AI {{ translate('providers') }}</span>
                     <span class="mm-chip"><i class="las la-puzzle-piece"></i> {{ $totalFeatures }} {{ translate('features') }}</span>
@@ -101,6 +101,15 @@
 
 @include('backend.seo.partials.suite_nav')
 
+<nav class="seo-dashboard-jumpbar" aria-label="{{ translate('Suite sections') }}">
+    <a href="#seo-overview"><i class="las la-tachometer-alt"></i>{{ translate('Overview') }}</a>
+    <a href="#seo-keywords"><i class="las la-chart-line"></i>{{ translate('Keywords') }}</a>
+    <a href="#seo-autopilot"><i class="las la-bolt"></i>{{ translate('Autopilot') }}</a>
+    <a href="#seo-targets"><i class="las la-crosshairs"></i>{{ translate('Next Targets') }}</a>
+    <a href="#seo-inventory"><i class="las la-list-alt"></i>{{ translate('URL Inventory') }}</a>
+    <a href="#seo-tools"><i class="las la-tools"></i>{{ translate('Tools') }}</a>
+</nav>
+
 @if(!empty($setupRequired))
 <div class="alert alert-warning d-flex align-items-center">
     <i class="las la-exclamation-triangle mr-2 la-lg"></i>
@@ -109,7 +118,7 @@
 @endif
 
 {{-- ROW 1: Setup Wizard + SEO Site Score --}}
-<div class="row gutters-16 mb-4">
+<div id="seo-overview" class="row gutters-16 mb-4 seo-section-anchor">
     {{-- Setup Card --}}
     <div class="col-lg-6">
         <div class="card h-100">
@@ -161,7 +170,7 @@
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h6 class="mb-0 font-weight-600">{{ translate('SEO Site Score') }}</h6>
-                <a href="{{ route('admin.seo-suite.revisions') }}" class="btn btn-xs btn-soft-primary">{{ translate('Full Report') }} →</a>
+                <a href="{{ route('admin.seo-suite.revisions') }}" class="btn btn-xs btn-soft-primary">{{ translate('Full Report') }} <i class="las la-arrow-right ml-1"></i></a>
             </div>
             <div class="card-body">
                 <div class="row align-items-center">
@@ -207,7 +216,7 @@
                             </div>
                         </div>
                         <a href="{{ route('admin.seo_optimization.index') }}" class="btn btn-soft-primary btn-sm btn-block">
-                            {{ translate('Complete Site Audit') }} →
+                            {{ translate('Complete Site Audit') }} <i class="las la-arrow-right ml-1"></i>
                         </a>
                     </div>
                 </div>
@@ -367,7 +376,7 @@
 </div>
 
 {{-- KEYWORD INTELLIGENCE --}}
-<div class="card mb-4">
+<div id="seo-keywords" class="card mb-4 seo-section-anchor">
     <div class="card-header d-flex flex-wrap align-items-center justify-content-between">
         <div>
             <h5 class="mb-0 h6">{{ translate('Target Keyword Intelligence') }}</h5>
@@ -461,7 +470,7 @@
 </div>
 
 {{-- SEO AUTOPILOT CENTER --}}
-<div class="card mb-4">
+<div id="seo-autopilot" class="card mb-4 seo-section-anchor">
     <div class="card-header d-flex flex-wrap align-items-center justify-content-between">
         <div>
             <h5 class="mb-0 h6">{{ translate('SEO Autopilot Center') }}</h5>
@@ -837,7 +846,7 @@
 </div>
 
 {{-- AUTOPILOT NEXT TARGETS --}}
-<div class="card mb-4">
+<div id="seo-targets" class="card mb-4 seo-section-anchor">
     <div class="card-header d-flex align-items-center justify-content-between">
         <div>
             <h5 class="mb-0 h6">{{ translate('Autopilot Next Targets Preview') }}</h5>
@@ -950,7 +959,7 @@
 </div>
 
 {{-- SEO URL INVENTORY --}}
-<div class="card mb-4">
+<div id="seo-inventory" class="card mb-4 seo-section-anchor">
     <div class="card-header d-flex flex-wrap align-items-center justify-content-between">
         <div>
             <h5 class="mb-0 h6">{{ translate('SEO URL Inventory') }}</h5>
@@ -1223,7 +1232,7 @@
 </div>
 
 {{-- ROW 3: Run Tools + Settings --}}
-<div class="card mb-4">
+<div id="seo-tools" class="card mb-4 seo-section-anchor">
     <div class="card-header">
         <ul class="nav nav-tabs card-header-tabs" role="tablist">
             <li class="nav-item">

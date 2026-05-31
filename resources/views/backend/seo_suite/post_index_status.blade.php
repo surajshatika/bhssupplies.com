@@ -15,6 +15,8 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 <div class="row">
     <div class="col-lg-4">
         <div class="card">
@@ -99,12 +101,18 @@
                         </ul>
                     </div>
                 </div>
-                <a href="{{ route('admin.seo-suite.sitemap') }}" class="btn btn-sm btn-soft-primary mr-2">
-                    {{ translate('Regenerate Sitemap') }}
-                </a>
-                <a href="{{ route('admin.seo-suite.indexnow') }}" class="btn btn-sm btn-soft-success">
-                    {{ translate('Submit via IndexNow') }}
-                </a>
+                <form action="{{ route('admin.seo-suite.sitemap') }}" method="POST" class="d-inline">
+                    @csrf
+                    <button class="btn btn-sm btn-soft-primary mr-2">
+                        {{ translate('Regenerate Sitemap') }}
+                    </button>
+                </form>
+                <form action="{{ route('admin.seo-suite.indexnow') }}" method="POST" class="d-inline">
+                    @csrf
+                    <button class="btn btn-sm btn-soft-success">
+                        {{ translate('Submit Homepage via IndexNow') }}
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -114,6 +122,23 @@
 @section('script')
 <script>
 $(function() {
+    function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function(char) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
+        });
+    }
+
+    function safeUrl(value) {
+        var raw = String(value == null ? '' : value).trim();
+        if (!raw) return '';
+        try {
+            var url = new URL(raw, window.location.href);
+            return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
     $('#idx-check-btn').on('click', function() {
         $('#idx-loading').removeClass('d-none');
         $('#idx-results-card, #idx-ai-card').addClass('d-none');
@@ -132,15 +157,20 @@ $(function() {
 
                 var tbody = $('#idx-results-tbody').empty();
                 (res.results || []).forEach(function(r) {
+                    var rawUrl = String(r.url == null ? '' : r.url);
+                    var href = safeUrl(rawUrl);
+                    var urlCell = href
+                        ? '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener" class="small">' + escapeHtml(rawUrl) + '</a>'
+                        : '<span class="small">' + escapeHtml(rawUrl) + '</span>';
                     var badge = r.indexed
                         ? '<span class="badge badge-success"><i class="las la-check mr-1"></i>Indexed</span>'
                         : '<span class="badge badge-danger"><i class="las la-times mr-1"></i>Not Indexed</span>';
                     tbody.append(
                         '<tr>' +
-                        '<td class="text-truncate" style="max-width:260px;"><a href="' + r.url + '" target="_blank" class="small">' + r.url + '</a></td>' +
+                        '<td class="text-truncate" style="max-width:260px;">' + urlCell + '</td>' +
                         '<td>' + badge + '</td>' +
-                        '<td><small class="text-muted">' + r.method + '</small></td>' +
-                        '<td>' + (!r.indexed ? '<a href="https://search.google.com/search-console/inspect?resource_id=' + encodeURIComponent(r.url) + '" target="_blank" class="btn btn-xs btn-soft-warning">Inspect</a>' : '') + '</td>' +
+                        '<td><small class="text-muted">' + escapeHtml(r.method) + '</small></td>' +
+                        '<td>' + (!r.indexed ? '<a href="https://search.google.com/search-console/inspect?resource_id=' + encodeURIComponent(rawUrl) + '" target="_blank" rel="noopener" class="btn btn-xs btn-soft-warning">Inspect</a>' : '') + '</td>' +
                         '</tr>'
                     );
                 });

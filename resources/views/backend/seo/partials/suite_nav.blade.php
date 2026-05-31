@@ -1,3 +1,4 @@
+@include('backend.seo.partials.module_styles')
 @php
     $settings = $settings ?? [];
     $seoSuiteNavItems = [
@@ -43,21 +44,28 @@
 @endphp
 
 <style>
-.seo-suite-strip { border: 1px solid #edf0f5; border-radius: 8px; background: #fff; }
-.seo-suite-strip .nav-scroll { overflow-x: auto; white-space: nowrap; }
-.seo-suite-strip .seo-nav-link { display: inline-flex; align-items: center; padding: 9px 11px; border-radius: 6px; color: #4a5568; font-size: .82rem; font-weight: 600; }
-.seo-suite-strip .seo-nav-link:hover { background: #f7f9fc; color: #1f2937; text-decoration: none; }
-.seo-suite-strip .seo-nav-link.active { background: #eaf1ff; color: #2f5fb8; }
-.seo-suite-strip .seo-nav-link i { font-size: 1rem; margin-right: 5px; }
-.seo-suite-strip .seo-chip { display: inline-flex; align-items: center; padding: 5px 8px; border-radius: 999px; background: #f7f9fc; color: #6b7280; font-size: .74rem; font-weight: 600; }
-.seo-suite-strip .seo-chip.good { background: rgba(28,200,138,.12); color: #168a61; }
-.seo-suite-strip .seo-chip.warn { background: rgba(246,194,62,.16); color: #946400; }
-.seo-suite-strip .seo-chip.bad { background: rgba(231,74,59,.12); color: #b23125; }
+.seo-suite-strip { border: 1px solid #e6eaf0; border-radius: 8px; background: #fff; box-shadow: 0 2px 8px rgba(23,33,43,.035); overflow: hidden; }
+.seo-suite-strip .seo-nav-row { padding: .42rem .5rem .28rem; border-bottom: 1px solid #edf0f4; }
+.seo-suite-strip .nav-scroll { overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: thin; }
+.seo-suite-strip .seo-nav-link { display: inline-flex; align-items: center; padding: 8px 10px; border-radius: 6px; color: #52606d; font-size: .79rem; font-weight: 700; }
+.seo-suite-strip .seo-nav-link:hover { background: #f4f8f9; color: #164f5b; text-decoration: none; }
+.seo-suite-strip .seo-nav-link.active { background: #e9f6f8; color: #146c7e; }
+.seo-suite-strip .seo-nav-link i { font-size: .95rem; margin-right: 5px; }
+.seo-suite-strip .seo-health-row { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; padding: .48rem .62rem; background: #fbfcfd; }
+.seo-suite-strip .seo-health-label { margin-right: .12rem; color: #667085; font-size: .68rem; font-weight: 800; text-transform: uppercase; }
+.seo-suite-strip .seo-chip { display: inline-flex; align-items: center; padding: 4px 7px; border-radius: 999px; background: #f1f4f7; color: #667085; font-size: .7rem; font-weight: 700; white-space: nowrap; }
+.seo-suite-strip .seo-chip.good { background: rgba(21,128,93,.11); color: #127052; }
+.seo-suite-strip .seo-chip.warn { background: rgba(166,106,0,.12); color: #8a5900; }
+.seo-suite-strip .seo-chip.bad { background: rgba(195,63,74,.11); color: #a3313b; }
+@media (max-width: 767.98px) {
+    .seo-suite-strip .seo-health-label { display: block; width: 100%; }
+    .seo-suite-strip .seo-nav-link { padding: 7px 8px; font-size: .75rem; }
+}
 </style>
 
 <div class="seo-suite-strip mb-4">
-    <div class="d-flex flex-wrap align-items-center justify-content-between p-2">
-        <div class="nav-scroll flex-grow-1 mr-md-3">
+    <div class="seo-nav-row">
+        <div class="nav-scroll">
             @foreach($seoSuiteNavItems as $item)
                 @if(Route::has($item['route']))
                     <a href="{{ route($item['route']) }}"
@@ -67,21 +75,22 @@
                 @endif
             @endforeach
         </div>
-        <div class="d-flex flex-wrap mt-2 mt-md-0" style="gap:.35rem;">
-            <span class="seo-chip {{ $seoAutopilotEnabled ? 'good' : 'warn' }}">
-                <i class="las la-bolt mr-1"></i>{{ $seoAutopilotEnabled ? translate('Autopilot ON') : translate('Autopilot OFF') }}
+    </div>
+    <div class="seo-health-row">
+        <span class="seo-health-label">{{ translate('Live SEO Health') }}</span>
+        <span class="seo-chip {{ $seoAutopilotEnabled ? 'good' : 'warn' }}">
+            <i class="las la-bolt mr-1"></i>{{ $seoAutopilotEnabled ? translate('Autopilot ON') : translate('Autopilot OFF') }}
+        </span>
+        @if(!is_null($seoAutopilotPending))
+            <span class="seo-chip {{ $seoAutopilotPending > 0 ? 'warn' : 'good' }}">
+                <i class="las la-list-ol mr-1"></i>{{ $seoAutopilotPending }} {{ translate('pending') }}
             </span>
-            @if(!is_null($seoAutopilotPending))
-                <span class="seo-chip {{ $seoAutopilotPending > 0 ? 'warn' : 'good' }}">
-                    <i class="las la-list-ol mr-1"></i>{{ $seoAutopilotPending }} {{ translate('pending') }}
-                </span>
-            @endif
-            <span class="seo-chip {{ $configuredProviders > 0 ? 'good' : 'bad' }}"><i class="las la-key mr-1"></i>{{ $configuredProviders }}/4 {{ translate('AI keys') }}</span>
-            <span class="seo-chip {{ file_exists(base_path('sitemap.xml')) ? 'good' : 'bad' }}"><i class="las la-sitemap mr-1"></i>{{ file_exists(base_path('sitemap.xml')) ? translate('Sitemap ready') : translate('Sitemap missing') }}</span>
-            <span class="seo-chip {{ file_exists(public_path('robots.txt')) ? 'good' : 'bad' }}"><i class="las la-robot mr-1"></i>{{ file_exists(public_path('robots.txt')) ? translate('Robots ready') : translate('Robots missing') }}</span>
-            @if($seoActiveBatch)
-                <span class="seo-chip warn"><i class="las la-spinner mr-1"></i>#{{ $seoActiveBatch->id }} {{ $seoActiveBatch->status }} {{ $seoActiveBatch->progressPercent() }}%</span>
-            @endif
-        </div>
+        @endif
+        <span class="seo-chip {{ $configuredProviders > 0 ? 'good' : 'bad' }}"><i class="las la-key mr-1"></i>{{ $configuredProviders }}/4 {{ translate('AI keys') }}</span>
+        <span class="seo-chip {{ file_exists(base_path('sitemap.xml')) ? 'good' : 'bad' }}"><i class="las la-sitemap mr-1"></i>{{ file_exists(base_path('sitemap.xml')) ? translate('Sitemap ready') : translate('Sitemap missing') }}</span>
+        <span class="seo-chip {{ file_exists(public_path('robots.txt')) ? 'good' : 'bad' }}"><i class="las la-robot mr-1"></i>{{ file_exists(public_path('robots.txt')) ? translate('Robots ready') : translate('Robots missing') }}</span>
+        @if($seoActiveBatch)
+            <span class="seo-chip warn"><i class="las la-spinner mr-1"></i>#{{ $seoActiveBatch->id }} {{ $seoActiveBatch->status }} {{ $seoActiveBatch->progressPercent() }}%</span>
+        @endif
     </div>
 </div>

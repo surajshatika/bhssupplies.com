@@ -329,10 +329,17 @@ class SeoSuiteController extends Controller
     public function aiChat(Request $request)
     {
         $request->validate(['message' => 'required|string|max:2000']);
+        $history = $request->input('history', []);
+        if (is_string($history)) {
+            $history = json_decode($history, true);
+        }
+        if (!is_array($history)) {
+            $history = [];
+        }
 
         $result = app(AiAssistantService::class)->chat([
             'message'  => $request->input('message'),
-            'history'  => $request->input('history', []),
+            'history'  => $history,
             'provider' => $request->input('provider', get_setting('seo_suite_default_provider', 'openai')),
             'context'  => $request->input('context', 'general'),
         ]);
@@ -587,7 +594,7 @@ class SeoSuiteController extends Controller
         if (!file_exists($path)) {
             app(OptimizationService::class)->generateSitemap(['persist' => true]);
         }
-        return response(file_get_contents($path), 200)->header('Content-Type', 'application/xml');
+        return $this->publicGeneratedFileResponse($path, 'application/xml');
     }
 
     public function publicRobots()
@@ -596,7 +603,7 @@ class SeoSuiteController extends Controller
         if (!file_exists($path)) {
             app(OptimizationService::class)->optimizeRobotsTxt(['persist' => true]);
         }
-        return response(file_get_contents($path), 200)->header('Content-Type', 'text/plain');
+        return $this->publicGeneratedFileResponse($path, 'text/plain');
     }
 
     public function publicVideoSitemap()
@@ -605,7 +612,7 @@ class SeoSuiteController extends Controller
         if (!file_exists($path)) {
             app(VideoSitemapService::class)->handle(['persist' => true, 'base_url' => url('/')]);
         }
-        return response(file_get_contents($path), 200)->header('Content-Type', 'application/xml');
+        return $this->publicGeneratedFileResponse($path, 'application/xml');
     }
 
     public function publicNewsSitemap()
@@ -614,7 +621,7 @@ class SeoSuiteController extends Controller
         if (!file_exists($path)) {
             app(GoogleNewsSitemapService::class)->handle(['persist' => true, 'base_url' => url('/')]);
         }
-        return response(file_get_contents($path), 200)->header('Content-Type', 'application/xml');
+        return $this->publicGeneratedFileResponse($path, 'application/xml');
     }
 
     public function publicRss()
@@ -623,7 +630,7 @@ class SeoSuiteController extends Controller
         if (!file_exists($path)) {
             app(RssContentService::class)->handle(['persist' => true]);
         }
-        return response(file_get_contents($path), 200)->header('Content-Type', 'application/rss+xml');
+        return $this->publicGeneratedFileResponse($path, 'application/rss+xml');
     }
 
     public function publicLlmsTxt()
@@ -635,7 +642,25 @@ class SeoSuiteController extends Controller
         if (!file_exists($path)) {
             return response('# ' . get_setting('website_name', config('app.name')), 200)->header('Content-Type', 'text/plain');
         }
-        return response(file_get_contents($path), 200)->header('Content-Type', 'text/plain');
+        return $this->publicGeneratedFileResponse($path, 'text/plain');
+    }
+
+    protected function publicGeneratedFileResponse(string $path, string $contentType)
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            logger()->warning('SEO public artifact is unavailable', ['path' => $path]);
+            return response('SEO artifact is temporarily unavailable.', 503)
+                ->header('Content-Type', 'text/plain');
+        }
+
+        $contents = file_get_contents($path);
+        if ($contents === false) {
+            logger()->warning('SEO public artifact could not be read', ['path' => $path]);
+            return response('SEO artifact is temporarily unavailable.', 503)
+                ->header('Content-Type', 'text/plain');
+        }
+
+        return response($contents, 200)->header('Content-Type', $contentType);
     }
 
     // ── Settings ────────────────────────────────────────────────────────────────
@@ -669,8 +694,8 @@ class SeoSuiteController extends Controller
             'seo_local_business_name'       => $request->local_business_name,
             'seo_local_business_type'       => $request->local_business_type,
             'seo_search_console_site'       => $request->search_console_site,
-            'seo_optimization_minify'       => $request->enable_minify,
-            'seo_optimization_lazyload'     => $request->enable_lazyload,
+            'seo_optimization_minify'       => $request->boolean('enable_minify') ? 1 : 0,
+            'seo_optimization_lazyload'     => $request->boolean('enable_lazyload') ? 1 : 0,
             'seo_google_verification'       => $request->google_verification,
             'seo_bing_verification'         => $request->bing_verification,
             'seo_yandex_verification'       => $request->yandex_verification,

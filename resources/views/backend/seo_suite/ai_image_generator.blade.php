@@ -15,6 +15,8 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 <div class="row">
     <div class="col-lg-4">
         <div class="card">
@@ -38,16 +40,16 @@
                     <div class="col-7 form-group">
                         <label>{{ translate('Layout / Size') }}</label>
                         <select id="img-size" class="form-control">
-                            <option value="1024x1024">1024×1024 (Square)</option>
-                            <option value="1792x1024">1792×1024 (Landscape)</option>
-                            <option value="1024x1792">1024×1792 (Portrait)</option>
+                            <option value="1024x1024">1024x1024 (Square)</option>
+                            <option value="1792x1024">1792x1024 (Landscape)</option>
+                            <option value="1024x1792">1024x1792 (Portrait)</option>
                         </select>
                     </div>
                     <div class="col-5 form-group">
                         <label>{{ translate('Quality') }}</label>
                         <select id="img-quality" class="form-control">
                             <option value="standard">{{ translate('Standard') }}</option>
-                            <option value="hd">{{ translate('HD (2× cost)') }}</option>
+                            <option value="hd">{{ translate('HD (2x cost)') }}</option>
                         </select>
                     </div>
                 </div>
@@ -153,6 +155,30 @@
 @section('script')
 <script>
 $(function() {
+    function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function(char) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
+        });
+    }
+
+    function safeUrl(value) {
+        var raw = String(value == null ? '' : value).trim();
+        if (!raw) return '';
+        try {
+            var url = new URL(raw, window.location.href);
+            return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function setOgStatus($status, className, text, iconClass) {
+        var $span = $('<span>').addClass(className);
+        if (iconClass) $span.append($('<i>').addClass(iconClass), document.createTextNode(' '));
+        $span.append(document.createTextNode(String(text == null ? '' : text)));
+        $status.empty().append($span);
+    }
+
     $('#img-generate-btn').on('click', function() {
         var keyword = $('#img-keyword').val().trim();
         if (!keyword) { alert('Please enter a keyword.'); return; }
@@ -179,19 +205,20 @@ $(function() {
                 $('#img-generate-btn').prop('disabled', false);
 
                 if (res.error) {
-                    $('#img-results').html('<div class="alert alert-danger"><i class="las la-exclamation-circle mr-1"></i>' + res.error + '</div><div class="text-muted small mt-2">Prompt used: ' + (res.prompt || '') + '</div>');
+                    $('#img-results').html('<div class="alert alert-danger"><i class="las la-exclamation-circle mr-1"></i>' + escapeHtml(res.error) + '</div><div class="text-muted small mt-2">Prompt used: ' + escapeHtml(res.prompt) + '</div>');
                     return;
                 }
 
                 var html = '';
                 if (res.images && res.images.length > 0) {
                     res.images.forEach(function(img) {
-                        var displayUrl = img.local_url || img.url;
+                        var displayUrl = safeUrl(img.local_url || img.url);
+                        var providerUrl = safeUrl(img.url);
                         html += '<div class="mb-3 border rounded p-2">';
-                        html += '<img src="' + displayUrl + '" class="img-fluid rounded shadow-sm mb-2" style="max-height:480px; width:auto;" alt="' + img.alt_text + '">';
+                        html += '<img src="' + escapeHtml(displayUrl) + '" class="img-fluid rounded shadow-sm mb-2" style="max-height:480px; width:auto;" alt="' + escapeHtml(img.alt_text) + '">';
                         html += '<div class="d-flex flex-wrap mt-1" style="gap:.4rem;">';
-                        html += '<a href="' + displayUrl + '" target="_blank" class="btn btn-sm btn-soft-primary"><i class="las la-external-link-alt mr-1"></i>Open</a>';
-                        html += '<a href="' + displayUrl + '" download="' + img.filename + '" class="btn btn-sm btn-soft-success"><i class="las la-download mr-1"></i>Download</a>';
+                        html += '<a href="' + escapeHtml(displayUrl) + '" target="_blank" rel="noopener" class="btn btn-sm btn-soft-primary"><i class="las la-external-link-alt mr-1"></i>Open</a>';
+                        html += '<a href="' + escapeHtml(displayUrl) + '" download="' + escapeHtml(img.filename) + '" class="btn btn-sm btn-soft-success"><i class="las la-download mr-1"></i>Download</a>';
                         if (img.local_url) {
                             html += '<span class="btn btn-sm btn-soft-info disabled"><i class="las la-check mr-1"></i>In media library</span>';
                         }
@@ -203,7 +230,7 @@ $(function() {
                         html += '<div class="d-flex flex-wrap align-items-center" style="gap:.35rem;">';
                         html += '<select class="form-control form-control-sm og-type" style="width:auto;"><option value="product">Product</option><option value="category">Category</option><option value="page">Page</option><option value="blog">Blog</option></select>';
                         html += '<input type="number" class="form-control form-control-sm og-id" placeholder="ID" style="width:90px;">';
-                        html += '<button class="btn btn-sm btn-primary og-apply" data-upload="' + (img.upload_id || '') + '" data-url="' + img.url + '">{{ translate('Apply') }}</button>';
+                        html += '<button class="btn btn-sm btn-primary og-apply" data-upload="' + escapeHtml(img.upload_id) + '" data-url="' + escapeHtml(providerUrl) + '">{{ translate('Apply') }}</button>';
                         html += '<span class="og-status small ml-1"></span>';
                         html += '</div></div>';
                         html += '</div>';
@@ -222,7 +249,7 @@ $(function() {
             error: function(xhr) {
                 $('#img-loading-indicator').addClass('d-none');
                 $('#img-generate-btn').prop('disabled', false);
-                $('#img-results').html('<div class="alert alert-danger">Error: ' + (xhr.responseJSON?.message || 'Request failed') + '</div>');
+                $('#img-results').html('<div class="alert alert-danger">Error: ' + escapeHtml(xhr.responseJSON?.message || 'Request failed') + '</div>');
             }
         });
     });
@@ -234,10 +261,10 @@ $(function() {
         var type = $wrap.find('.og-type').val();
         var id   = $wrap.find('.og-id').val();
         var $status = $wrap.find('.og-status');
-        if (!id) { $status.html('<span class="text-danger">{{ translate('Enter an ID') }}</span>'); return; }
+        if (!id) { setOgStatus($status, 'text-danger', '{{ translate('Enter an ID') }}'); return; }
 
         $btn.prop('disabled', true);
-        $status.html('<span class="text-muted">…</span>');
+        setOgStatus($status, 'text-muted', '…');
 
         $.ajax({
             url: '{{ route('admin.seo-suite.ai_images.apply_og') }}',
@@ -252,14 +279,14 @@ $(function() {
             success: function(res) {
                 $btn.prop('disabled', false);
                 if (res.success) {
-                    $status.html('<span class="text-success"><i class="las la-check"></i> {{ translate('Applied') }}</span>');
+                    setOgStatus($status, 'text-success', '{{ translate('Applied') }}', 'las la-check');
                 } else {
-                    $status.html('<span class="text-danger">' + (res.error || 'Failed') + '</span>');
+                    setOgStatus($status, 'text-danger', res.error || 'Failed');
                 }
             },
             error: function(xhr) {
                 $btn.prop('disabled', false);
-                $status.html('<span class="text-danger">' + (xhr.responseJSON?.error || xhr.responseJSON?.message || 'Failed') + '</span>');
+                setOgStatus($status, 'text-danger', xhr.responseJSON?.error || xhr.responseJSON?.message || 'Failed');
             }
         });
     });

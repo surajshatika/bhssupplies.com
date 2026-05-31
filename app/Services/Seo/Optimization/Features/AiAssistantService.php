@@ -27,6 +27,13 @@ class AiAssistantService extends AbstractSeoService
         $provider     = $payload['provider'] ?? get_setting('seo_suite_default_provider', 'openai');
         $context      = $payload['context'] ?? 'general'; // general, on_page, off_page, technical
 
+        if (is_string($history)) {
+            $history = json_decode($history, true);
+        }
+        if (!is_array($history)) {
+            $history = [];
+        }
+
         if (empty($message)) {
             return ['error' => 'Message is required.'];
         }

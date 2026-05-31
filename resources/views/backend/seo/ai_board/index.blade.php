@@ -19,8 +19,8 @@
 .score-ring.warning { background: #f6c23e; }
 .score-ring.danger  { background: #e74a3b; }
 .score-ring.secondary { background: #b0b4bc; }
-.tab-pill { padding: .4rem .85rem; border-radius: 20px; background: #f3f4f6; color: #374151; font-weight: 500; font-size: .85rem; margin-right: .35rem; display: inline-block; }
-.tab-pill.active { background: #4e73df; color: #fff; }
+.tab-pill { padding: .4rem .7rem; border-radius: 6px; background: #f3f4f6; color: #374151; font-weight: 600; font-size: .8rem; margin-right: .25rem; display: inline-block; }
+.tab-pill.active { background: #146c7e; color: #fff; }
 .badge-soft-success { background: rgba(28,200,138,.15); color: #1cc88a; }
 .badge-soft-danger  { background: rgba(231,74,59,.15); color: #e74a3b; }
 .fix-drawer { position: fixed; top: 0; right: -560px; bottom: 0; width: 560px; max-width: 100%; background: #fff; box-shadow: -8px 0 24px rgba(0,0,0,.12); z-index: 1080; transition: right .25s ease; overflow-y: auto; }
@@ -49,10 +49,10 @@
     <div class="row align-items-center">
         <div class="col-md-7">
             <h1 class="h3 mb-0">{{ translate('AI SEO Board') }}</h1>
-            <p class="text-muted mb-0 small">{{ translate('Scan every product, category, page and blog post — see what is missing and let AI fill the gaps.') }}</p>
+            <p class="text-muted mb-0 small">{{ translate('Scan every product, category, page and blog post - see what is missing and let AI fill the gaps.') }}</p>
         </div>
-        <div class="col-md-5 text-md-right mt-3 mt-md-0">
-            <div class="d-inline-flex align-items-center" style="gap:.35rem;">
+        <div class="col-md-5">
+            <div class="seo-board-actions">
                 <select id="bulkLimit" class="form-control form-control-sm" style="width:auto;" title="{{ translate('How many matching URLs to fix in this run') }}">
                     <option value="100">100 {{ translate('per run') }}</option>
                     <option value="250">250 {{ translate('per run') }}</option>
@@ -62,13 +62,13 @@
                 <button type="button" class="btn btn-success btn-sm js-bulk-trigger" data-mode="filtered">
                     <i class="las la-magic"></i> {{ translate('AI Fix All Filtered') }}
                 </button>
+                <a href="{{ route('admin.seo.ai_board.index', ['type' => $type]) }}" class="btn btn-soft-secondary btn-sm">
+                    <i class="las la-sync"></i> {{ translate('Refresh') }}
+                </a>
+                <a href="{{ route('admin.seo-suite.settings.view') }}" class="btn btn-soft-primary btn-sm">
+                    <i class="las la-cog"></i> {{ translate('Settings') }}
+                </a>
             </div>
-            <a href="{{ route('admin.seo.ai_board.index', ['type' => $type]) }}" class="btn btn-soft-secondary btn-sm ml-1">
-                <i class="las la-sync"></i> {{ translate('Refresh') }}
-            </a>
-            <a href="{{ route('admin.seo-suite.settings.view') }}" class="btn btn-soft-primary btn-sm ml-1">
-                <i class="las la-cog"></i> {{ translate('Settings') }}
-            </a>
         </div>
     </div>
 </div>
@@ -103,7 +103,7 @@
     <div class="col-6 col-md-3 col-xl mb-2">
         <div class="ai-board-stat">
             <div class="stat-num text-warning">{{ number_format($summary['warning']) }}</div>
-            <div class="stat-label">{{ translate('Warning (50–79)') }}</div>
+            <div class="stat-label">{{ translate('Warning (50-79)') }}</div>
         </div>
     </div>
     <div class="col-6 col-md-3 col-xl mb-2">
@@ -132,7 +132,7 @@
         <div class="row gutters-8 align-items-end">
             <div class="col-md-3">
                 <label class="small mb-1">{{ translate('Search') }}</label>
-                <input type="text" name="search" value="{{ $filters['search'] }}" class="form-control form-control-sm" placeholder="{{ translate('Name or title…') }}">
+                <input type="text" name="search" value="{{ $filters['search'] }}" class="form-control form-control-sm" placeholder="{{ translate('Name or title...') }}">
             </div>
             <div class="col-md-2">
                 <label class="small mb-1">{{ translate('Missing') }}</label>
@@ -467,6 +467,17 @@
         });
     }
 
+    function safeHttpUrl(value) {
+        const raw = String(value == null ? '' : value).trim();
+        if (!raw) return '';
+        try {
+            const url = new URL(raw, window.location.href);
+            return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
     function readJsonResponse(response) {
         return response.text().then(function (text) {
             let payload = null;
@@ -524,11 +535,14 @@
         renderPreviews(data.row || {});
 
         const apEl = document.getElementById('fixDrawerApplied');
-        apEl.innerHTML = '';
+        apEl.replaceChildren();
 
         const applied = data.applied || {};
         if (Object.keys(applied).length === 0) {
-            apEl.innerHTML = '<p class="text-muted">{{ translate("Nothing to fix — this entity already has complete SEO data.") }}</p>';
+            const empty = document.createElement('p');
+            empty.className = 'text-muted';
+            empty.textContent = '{{ translate("Nothing to fix — this entity already has complete SEO data.") }}';
+            apEl.appendChild(empty);
             return;
         }
 
@@ -537,7 +551,13 @@
         for (const [field, value] of Object.entries(applied)) {
             const row = document.createElement('div');
             row.className = 'mb-2';
-            row.innerHTML = '<div class="field-label">' + field + '</div><div class="field-value">' + (value || '').toString() + '</div>';
+            const label = document.createElement('div');
+            label.className = 'field-label';
+            label.textContent = field;
+            const fieldValue = document.createElement('div');
+            fieldValue.className = 'field-value';
+            fieldValue.textContent = value == null ? '' : String(value);
+            row.append(label, fieldValue);
             panel.appendChild(row);
         }
         apEl.appendChild(panel);
@@ -563,7 +583,8 @@
 
         // Social card
         const img = document.getElementById('pvSocialImg');
-        if (row.og_image) { img.style.backgroundImage = 'url("' + row.og_image + '")'; img.textContent = ''; }
+        const ogImageUrl = safeHttpUrl(row.og_image);
+        if (ogImageUrl) { img.style.backgroundImage = 'url(' + JSON.stringify(ogImageUrl) + ')'; img.textContent = ''; }
         else { img.style.backgroundImage = 'none'; img.textContent = '{{ translate('No OG image set') }}'; }
         document.getElementById('pvSocialHost').textContent = host;
         const st2 = document.getElementById('pvSocialTitle');
@@ -618,7 +639,8 @@
 
     function refreshRow(row) {
         if (!row || !row.id || !row.type) return;
-        const tr = document.querySelector('tr[data-row-id="' + row.type + '-' + row.id + '"]');
+        const rowId = String(row.type) + '-' + String(row.id);
+        const tr = Array.from(document.querySelectorAll('tr[data-row-id]')).find(el => el.dataset.rowId === rowId);
         if (!tr) return;
         const ring = tr.querySelector('.score-ring');
         if (ring) {
@@ -634,9 +656,15 @@
                 { ok: row.has_schema,   label: 'S',  title: 'Schema' },
                 { ok: row.has_focus_kw, label: 'K',  title: 'Focus keyword' },
             ];
-            signals.innerHTML = flags.map(f =>
-                '<span class="badge ' + (f.ok ? 'badge-soft-success' : 'badge-soft-danger') + '" title="' + f.title + '">' + f.label + '</span>'
-            ).join(' ');
+            signals.replaceChildren();
+            flags.forEach(function(flag, index) {
+                if (index > 0) signals.appendChild(document.createTextNode(' '));
+                const badge = document.createElement('span');
+                badge.className = 'badge ' + (flag.ok ? 'badge-soft-success' : 'badge-soft-danger');
+                badge.title = flag.title;
+                badge.textContent = flag.label;
+                signals.appendChild(badge);
+            });
         }
     }
 
@@ -736,11 +764,11 @@
 
     const currentFilters = {
         type:      '{{ $type }}',
-        search:    {!! json_encode($filters['search']) !!},
-        missing:   {!! json_encode($filters['missing']) !!},
-        min_score: {!! json_encode($filters['min_score']) !!},
-        max_score: {!! json_encode($filters['max_score']) !!},
-        sort:      {!! json_encode($filters['sort']) !!},
+        search:    {!! json_encode($filters['search'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!},
+        missing:   {!! json_encode($filters['missing'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!},
+        min_score: {!! json_encode($filters['min_score'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!},
+        max_score: {!! json_encode($filters['max_score'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!},
+        sort:      {!! json_encode($filters['sort'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!},
     };
 
     function selectedTargets() {
@@ -819,8 +847,12 @@
         })
         .catch(err => {
             document.getElementById('bulkCostLoading').classList.add('d-none');
-            document.getElementById('bulkCostBody').classList.remove('d-none');
-            document.getElementById('bulkCostBody').innerHTML = '<div class="alert alert-danger mb-0">' + escapeHtml(err.message || 'Estimate failed') + '</div>';
+            const body = document.getElementById('bulkCostBody');
+            const error = document.createElement('div');
+            error.className = 'alert alert-danger mb-0';
+            error.textContent = err.message || 'Estimate failed';
+            body.replaceChildren(error);
+            body.classList.remove('d-none');
         });
     }
 
@@ -906,8 +938,16 @@
         if ((s.recent_errors || []).length > 0) {
             const el = document.getElementById('bpErrors');
             el.classList.remove('d-none');
-            el.innerHTML = '<strong>{{ translate("Recent errors") }}:</strong><br>' +
-                s.recent_errors.map(e => '<code>' + escapeHtml(e.msg || '') + '</code>').join('<br>');
+            el.replaceChildren();
+            const label = document.createElement('strong');
+            label.textContent = '{{ translate("Recent errors") }}:';
+            el.append(label, document.createElement('br'));
+            s.recent_errors.forEach(function(error, index) {
+                if (index > 0) el.appendChild(document.createElement('br'));
+                const code = document.createElement('code');
+                code.textContent = error.msg || '';
+                el.appendChild(code);
+            });
         }
     }
 

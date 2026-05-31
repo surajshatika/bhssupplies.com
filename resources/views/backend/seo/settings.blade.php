@@ -35,6 +35,12 @@
 
 @include('backend.seo.partials.suite_nav')
 
+@if(!empty($settings['gsc_connected_email']))
+<form id="seo-google-disconnect-form" action="{{ route('admin.seo.oauth.google.disconnect') }}" method="POST" class="d-none">
+    @csrf
+</form>
+@endif
+
 <form action="{{ route('admin.seo-suite.settings') }}" method="POST">
 @csrf
 
@@ -147,12 +153,9 @@
                         {{ translate('Connected as') }} <strong>{{ $settings['gsc_connected_email'] }}</strong>
                         — {{ translate('clicks/impressions/CTR/position sync every day at 04:00.') }}
                     </div>
-                    <form action="{{ route('admin.seo.oauth.google.disconnect') }}" method="POST" class="d-inline">
-                        @csrf
-                        <button class="btn btn-soft-danger btn-sm" onclick="return confirm('{{ translate('Disconnect Google Search Console?') }}');">
-                            <i class="las la-unlink mr-1"></i> {{ translate('Disconnect Google') }}
-                        </button>
-                    </form>
+                    <button type="submit" form="seo-google-disconnect-form" class="btn btn-soft-danger btn-sm" onclick="return confirm('{{ translate('Disconnect Google Search Console?') }}');">
+                        <i class="las la-unlink mr-1"></i> {{ translate('Disconnect Google') }}
+                    </button>
                 @elseif ($hasGoogleClient)
                     @if (!empty($settings['gsc_expected_email']))
                         <div class="alert alert-info py-2 mb-3 small">
@@ -532,10 +535,13 @@ function generateIndexNowKey() {
             'X-CSRF-TOKEN': '{{ csrf_token() }}',
             'Accept': 'application/json',
         },
-    }).then(function() {
+    }).then(function(response) {
+        if (!response.ok) {
+            throw new Error('IndexNow key generation failed');
+        }
         window.location.reload();
     }).catch(function() {
-        window.location.href = '{{ route('admin.seo-suite.indexnow.generate_key') }}';
+        alert('{{ translate('Unable to generate the IndexNow key. Please refresh and try again.') }}');
     });
 }
 </script>

@@ -18,18 +18,22 @@ class SmartSitemapService extends AbstractSeoService
         // Sort by priority descending
         usort($allUrls, fn($a, $b) => strcmp($b['priority'], $a['priority']));
 
-        $xml   = $this->buildSitemap($allUrls);
-        $index = $this->buildSitemapIndex($baseUrl);
+        $xml = $this->buildSitemap($allUrls);
 
         if ($payload['persist'] ?? false) {
             file_put_contents(base_path('sitemap.xml'), $xml);
-            file_put_contents(public_path('sitemap-index.xml'), $index);
             // Write split sitemaps
             foreach ($groups as $type => $urls) {
                 if (!empty($urls)) {
                     file_put_contents(public_path("sitemap-{$type}.xml"), $this->buildSitemap($urls));
                 }
             }
+        }
+
+        $index = $this->buildSitemapIndex($baseUrl);
+
+        if ($payload['persist'] ?? false) {
+            file_put_contents(public_path('sitemap-index.xml'), $index);
         }
 
         return [

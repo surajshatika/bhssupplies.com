@@ -209,7 +209,7 @@ class PageCacheService
             'reasons' => $reasons,
             'warnings' => $warnings,
             'ttl_minutes' => $ttl,
-            'stored_copy' => $this->driver === 'litespeed' ? null : $this->has($url, $request),
+            'stored_copy' => $this->has($url, $request),
         ];
     }
 
@@ -555,7 +555,14 @@ class PageCacheService
             return $this->isWarmableUrl($url, $baseHost);
         }));
 
-        foreach (array_slice($urls, 0, $max) as $u) {
+        $cursorKey = 'perf_page_cache_warm_cursor_' . md5($base);
+        $cursor = (int) Cache::get($cursorKey, 0);
+        if ($cursor < 0 || $cursor >= count($urls)) {
+            $cursor = 0;
+        }
+        $batch = array_slice($urls, $cursor, $max);
+
+        foreach ($batch as $u) {
             $attempted++;
             try {
                 $http = $verifyTls
@@ -565,7 +572,7 @@ class PageCacheService
                     ->withHeaders(['User-Agent' => 'BHS-Performance-Optimizer-Warm/1.1'])
                     ->get($u);
                 if ($resp->successful() && $this->isHtmlWarmResponse($resp)) {
-                    if ($this->driver === 'litespeed' || $this->store($u, $resp->body())) {
+                    if ($this->store($u, $resp->body())) {
                         $warmed++;
                     } else {
                         $failed++;
@@ -584,6 +591,9 @@ class PageCacheService
             }
         }
 
+        $nextCursor = count($urls) > 0 ? ($cursor + count($batch)) % count($urls) : 0;
+        Cache::put($cursorKey, $nextCursor, 86400);
+
         try {
             OptimizationLog::create([
                 'type' => 'page_cache', 'action' => 'warm', 'status' => $failed > 0 && $warmed === 0 ? 'failed' : 'success',
@@ -592,6 +602,8 @@ class PageCacheService
                     'failed' => $failed,
                     'attempted' => $attempted,
                     'total_urls' => count($urls),
+                    'cursor' => $cursor,
+                    'next_cursor' => $nextCursor,
                     'driver' => $this->driver,
                 ],
             ]);
@@ -604,6 +616,8 @@ class PageCacheService
             'failed' => $failed,
             'attempted' => $attempted,
             'total' => count($urls),
+            'cursor' => $cursor,
+            'next_cursor' => $nextCursor,
         ];
     }
 
@@ -721,7 +735,7 @@ class PageCacheService
     }
 
     /**
-     * List recently cached pages (file driver only, up to $limit).
+     * List recently cached file-backed pages (up to $limit).
      * Each entry: {url, size_bytes, cached_at}
      */
     public function getPagesList(int $limit = 50): array
@@ -738,7 +752,7 @@ class PageCacheService
                 return [];
             }
         }
-        if ($this->driver !== 'file') return [];
+        if (!in_array($this->driver, ['file', 'litespeed'], true)) return [];
         if (!is_dir($this->cacheDir)) return [];
 
         $files = glob($this->cacheDir . '/*.html') ?: [];

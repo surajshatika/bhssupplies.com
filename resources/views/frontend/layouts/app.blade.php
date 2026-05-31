@@ -67,10 +67,6 @@
     @yield('lcp_preload')
     @yield('preload_assets')
 
-    <!-- Preload critical scripts so the browser fetches them in parallel with HTML parsing -->
-    <link rel="preload" href="{{ static_asset('assets/js/vendors.js?v=') }}{{ get_setting('current_version') }}" as="script">
-    <link rel="preload" href="{{ static_asset('assets/js/aiz-core.min.js?v=') }}{{ get_setting('current_version') }}" as="script">
-
     <!-- DNS Prefetch for third-party origins -->
     <link rel="dns-prefetch" href="//www.googletagmanager.com">
     <link rel="dns-prefetch" href="//connect.facebook.net">
@@ -91,17 +87,38 @@
     <!-- CSS — critical files load synchronously (instant render), non-critical async -->
     @php
         $_cv = get_setting('current_version');
-        $_customCssPath = public_path('assets/css/custom-style.css');
-        $_customCv = file_exists($_customCssPath) ? filemtime($_customCssPath) : $_cv;
+        $_cssAsset = static function (string $relativePath): array {
+            $sourcePath = public_path($relativePath);
+            $selectedPath = $relativePath;
+
+            if ((int) get_setting('perf_css_minify_status', 0) === 1) {
+                $minifiedPath = preg_replace('/\.css$/i', '.min.css', $relativePath);
+                $minifiedAbsolutePath = public_path($minifiedPath);
+                if (is_file($minifiedAbsolutePath)
+                    && (!is_file($sourcePath) || filemtime($minifiedAbsolutePath) >= filemtime($sourcePath))
+                ) {
+                    $selectedPath = $minifiedPath;
+                }
+            }
+
+            $selectedAbsolutePath = public_path($selectedPath);
+            return [
+                'path' => $selectedPath,
+                'version' => is_file($selectedAbsolutePath) ? filemtime($selectedAbsolutePath) : null,
+            ];
+        };
+        $_vendorsCss = $_cssAsset('assets/css/vendors.css');
+        $_coreCss = $_cssAsset('assets/css/aiz-core.css');
+        $_customCss = $_cssAsset('assets/css/custom-style.css');
     @endphp
-    <link rel="stylesheet" href="{{ static_asset('assets/css/vendors.css?v=') }}{{ $_cv }}">
+    <link rel="stylesheet" href="{{ static_asset($_vendorsCss['path'] . '?v=') }}{{ $_vendorsCss['version'] ?: $_cv }}">
     @if ($rtl == 1)
         <link rel="stylesheet" href="{{ static_asset('assets/css/bootstrap-rtl.min.css') }}">
     @endif
-    <link rel="stylesheet" href="{{ static_asset('assets/css/aiz-core.css?v=') }}{{ $_cv }}">
+    <link rel="stylesheet" href="{{ static_asset($_coreCss['path'] . '?v=') }}{{ $_coreCss['version'] ?: $_cv }}">
     {{-- Non-critical overrides load async — no layout impact --}}
-    <link rel="preload" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_customCv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_customCv }}"></noscript>
+    <link rel="preload" href="{{ static_asset($_customCss['path'] . '?v=') }}{{ $_customCss['version'] ?: $_cv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="{{ static_asset($_customCss['path'] . '?v=') }}{{ $_customCss['version'] ?: $_cv }}"></noscript>
     @if(get_setting('homepage_select') == 'thecore')
     <link rel="preload" href="{{ static_asset('assets/css/thecore.css') }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/thecore.css') }}"></noscript>

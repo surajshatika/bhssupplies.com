@@ -18,7 +18,8 @@
     $basePrice = format_price($basePriceRaw);
     $discountedBasePrice = format_price($discountedBasePriceRaw);
     $listingIndex = isset($listingIndex) ? (int) $listingIndex : 99;
-    $isPriorityImage = $listingIndex < 4 && !request()->ajax();
+    $isEagerImage = $listingIndex < 4 && !request()->ajax();
+    $isPriorityImage = $listingIndex === 0 && !request()->ajax();
     $mainImage = get_image($product->thumbnail);
     $hoverImage = get_first_product_image($product->photos, $product->thumbnail_img);
     $showHoverImage = (int) get_setting('perf_product_hover_images', 0) === 1 && $hoverImage !== $mainImage;
@@ -44,11 +45,11 @@
         @endif
 
         <a href="{{ $product_url }}" class="d-block pc-img-link {{ $showHoverImage ? 'has-hover-image' : '' }}">
-            <img class="{{ $isPriorityImage ? '' : 'lazyload' }} pc-img"
-                src="{{ $isPriorityImage ? $mainImage : $placeholderImage }}"
-                @if(!$isPriorityImage) data-src="{{ $mainImage }}" @endif
+            <img class="{{ $isEagerImage ? '' : 'lazyload' }} pc-img"
+                src="{{ $isEagerImage ? $mainImage : $placeholderImage }}"
+                @if(!$isEagerImage) data-src="{{ $mainImage }}" @endif
                 alt="{{ $product->getTranslation('name') }}"
-                loading="{{ $isPriorityImage ? 'eager' : 'lazy' }}"
+                loading="{{ $isEagerImage ? 'eager' : 'lazy' }}"
                 decoding="async"
                 @if($isPriorityImage) fetchpriority="high" @endif
                 sizes="(max-width: 575px) 50vw, (max-width: 991px) 33vw, 300px"

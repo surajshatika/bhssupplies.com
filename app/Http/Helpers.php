@@ -196,7 +196,13 @@ if (!function_exists('verified_sellers_id')) {
 if (!function_exists('get_system_default_currency')) {
     function get_system_default_currency()
     {
-        return Cache::remember('system_default_currency', 86400, function () {
+        static $currency = null;
+
+        if ($currency !== null) {
+            return $currency;
+        }
+
+        return $currency = Cache::remember('system_default_currency', 86400, function () {
             return Currency::findOrFail(get_setting('system_default_currency'));
         });
     }
@@ -928,46 +934,54 @@ if (!function_exists('renderStarRatingLatest')) {
 
 function translate($key, $lang = null, $addslashes = false)
 {
+    static $translations = [];
+
     if ($lang == null) {
         $lang = App::getLocale();
     }
 
     $lang_key = preg_replace('/[^A-Za-z0-9\_]/', '', str_replace(' ', '_', strtolower($key)));
+    $loadTranslations = function ($locale) use (&$translations) {
+        if (!array_key_exists($locale, $translations)) {
+            $translations[$locale] = Cache::rememberForever("translations-{$locale}", function () use ($locale) {
+                return Translation::where('lang', $locale)->pluck('lang_value', 'lang_key')->toArray();
+            });
+        }
 
-    $translations_en = Cache::rememberForever('translations-en', function () {
-        return Translation::where('lang', 'en')->pluck('lang_value', 'lang_key')->toArray();
-    });
+        return $translations[$locale];
+    };
+
+    $translations_en = $loadTranslations('en');
 
     if (!isset($translations_en[$lang_key])) {
+        $translation_value = str_replace(array("\r", "\n", "\r\n"), "", $key);
         $translation_def = new Translation;
         $translation_def->lang = 'en';
         $translation_def->lang_key = $lang_key;
-        $translation_def->lang_value = str_replace(array("\r", "\n", "\r\n"), "", $key);
+        $translation_def->lang_value = $translation_value;
         $translation_def->save();
 
         if (env('DEMO_MODE') != 'On') {
                 $app_translation = new AppTranslation();
                 $app_translation->lang = 'en';
                 $app_translation->lang_key = $lang_key . '_ucf';
-                $app_translation->lang_value = str_replace(array("\r", "\n", "\r\n"), "", $key);
+                $app_translation->lang_value = $translation_value;
                 $app_translation->save();
             }
 
+        $translations_en[$lang_key] = $translation_value;
+        $translations['en'] = $translations_en;
         Cache::forget('translations-en');
     }
 
     // return user session lang
-    $translation_locale = Cache::rememberForever("translations-{$lang}", function () use ($lang) {
-        return Translation::where('lang', $lang)->pluck('lang_value', 'lang_key')->toArray();
-    });
+    $translation_locale = $loadTranslations($lang);
     if (isset($translation_locale[$lang_key])) {
         return $addslashes ? addslashes(trim($translation_locale[$lang_key])) : trim($translation_locale[$lang_key]);
     }
 
     // return default lang if session lang not found
-    $translations_default = Cache::rememberForever('translations-' . env('DEFAULT_LANGUAGE', 'en'), function () {
-        return Translation::where('lang', env('DEFAULT_LANGUAGE', 'en'))->pluck('lang_value', 'lang_key')->toArray();
-    });
+    $translations_default = $loadTranslations(env('DEFAULT_LANGUAGE', 'en'));
     if (isset($translations_default[$lang_key])) {
         return $addslashes ? addslashes(trim($translations_default[$lang_key])) : trim($translations_default[$lang_key]);
     }
@@ -1344,19 +1358,34 @@ if (!function_exists('optimized_image_url')) {
     }
 }
 
+if (!function_exists('get_cached_upload')) {
+    function get_cached_upload($id)
+    {
+        static $uploads = [];
+
+        if ($id instanceof Upload) {
+            return $id;
+        }
+        if (!$id || !is_numeric($id)) {
+            return null;
+        }
+
+        $id = (int) $id;
+        if (!array_key_exists($id, $uploads)) {
+            $uploads[$id] = Cache::remember('uploaded_asset_row_' . $id, 86400, function () use ($id) {
+                return Upload::find($id);
+            });
+        }
+
+        return $uploads[$id];
+    }
+}
+
 //return file uploaded via uploader
 if (!function_exists('uploaded_asset')) {
     function uploaded_asset($id)
     {
-        if ($id instanceof Upload) {
-            $asset = $id;
-        } elseif ($id && is_numeric($id)) {
-            $asset = Cache::remember('uploaded_asset_row_' . $id, 86400, function () use ($id) {
-                return Upload::find($id);
-            });
-        } else {
-            $asset = null;
-        }
+        $asset = get_cached_upload($id);
 
         if ($asset != null) {
             return optimized_image_url($asset->external_link == null ? my_asset($asset->file_name) : $asset->external_link);
@@ -1451,9 +1480,13 @@ if (!function_exists('isUnique')) {
 if (!function_exists('get_setting')) {
     function get_setting($key, $default = null, $lang = false)
     {
-        $settings = Cache::remember('business_settings', 86400, function () {
-            return BusinessSetting::all();
-        });
+        static $settings = null;
+
+        if ($settings === null) {
+            $settings = Cache::remember('business_settings', 86400, function () {
+                return BusinessSetting::all();
+            });
+        }
 
         if ($lang == false) {
             $setting = $settings->where('type', $key)->first();
@@ -1726,12 +1759,21 @@ if (!function_exists('calculateCommissionAffilationClubPoint')) {
 if (!function_exists('addon_is_activated')) {
     function addon_is_activated($identifier, $default = null)
     {
-        try {
-            $addons = Cache::remember('addons', 86400, function () {
-                return Addon::all();
-            });
-        } catch (\Throwable $e) {
-            \Log::error('addon_is_activated cache failure: ' . $e->getMessage());
+        static $addons = null;
+        static $loaded = false;
+
+        if (!$loaded) {
+            $loaded = true;
+            try {
+                $addons = Cache::remember('addons', 86400, function () {
+                    return Addon::all();
+                });
+            } catch (\Throwable $e) {
+                \Log::error('addon_is_activated cache failure: ' . $e->getMessage());
+            }
+        }
+
+        if ($addons === null) {
             return (bool) $default;
         }
 
@@ -1885,11 +1927,17 @@ if (!function_exists('get_active_taxes')) {
 if (!function_exists('get_system_language')) {
     function get_system_language()
     {
+        static $languages = [];
+
         $locale = Session::has('locale')
             ? Session::get('locale', Config::get('app.locale'))
             : 'en';
 
-        return Cache::remember('system_language_' . $locale, 86400, function () use ($locale) {
+        if (array_key_exists($locale, $languages)) {
+            return $languages[$locale];
+        }
+
+        return $languages[$locale] = Cache::remember('system_language_' . $locale, 86400, function () use ($locale) {
             return Language::where('code', $locale)->first();
         });
     }
@@ -1898,7 +1946,13 @@ if (!function_exists('get_system_language')) {
 if (!function_exists('get_all_active_language')) {
     function get_all_active_language()
     {
-        return Cache::remember('all_active_languages', 86400, function () {
+        static $languages = null;
+
+        if ($languages !== null) {
+            return $languages;
+        }
+
+        return $languages = Cache::remember('all_active_languages', 86400, function () {
             return Language::where('status', 1)->get();
         });
     }
@@ -1908,8 +1962,14 @@ if (!function_exists('get_all_active_language')) {
 if (!function_exists('get_session_language')) {
     function get_session_language()
     {
+        static $languages = [];
+
         $locale = Session::get('locale', Config::get('app.locale'));
-        return Cache::remember('session_language_' . $locale, 86400, function () use ($locale) {
+        if (array_key_exists($locale, $languages)) {
+            return $languages[$locale];
+        }
+
+        return $languages[$locale] = Cache::remember('session_language_' . $locale, 86400, function () use ($locale) {
             return Language::where('code', $locale)->first();
         });
     }
@@ -1918,11 +1978,17 @@ if (!function_exists('get_session_language')) {
 if (!function_exists('get_system_currency')) {
     function get_system_currency()
     {
+        static $currencies = [];
+
         $code = Session::has('currency_code')
             ? Session::get('currency_code')
             : 'default_' . get_setting('system_default_currency');
 
-        return Cache::remember('system_currency_' . $code, 86400, function () {
+        if (array_key_exists($code, $currencies)) {
+            return $currencies[$code];
+        }
+
+        return $currencies[$code] = Cache::remember('system_currency_' . $code, 86400, function () {
             $query = Currency::query();
             if (Session::has('currency_code')) {
                 $query->where('code', Session::get('currency_code'));
@@ -1937,7 +2003,13 @@ if (!function_exists('get_system_currency')) {
 if (!function_exists('get_all_active_currency')) {
     function get_all_active_currency()
     {
-        return Cache::remember('all_active_currencies', 86400, function () {
+        static $currencies = null;
+
+        if ($currencies !== null) {
+            return $currencies;
+        }
+
+        return $currencies = Cache::remember('all_active_currencies', 86400, function () {
             return Currency::where('status', 1)->get();
         });
     }
@@ -2745,14 +2817,10 @@ if (!function_exists('get_first_product_image')) {
         $firstPhotoId = reset($photos);
         $image = null;
         if (!empty($firstPhotoId)) {
-            $image = Cache::remember('uploaded_asset_row_' . $firstPhotoId, 86400, function () use ($firstPhotoId) {
-                return Upload::find($firstPhotoId);
-            });
+            $image = get_cached_upload($firstPhotoId);
         }
         if ($image == null && $thumbnail != null) {
-            $image = Cache::remember('uploaded_asset_row_' . $thumbnail, 86400, function () use ($thumbnail) {
-                return Upload::find($thumbnail);
-            });
+            $image = get_cached_upload($thumbnail);
         }
         if ($image instanceof \Illuminate\Database\Eloquent\Collection) {
             $image = $image->first();
@@ -3410,12 +3478,16 @@ if (!function_exists('get_all_sale_alert_products')) {
 //get products label
 if (!function_exists('get_custom_labels')) {
     function get_custom_labels($labels) {
+        static $allLabels = null;
+
         $labels_array = [];
         if($labels){
             $labels = explode(',',$labels);
-            $allLabels = Cache::remember('custom_labels_frontend', 86400, function () {
-                return CustomLabel::all()->keyBy('id');
-            });
+            if ($allLabels === null) {
+                $allLabels = Cache::remember('custom_labels_frontend', 86400, function () {
+                    return CustomLabel::all()->keyBy('id');
+                });
+            }
             foreach($labels as $label){
                 $label_data = $allLabels->get((int) $label);
                 if($label_data){

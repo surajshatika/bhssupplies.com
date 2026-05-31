@@ -52,10 +52,10 @@
 
         <div class="perf-section">
             <div class="perf-section-header">
-                <h5><span class="perf-section-icon" style="background:rgba(40,167,69,.1);color:var(--perf-green)"><i class="las la-server"></i></span>{{ translate('Serve WebP Automatically (.htaccess)') }}</h5>
+                <h5><span class="perf-section-icon" style="background:rgba(40,167,69,.1);color:var(--perf-green)"><i class="las la-server"></i></span>{{ translate('Serve WebP / AVIF Automatically (.htaccess)') }}</h5>
             </div>
             <div class="perf-section-body">
-                <p>{{ translate('When enabled, Apache will automatically serve .webp files to browsers that support it — no template changes needed.') }}</p>
+                <p>{{ translate('Apache automatically serves available .avif or .webp siblings to browsers that support them — no template changes needed.') }}</p>
                 <div class="d-flex align-items-center">
                     <label class="aiz-switch aiz-switch-success mb-0 mr-2">
                         <input type="checkbox" onchange="perfToggle(this, 'perf_image_serve_webp_auto')"
@@ -135,7 +135,9 @@
                         <tr><td>{{ translate('Total Images') }}</td><td class="text-right"><strong>{{ number_format($stats['total']) }}</strong></td></tr>
                         <tr><td>{{ translate('WebP Converted') }}</td><td class="text-right text-success"><strong>{{ number_format($stats['converted']) }}</strong></td></tr>
                         <tr><td>{{ translate('Not Converted') }}</td><td class="text-right text-warning"><strong>{{ number_format($stats['not_converted']) }}</strong></td></tr>
-                        <tr><td>{{ translate('Space Saved') }}</td><td class="text-right text-info"><strong>{{ $stats['space_saved'] }}</strong></td></tr>
+                        <tr><td>{{ translate('WebP Space Saved') }}</td><td class="text-right text-info"><strong>{{ $stats['space_saved'] }}</strong></td></tr>
+                        <tr><td>{{ translate('AVIF Converted') }}</td><td class="text-right text-success"><strong>{{ number_format($stats['avif_converted'] ?? 0) }}</strong></td></tr>
+                        <tr><td>{{ translate('AVIF Space Saved') }}</td><td class="text-right text-info"><strong>{{ $stats['avif_space_saved'] ?? '0 B' }}</strong></td></tr>
                         <tr><td>{{ translate('Backup Size') }}</td><td class="text-right"><strong>{{ $stats['backup_size'] }}</strong></td></tr>
                     </tbody>
                 </table>

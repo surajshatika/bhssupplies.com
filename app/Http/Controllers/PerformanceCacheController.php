@@ -68,7 +68,8 @@ class PerformanceCacheController extends Controller
             $result = $this->service->warmFromSitemap($max);
             $this->forgetDashboardCaches();
             $message = translate('Cache warm completed.') . " {$result['warmed']} / {$result['attempted']} "
-                . translate('URLs warmed.') . " {$result['failed']} " . translate('failed.');
+                . translate('URLs warmed.') . " {$result['failed']} " . translate('failed.') . ' '
+                . translate('Next batch starts at') . " {$result['next_cursor']} / {$result['total']}.";
 
             if (($result['warmed'] ?? 0) > 0) {
                 flash($message)->success();
@@ -185,12 +186,10 @@ class PerformanceCacheController extends Controller
         $lines   = [];
         $driver  = (string) get_setting('perf_page_cache_driver', 'file');
 
-        // 1. File / Redis / Memcached page cache
-        if (in_array($driver, ['file', 'redis', 'memcached'], true)) {
-            $n = $this->service->clearAll();
-            $lines[] = translate('Page cache cleared') . ": {$n} " . translate('pages');
-            $this->forgetDashboardCaches();
-        }
+        // 1. File / Redis / Memcached page cache, including LiteSpeed safety copies
+        $n = $this->service->clearAll();
+        $lines[] = translate('Page cache cleared') . ": {$n} " . translate('pages');
+        $this->forgetDashboardCaches();
 
         // 2. LiteSpeed Cache — always attempt when driver=litespeed, harmless otherwise
         if ($driver === 'litespeed') {

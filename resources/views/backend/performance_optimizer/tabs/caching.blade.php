@@ -316,7 +316,7 @@
                         {{ translate('LiteSpeed server not detected on this host. Select the LiteSpeed driver only when deployed on LiteSpeed Web Server or OpenLiteSpeed.') }}
                     </div>
                 @endif
-                <p class="text-muted small mb-2">{{ translate('Server-level page cache. PHP sets X-LiteSpeed-Cache-Control headers; LiteSpeed serves cached pages directly without invoking PHP on cache hits. No file or Redis storage is used by PHP.') }}</p>
+                <p class="text-muted small mb-2">{{ translate('Server-level page cache. PHP sets X-LiteSpeed-Cache-Control headers so LiteSpeed can serve cache hits directly. A local file safety copy is also kept for hosts where LSCache repeatedly misses.') }}</p>
                 <div class="d-flex flex-wrap mb-2" style="gap:8px">
                     <form action="{{ route('performance_optimizer.cache.purge_litespeed') }}" method="POST"
                           onsubmit="return confirm('{{ translate('Purge all LiteSpeed cached pages?') }}')">

@@ -37,6 +37,8 @@ storage/oauth-public.key
 !/storage/logs/.gitignore
 /storage/framework/cache/data/*
 !/storage/framework/cache/data/.gitignore
+/storage/framework/page-cache/*
+!/storage/framework/page-cache/.gitignore
 /storage/framework/sessions/*
 !/storage/framework/sessions/.gitignore
 /storage/framework/views/*

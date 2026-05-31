@@ -83,7 +83,7 @@ class MarketingEventDispatcher
         // strip non-serialisable keys for queue safety; they're rebuilt where needed.
         $serialisable = $this->serialisablePayload($payload);
 
-        if ($queued && config('queue.default') !== 'sync') {
+        if ($queued) {
             DispatchMarketingEventJob::dispatch($eventName, $serialisable, $eventId)->afterResponse();
             return;
         }

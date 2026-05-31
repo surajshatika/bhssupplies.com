@@ -106,7 +106,7 @@ class PerformanceOutputMiddleware
         $injects = [];
 
         // LCP hero image preload — inject before anything else so browser discovers it first
-        if ($lcpSrc !== null) {
+        if ($lcpSrc !== null && !$this->hasImagePreload($html)) {
             $injects[] = '<link rel="preload" as="image" href="' . htmlspecialchars($lcpSrc, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '" fetchpriority="high">';
         }
 
@@ -244,7 +244,7 @@ class PerformanceOutputMiddleware
         // Safety baseline: never defer scripts that ship jQuery or the AIZ core,
         // because the layout has inline <script> blocks that call $() / AIZ.* at parse time.
         // Deferring these breaks home-section AJAX loaders, infinite scroll, modals, etc.
-        $defaultExcludes = ['jquery', 'vendors.js', 'aiz-core.js'];
+        $defaultExcludes = ['jquery', 'vendors.js', 'aiz-core', 'bootstrap', 'slick', 'checkout', 'stripe', 'recaptcha', 'firebase'];
         $userExcludes    = array_filter(array_map('trim', explode("\n", $this->setting('perf_js_defer_exclude', ''))));
         $excludes        = array_values(array_unique(array_merge($defaultExcludes, $userExcludes)));
 
@@ -427,5 +427,13 @@ class PerformanceOutputMiddleware
             $this->localFileExists[$path] = file_exists($path);
         }
         return $this->localFileExists[$path];
+    }
+
+    protected function hasImagePreload(string $html): bool
+    {
+        return (bool) preg_match(
+            '/<link\b(?=[^>]*\brel\s*=\s*["\']preload["\'])(?=[^>]*\bas\s*=\s*["\']image["\'])[^>]*>/i',
+            $html
+        );
     }
 }

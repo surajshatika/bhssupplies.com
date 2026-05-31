@@ -33,12 +33,32 @@ class PageCacheMiddleware
         // ── LiteSpeed Cache driver ────────────────────────────────────────────
         // LiteSpeed handles storage itself via the server module.
         // PHP only needs to set the correct X-LiteSpeed-Cache-Control headers.
-        if ($driver === 'litespeed' && (int) get_setting('perf_page_cache_status', 0) === 1) {
+        if ($driver === 'litespeed'
+            && $this->lsc->isLiteSpeedServer()
+            && (int) get_setting('perf_page_cache_status', 0) === 1
+        ) {
+            $shouldCache = $this->cache->shouldCache($request);
+            $url = $request->fullUrl();
+
+            // Keep a local safety copy. Some shared hosts expose LiteSpeed headers
+            // while server-level LSCache is disabled or repeatedly misses.
+            if ($shouldCache && ($cached = $this->cache->get($url, $request)) !== null) {
+                $ttlSeconds = $this->cache->ttlMinutesFor($request) * 60;
+                return response($cached, 200)
+                    ->header('Content-Type', 'text/html; charset=UTF-8')
+                    ->header('X-LiteSpeed-Cache-Control', "public,max-age={$ttlSeconds}")
+                    ->header('X-LiteSpeed-Vary', 'value=cookie[currency_code],value=cookie[locale_code]')
+                    ->header('X-Performance-Cache', 'HIT')
+                    ->header('Cache-Control', "public, max-age=0, s-maxage={$ttlSeconds}, stale-while-revalidate=60")
+                    ->header('Vary', 'Accept-Encoding');
+            }
+
             $response = $next($request);
-            if ($this->cache->shouldCache($request) && $this->isLiteSpeedCacheable($response)) {
+            if ($shouldCache && $this->isLiteSpeedCacheable($response)) {
                 $ttlMinutes = $this->cache->ttlMinutesFor($request);
                 $ttlSeconds = $ttlMinutes * 60;
                 $response->setContent($this->cache->prepareHtmlForSharedCache((string) $response->getContent()));
+                $this->cache->store($url, (string) $response->getContent(), $request);
                 $this->stripPublicCacheCookies($response);
                 // LSCache header — tells LiteSpeed server to cache this page
                 $response->headers->set('X-LiteSpeed-Cache-Control', "public,max-age={$ttlSeconds}");
@@ -56,7 +76,7 @@ class PageCacheMiddleware
             return $response;
         }
 
-        // ── File / Redis driver (existing behaviour) ──────────────────────────
+        // ── File / Redis driver, plus non-LiteSpeed fallback ──────────────────
         if (!$this->cache->shouldCache($request)) {
             $response = $next($request);
             if ($this->cache->isNeverCachePath(ltrim($request->path(), '/'))) {

@@ -21,16 +21,16 @@ SetEnv PHPRC /home/customer/www/bhssupplies.com/public_html/php.ini
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
-    # Serve AVIF instead of JPG/PNG when browser supports it and .avif file exists
+    # Serve an AVIF sibling instead of JPG/PNG/WebP when the browser supports it.
     RewriteCond %{HTTP_ACCEPT} image/avif
-    RewriteCond %{REQUEST_FILENAME} \.(jpe?g|png)$
-    RewriteCond %{REQUEST_FILENAME}\.avif -f
-    RewriteRule ^(.+)\.(jpe?g|png)$ $1.avif [T=image/avif,L]
+    RewriteCond %{REQUEST_FILENAME} ^(.+)\.(jpe?g|png|webp)$ [NC]
+    RewriteCond %1.avif -f
+    RewriteRule ^(.+)\.(jpe?g|png|webp)$ $1.avif [T=image/avif,L]
 
-    # Serve WebP instead of JPG/PNG when browser supports it and .webp file exists
+    # Serve a WebP sibling instead of JPG/PNG when the browser supports it.
     RewriteCond %{HTTP_ACCEPT} image/webp
-    RewriteCond %{REQUEST_FILENAME} \.(jpe?g|png)$
-    RewriteCond %{REQUEST_FILENAME}\.webp -f
+    RewriteCond %{REQUEST_FILENAME} ^(.+)\.(jpe?g|png)$ [NC]
+    RewriteCond %1.webp -f
     RewriteRule ^(.+)\.(jpe?g|png)$ $1.webp [T=image/webp,L]
 
     # Redirect Trailing Slashes If Not A Folder...
@@ -43,6 +43,12 @@ SetEnv PHPRC /home/customer/www/bhssupplies.com/public_html/php.ini
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{DOCUMENT_ROOT}/public%{REQUEST_URI} -f
     RewriteRule ^(.*)$ public/$1 [L]
+
+    # Subdirectory installs (for example WAMP /bhssupplies1) need a relative
+    # fallback because DOCUMENT_ROOT does not include the project folder.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(assets|uploads|storage)/(.*)$ public/$1/$2 [L]
 
     # Handle Front Controller...
     RewriteCond %{REQUEST_FILENAME} !-d

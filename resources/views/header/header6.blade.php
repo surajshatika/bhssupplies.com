@@ -32,11 +32,11 @@ $bottomHeaderTextColor = get_setting('bottom_header_text_color');
                         @if ($header_logo != null)
                         <img id="header-logo-preview" src="{{ uploaded_asset($header_logo) }}" alt="{{ env('APP_NAME') }}"
                             class="mw-100 h-30px h-md-40px" height="40"
-                            loading="eager" fetchpriority="high" decoding="async">
+                            loading="eager" decoding="async">
                         @else
                         <img id="header-logo-preview" src="{{ static_asset('assets/img/logo.png') }}" alt="{{ env('APP_NAME') }}"
                             class="mw-100 h-30px h-md-40px" height="40"
-                            loading="eager" fetchpriority="high" decoding="async">
+                            loading="eager" decoding="async">
                         @endif
                     </a>
                 </div>

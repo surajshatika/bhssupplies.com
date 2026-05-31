@@ -13,6 +13,7 @@ use App\Models\SeoProject;
 use App\Models\SeoScoreHistory;
 use App\Services\Seo\OnPage\Features\TruSeoAnalysisService;
 use App\Services\Seo\Providers\SeoProviderManager;
+use App\Services\Seo\Providers\SeoProviderReliability;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -717,6 +718,8 @@ class AiSeoBoardService
             $type
         );
         $aiData = $bundle['data'];
+        $aiAttempts = $bundle['tried'] ?? [];
+        $aiAttemptDetails = $bundle['attempt_details'] ?? [];
         if (!empty($aiData)) {
             $source = 'ai';
             $actualProvider = $bundle['provider'];
@@ -823,6 +826,8 @@ class AiSeoBoardService
             'score_before' => $before['score'],
             'score_after'  => $afterRow['score'],
             'source'       => $source,
+            'ai_attempts'  => $aiAttempts,
+            'ai_attempt_details' => $aiAttemptDetails,
             'row'          => $afterRow,
         ];
     }
@@ -885,6 +890,9 @@ class AiSeoBoardService
             'title'        => $name,
             'url'          => $this->urlFor($entity, $type),
             'source'       => $source,
+            'provider'     => $bundle['provider'] ?? null,
+            'ai_attempts'  => $bundle['tried'] ?? [],
+            'ai_attempt_details' => $bundle['attempt_details'] ?? [],
             'score_before' => $before['score'],
             'current'      => [
                 'meta_title'       => $meta['meta_title'] ?? null,
@@ -1659,18 +1667,34 @@ class AiSeoBoardService
     protected function askBestAiForSeoBundle(?string $preferredProvider, string $name, string $description, string $type): array
     {
         $tried = [];
+        $attemptDetails = [];
+        $reliability = app(SeoProviderReliability::class);
 
         foreach ($this->providerFallbackOrder($preferredProvider) as $providerName) {
-            $ai = SeoProviderManager::make($providerName);
+            if ($reliability->shouldSkip($providerName)) {
+                $attemptDetails[] = $this->providerAttemptDetail($providerName, 'cooldown', 0, 0.0);
+                continue;
+            }
+
+            $ai = SeoProviderManager::makeDirect($providerName);
             if (!$ai || !method_exists($ai, 'isConfigured') || !$ai->isConfigured()) {
                 continue;
             }
 
             $actualName = method_exists($ai, 'getName') ? $ai->getName() : $providerName;
+            $startedAt = microtime(true);
             $data = $this->askAiForSeoBundle($ai, $name, $description, $type);
             $tried[] = $actualName;
 
             if (empty($data)) {
+                $durationMs = $this->providerDurationMs($startedAt);
+                $reliability->recordAttempt($actualName, 'empty', null, $durationMs);
+                $attemptDetails[] = $this->providerAttemptDetail(
+                    $actualName,
+                    'empty',
+                    $durationMs,
+                    $reliability->estimateAttemptCost($actualName)
+                );
                 logger()->info('AI SEO provider returned empty bundle; trying fallback', [
                     'provider' => $actualName,
                     'type' => $type,
@@ -1681,13 +1705,34 @@ class AiSeoBoardService
 
             $data = $this->repairSeoBundle($data, $name, $type);
             if ($this->seoBundleHasMinimumQuality($data)) {
+                $durationMs = $this->providerDurationMs($startedAt);
+                $reliability->recordAttempt($actualName, 'success', null, $durationMs);
+                $attemptDetails[] = $this->providerAttemptDetail(
+                    $actualName,
+                    'success',
+                    $durationMs,
+                    $reliability->estimateAttemptCost($actualName)
+                );
+                if (SeoProviderManager::normalizeName($actualName) !== SeoProviderManager::normalizeName($preferredProvider)) {
+                    $reliability->recordFallbackSelection($actualName);
+                }
+
                 return [
                     'data' => $data,
                     'provider' => $actualName,
                     'tried' => $tried,
+                    'attempt_details' => $attemptDetails,
                 ];
             }
 
+            $durationMs = $this->providerDurationMs($startedAt);
+            $reliability->recordAttempt($actualName, 'weak_bundle', null, $durationMs);
+            $attemptDetails[] = $this->providerAttemptDetail(
+                $actualName,
+                'weak_bundle',
+                $durationMs,
+                $reliability->estimateAttemptCost($actualName)
+            );
             logger()->info('AI SEO provider bundle was too weak; trying fallback', [
                 'provider' => $actualName,
                 'type' => $type,
@@ -1695,33 +1740,27 @@ class AiSeoBoardService
             ]);
         }
 
-        return ['data' => null, 'provider' => null, 'tried' => $tried];
+        return ['data' => null, 'provider' => null, 'tried' => $tried, 'attempt_details' => $attemptDetails];
+    }
+
+    protected function providerAttemptDetail(string $provider, string $status, int $durationMs, float $estimatedCostUsd): array
+    {
+        return [
+            'provider' => $provider,
+            'status' => $status,
+            'duration_ms' => $durationMs,
+            'estimated_cost_usd' => round($estimatedCostUsd, 6),
+        ];
+    }
+
+    protected function providerDurationMs(float $startedAt): int
+    {
+        return max(0, (int) round((microtime(true) - $startedAt) * 1000));
     }
 
     protected function providerFallbackOrder(?string $preferredProvider): array
     {
-        $preferred = $this->normalizeProviderName($preferredProvider ?: config('seo.default_provider', 'openai'));
-
-        return array_values(array_unique(array_filter([
-            $preferred,
-            'claude',
-            'openai',
-            'gemini',
-            'grok',
-        ])));
-    }
-
-    protected function normalizeProviderName(?string $provider): ?string
-    {
-        $provider = Str::lower(trim((string) $provider));
-
-        return match ($provider) {
-            'anthropic' => 'claude',
-            'chatgpt' => 'openai',
-            'google' => 'gemini',
-            'xai' => 'grok',
-            default => $provider ?: null,
-        };
+        return SeoProviderManager::fallbackOrder($preferredProvider);
     }
 
     protected function seoBundleHasMinimumQuality(array $data): bool

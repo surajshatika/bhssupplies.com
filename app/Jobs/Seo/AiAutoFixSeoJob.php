@@ -3,9 +3,12 @@
 namespace App\Jobs\Seo;
 
 use App\Models\SeoFixBatch;
+use App\Services\Seo\Budget\SeoBudgetGuard;
 use App\Services\Seo\Optimization\Features\IndexNowService;
 use App\Services\Seo\Optimization\Features\SmartSitemapService;
 use App\Services\Seo\Board\AiSeoBoardService;
+use App\Services\Seo\Providers\SeoProviderManager;
+use App\Services\Seo\Providers\SeoProviderReliability;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -39,7 +42,7 @@ class AiAutoFixSeoJob implements ShouldQueue
         $this->onQueue(config('seo.queue.optimization', 'default'));
     }
 
-    public function handle(AiSeoBoardService $board): void
+    public function handle(AiSeoBoardService $board, SeoBudgetGuard $budget): void
     {
         $batch = SeoFixBatch::find($this->batchId);
         if (!$batch || $batch->isTerminal()) {
@@ -84,19 +87,30 @@ class AiAutoFixSeoJob implements ShouldQueue
                 continue;
             }
 
+            $reservedCost = $this->reservedCostForNextEntity($batch);
+            if (!$budget->allowsAdditional($reservedCost)) {
+                $this->pauseForBudget($batch, $budget, $reservedCost);
+                $this->runPostOptimizationActions($optimizedUrls, $batch);
+                return;
+            }
+
             $label = ($type ? ucfirst($type) : 'item') . '#' . $id;
             $batch->update(['current_label' => $label]);
 
             try {
                 $result = $board->applyAiFix($type, $id, $batch->provider);
-                $this->recordSeoOutcome($batch, $result, $type, $id, $label);
+                $attemptCost = $this->estimatedAttemptCost($result, $perEntityCost);
+                $this->recordSeoOutcome($batch, $result, $type, $id, $label, $attemptCost);
+
+                if ($attemptCost > 0) {
+                    $batch->actual_cost_usd = round((float) $batch->actual_cost_usd + $attemptCost, 6);
+                }
 
                 $applied = $result['applied'] ?? [];
                 if (empty($applied)) {
                     $batch->skipped++;
                 } else {
                     $batch->succeeded++;
-                    $batch->actual_cost_usd = round((float) $batch->actual_cost_usd + $perEntityCost, 4);
                     $url = $result['row']['url'] ?? null;
                     if ($url) {
                         $optimizedUrls[] = $url;
@@ -116,6 +130,7 @@ class AiAutoFixSeoJob implements ShouldQueue
             $batch->processed++;
             $processedThisRun++;
             $batch->save();
+            $budget->bustCache();
         }
 
         $batch->refresh();
@@ -157,7 +172,14 @@ class AiAutoFixSeoJob implements ShouldQueue
         return (float) $batch->estimated_cost_usd / $batch->total;
     }
 
-    protected function recordSeoOutcome(SeoFixBatch $batch, array $result, string $type, int $id, string $label): void
+    protected function recordSeoOutcome(
+        SeoFixBatch $batch,
+        array $result,
+        string $type,
+        int $id,
+        string $label,
+        float $estimatedSpendUsd = 0.0
+    ): void
     {
         $before = (int) ($result['score_before'] ?? 0);
         $after = (int) ($result['score_after'] ?? $before);
@@ -165,6 +187,8 @@ class AiAutoFixSeoJob implements ShouldQueue
         $applied = $result['applied'] ?? [];
         $source = (string) ($result['source'] ?? 'unknown');
         $provider = $applied['ai_provider'] ?? ($source === 'template' ? 'template' : null);
+        $providerAttempts = array_values(array_filter($result['ai_attempts'] ?? []));
+        $providerAttemptDetails = array_values(array_filter($result['ai_attempt_details'] ?? []));
         $done = !empty($row['has_meta'])
             && !empty($row['has_focus_kw'])
             && !empty($row['has_schema'])
@@ -195,6 +219,14 @@ class AiAutoFixSeoJob implements ShouldQueue
             $providers[$provider] = (int) ($providers[$provider] ?? 0) + 1;
             $stats['providers'] = $providers;
         }
+        if (count($providerAttempts) > 1) {
+            $stats['provider_failovers'] = (int) ($stats['provider_failovers'] ?? 0) + 1;
+        }
+        $stats['provider_attempts'] = (int) ($stats['provider_attempts'] ?? 0) + count($providerAttempts);
+        $stats['estimated_ai_spend_usd'] = round(
+            (float) ($stats['estimated_ai_spend_usd'] ?? 0) + $estimatedSpendUsd,
+            6
+        );
 
         $lastResults = $options['last_results'] ?? [];
         array_unshift($lastResults, [
@@ -210,11 +242,73 @@ class AiAutoFixSeoJob implements ShouldQueue
             'seo_done' => $done,
             'source' => $source,
             'provider' => $provider,
+            'provider_attempts' => $providerAttempts,
+            'provider_attempt_details' => $providerAttemptDetails,
+            'estimated_ai_spend_usd' => round($estimatedSpendUsd, 6),
         ]);
 
         $options['seo_stats'] = $stats;
         $options['last_results'] = array_slice($lastResults, 0, 25);
         $batch->options = $options;
+    }
+
+    protected function estimatedAttemptCost(array $result, float $perEntityCost): float
+    {
+        $details = array_values(array_filter($result['ai_attempt_details'] ?? []));
+        if (!empty($details)) {
+            return round((float) collect($details)->sum(function (array $attempt): float {
+                if (in_array($attempt['status'] ?? null, ['cooldown', 'not_configured'], true)) {
+                    return 0.0;
+                }
+
+                return max(0.0, (float) ($attempt['estimated_cost_usd'] ?? 0.0));
+            }), 6);
+        }
+
+        $attempts = array_values(array_filter($result['ai_attempts'] ?? []));
+
+        return round(max(0.0, $perEntityCost) * count($attempts), 6);
+    }
+
+    protected function reservedCostForNextEntity(SeoFixBatch $batch): float
+    {
+        $reliability = app(SeoProviderReliability::class);
+
+        return round((float) collect(SeoProviderManager::fallbackOrder($batch->provider))
+            ->sum(function (string $provider) use ($reliability): float {
+                if ($reliability->shouldSkip($provider)) {
+                    return 0.0;
+                }
+
+                try {
+                    if (!SeoProviderManager::makeDirect($provider)->isConfigured()) {
+                        return 0.0;
+                    }
+                } catch (Throwable $e) {
+                    return 0.0;
+                }
+
+                return $reliability->estimateAttemptCost($provider);
+            }), 6);
+    }
+
+    protected function pauseForBudget(SeoFixBatch $batch, SeoBudgetGuard $budget, float $reservedCost): void
+    {
+        $options = $batch->options ?? [];
+        $stats = $options['seo_stats'] ?? [];
+        $stats['budget_pauses'] = (int) ($stats['budget_pauses'] ?? 0) + 1;
+        $stats['last_checked_at'] = now()->toDateTimeString();
+        $options['seo_stats'] = $stats;
+        $options['budget_pause'] = [
+            'at' => now()->toDateTimeString(),
+            'reserved_cost_usd' => round($reservedCost, 6),
+            'remaining_usd' => round($budget->remainingUsd(), 6),
+        ];
+
+        $batch->update([
+            'current_label' => 'Paused: daily AI budget reached',
+            'options' => $options,
+        ]);
     }
 
     protected function runPostOptimizationActions(array $optimizedUrls, SeoFixBatch $batch): void

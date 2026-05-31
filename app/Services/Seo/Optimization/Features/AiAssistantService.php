@@ -48,6 +48,8 @@ class AiAssistantService extends AbstractSeoService
             'message'   => $message,
             'response'  => $response,
             'provider'  => $ai->getName(),
+            'provider_attempts' => method_exists($ai, 'getAttempts') ? $ai->getAttempts() : [],
+            'failover_used' => method_exists($ai, 'usedFallback') ? $ai->usedFallback() : false,
             'context'   => $context,
             'timestamp' => now()->toDateTimeString(),
         ];
@@ -73,10 +75,14 @@ class AiAssistantService extends AbstractSeoService
         $system = $this->buildSystemPrompt('general');
         $ai     = SeoProviderManager::make($payload['provider'] ?? null);
 
+        $response = $ai->generate($prompt, $system);
+
         return [
             'action'   => $action,
-            'response' => $ai->generate($prompt, $system),
+            'response' => $response,
             'provider' => $ai->getName(),
+            'provider_attempts' => method_exists($ai, 'getAttempts') ? $ai->getAttempts() : [],
+            'failover_used' => method_exists($ai, 'usedFallback') ? $ai->usedFallback() : false,
         ];
     }
 

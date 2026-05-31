@@ -32,8 +32,11 @@ use App\Services\Seo\Optimization\Features\SeoRevisionsService;
 use App\Services\Seo\Optimization\Features\LinkAssistantService;
 use App\Services\Seo\Board\AiSeoBoardService;
 use App\Services\Seo\Budget\SeoBudgetGuard;
+use App\Services\Seo\Providers\SeoProviderManager;
+use App\Services\Seo\Providers\SeoProviderReliability;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -128,6 +131,52 @@ class SeoSuiteController extends Controller
         }
         flash(translate($message))->success();
         return redirect()->route('admin.seo.ai_board.index', ['missing' => 'meta']);
+    }
+
+    public function recoverSeoQueue(Request $request)
+    {
+        if (!$this->seoTablesReady() || !Schema::hasTable('seo_fix_batches')) {
+            flash(translate('Run SEO migrations first.'))->warning();
+            return redirect()->route('admin.seo-suite.index');
+        }
+
+        $request->validate([
+            'mode' => 'required|in:compact,process_next',
+        ]);
+
+        $mode = (string) $request->input('mode');
+        $arguments = $mode === 'compact'
+            ? ['--compact-only' => true]
+            : ['--limit' => 1, '--max-batches' => 1];
+
+        try {
+            $exitCode = Artisan::call('seo:process-ai-batches', $arguments);
+            $output = trim(Artisan::output());
+
+            logger()->info('Manual SEO queue recovery action', [
+                'user_id' => optional(auth()->user())->id,
+                'mode' => $mode,
+                'exit_code' => $exitCode,
+                'output' => Str::limit($output, 2000),
+            ]);
+
+            if ($exitCode !== 0) {
+                flash(translate('Queue recovery needs attention. Check SEO Monitoring or the application log.'))->warning();
+            } elseif ($mode === 'compact') {
+                flash(translate('SEO queue duplicates compacted successfully.'))->success();
+            } else {
+                flash(translate('Processed the next pending SEO URL. Review the live batch impact below.'))->success();
+            }
+        } catch (\Throwable $e) {
+            logger()->error('Manual SEO queue recovery failed', [
+                'user_id' => optional(auth()->user())->id,
+                'mode' => $mode,
+                'error' => $e->getMessage(),
+            ]);
+            flash(translate('Queue recovery could not finish. Check SEO Monitoring or the application log.'))->warning();
+        }
+
+        return redirect()->to(route('admin.seo-suite.index') . '#seo-autopilot');
     }
 
     public function run(Request $request)
@@ -688,8 +737,23 @@ class SeoSuiteController extends Controller
             'grok_len'      => strlen((string) $request->grok_api_key),
         ]);
 
+        $failoverOrder = collect(preg_split('/[\s,]+/', (string) $request->input('ai_failover_order', '')))
+            ->map(fn($provider) => SeoProviderManager::normalizeName($provider))
+            ->filter()
+            ->unique()
+            ->implode(',');
+        if ($failoverOrder === '') {
+            $failoverOrder = implode(',', config('seo.provider_failover.order', ['claude', 'openai', 'gemini', 'grok']));
+        }
+
         $pairs = [
             'seo_suite_default_provider'    => $request->default_provider,
+            'seo_ai_failover_enabled'       => $request->boolean('ai_failover_enabled') ? 1 : 0,
+            'seo_ai_failover_order'         => $failoverOrder,
+            'seo_ai_failover_max_attempts'  => min(4, max(1, (int) $request->input('ai_failover_max_attempts', 4))),
+            'seo_ai_provider_cooldown_enabled' => $request->boolean('ai_provider_cooldown_enabled') ? 1 : 0,
+            'seo_ai_provider_failure_threshold' => min(10, max(1, (int) $request->input('ai_provider_failure_threshold', 3))),
+            'seo_ai_provider_cooldown_minutes' => min(1440, max(1, (int) $request->input('ai_provider_cooldown_minutes', 15))),
             'seo_default_robots'            => $request->default_robots,
             'seo_local_business_name'       => $request->local_business_name,
             'seo_local_business_type'       => $request->local_business_type,
@@ -940,6 +1004,12 @@ class SeoSuiteController extends Controller
     {
         return [
             'default_provider'       => get_setting('seo_suite_default_provider', config('seo.default_provider')),
+            'ai_failover_enabled'    => (int) get_setting('seo_ai_failover_enabled', config('seo.provider_failover.enabled', true) ? 1 : 0),
+            'ai_failover_order'      => get_setting('seo_ai_failover_order', implode(',', config('seo.provider_failover.order', ['claude', 'openai', 'gemini', 'grok']))),
+            'ai_failover_max_attempts' => (int) get_setting('seo_ai_failover_max_attempts', config('seo.provider_failover.max_attempts', 4)),
+            'ai_provider_cooldown_enabled' => (int) get_setting('seo_ai_provider_cooldown_enabled', config('seo.provider_failover.cooldown_enabled', true) ? 1 : 0),
+            'ai_provider_failure_threshold' => (int) get_setting('seo_ai_provider_failure_threshold', config('seo.provider_failover.failure_threshold', 3)),
+            'ai_provider_cooldown_minutes' => (int) get_setting('seo_ai_provider_cooldown_minutes', config('seo.provider_failover.cooldown_minutes', 15)),
             'default_robots'         => get_setting('seo_default_robots', 'index, follow'),
             'local_business_name'    => get_setting('seo_local_business_name', get_setting('website_name')),
             'local_business_type'    => get_setting('seo_local_business_type', config('seo.local_business.type', 'Store')),
@@ -1026,6 +1096,7 @@ class SeoSuiteController extends Controller
             'gemini' => !empty($settings['gemini_api_key']),
             'grok' => !empty($settings['grok_api_key']),
         ];
+        $providerReliability = app(SeoProviderReliability::class)->dashboard();
 
         $files = [
             'sitemap' => $this->fileHealth('Sitemap', base_path('sitemap.xml'), 'la-sitemap', 'admin.seo-suite.sitemap'),
@@ -1125,6 +1196,7 @@ class SeoSuiteController extends Controller
             'avg_duration' => $avgDuration,
             'trend_delta' => $trendDelta,
             'providers' => $providers,
+            'provider_reliability' => $providerReliability,
             'files' => $files,
             'actions' => $actions,
             'risk_level' => $latestScore >= 80 && $successRate >= 80 ? 'low' : ($latestScore >= 50 ? 'medium' : 'high'),

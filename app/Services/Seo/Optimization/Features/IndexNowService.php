@@ -76,11 +76,10 @@ class IndexNowService extends AbstractSeoService
 
     protected function getIndexNowKey(): ?string
     {
-        $key = config('seo.indexnow.key');
-        if ($key) return $key;
         if (function_exists('get_setting')) {
-            return get_setting('seo_indexnow_key');
+            $key = get_setting('seo_indexnow_key');
+            if ($key) return $key;
         }
-        return null;
+        return config('seo.indexnow.key');
     }
 }

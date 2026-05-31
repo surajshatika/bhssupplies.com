@@ -28,6 +28,7 @@
 .mini-table td { padding: .35rem .5rem; font-size: .82rem; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
 .mini-table tr:last-child td { border-bottom: 0; }
 .text-truncate-cell { max-width: 220px; }
+.queue-health-strip { display:flex; flex-wrap:wrap; gap:.45rem 1rem; margin-top:.75rem; padding-top:.65rem; border-top:1px solid #eef0f4; font-size:.8rem; }
 </style>
 
 <div class="aiz-titlebar mt-2 mb-3">
@@ -98,7 +99,7 @@
     <div class="mon-card-head">
         <span><i class="las la-bolt mr-1"></i>{{ translate('Autopilot Health') }}</span>
         <div>
-            <a href="{{ route('admin.seo-suite.index') }}" class="btn btn-xs btn-soft-primary">{{ translate('Suite') }}</a>
+            <a href="{{ route('admin.seo-suite.index') }}#seo-autopilot" class="btn btn-xs btn-soft-primary">{{ translate('Queue Controls') }}</a>
             <a href="{{ route('admin.seo.ai_board.index', ['missing' => 'meta', 'sort' => 'score_asc']) }}" class="btn btn-xs btn-soft-danger ml-1">{{ translate('Pending Board') }}</a>
         </div>
     </div>
@@ -113,22 +114,37 @@
                 <div class="kv-row"><span class="k">{{ translate('Forecast') }}</span><span>{{ $auto['days_to_completion'] ?? '-' }} {{ translate('days') }}</span></div>
             </div>
             <div class="col-md-3 mb-2 mb-md-0">
+                <div class="kv-row"><span class="k">{{ translate('Recovery backlog') }}</span><span class="{{ ($auto['active_backlog_urls'] ?? 0) > 0 ? 'text-warning' : 'text-success' }} font-weight-600">{{ number_format($auto['active_backlog_urls'] ?? 0) }}</span></div>
+                <div class="kv-row"><span class="k">{{ translate('Drain estimate') }}</span><span>{{ number_format($auto['queue_drain_minutes'] ?? 0) }} {{ translate('min') }}</span></div>
+            </div>
+            <div class="col-md-3">
                 <div class="kv-row"><span class="k">{{ translate('Budget spent') }}</span><span>${{ number_format($auto['spent_today'] ?? 0, 4) }}</span></div>
                 <div class="kv-row"><span class="k">{{ translate('Daily cap') }}</span><span>{{ ($auto['budget_cap'] ?? 0) > 0 ? '$'.number_format($auto['budget_cap'], 2) : translate('No cap') }}</span></div>
             </div>
-            <div class="col-md-3">
-                <div class="kv-row">
-                    <span class="k">{{ translate('Active batch') }}</span>
-                    <span>
-                        @if(!empty($auto['active_batch']))
-                            #{{ $auto['active_batch']['id'] }} {{ $auto['active_batch']['status'] }} {{ $auto['active_batch']['percent'] }}%
-                        @else
-                            {{ translate('None') }}
-                        @endif
-                    </span>
-                </div>
-                <div class="kv-row"><span class="k">{{ translate('7d failed/cancelled') }}</span><span>{{ $auto['recent_failure_count'] ?? 0 }}</span></div>
-            </div>
+        </div>
+        <div class="queue-health-strip">
+            <span>
+                <span class="text-muted">{{ translate('Active batches') }}:</span>
+                <strong>{{ $auto['active_batch_count'] ?? 0 }}</strong>
+            </span>
+            <span>
+                <span class="text-muted">{{ translate('Stalled') }}:</span>
+                <strong class="{{ ($auto['stalled_batch_count'] ?? 0) > 0 ? 'text-danger' : 'text-success' }}">{{ $auto['stalled_batch_count'] ?? 0 }}</strong>
+            </span>
+            <span>
+                <span class="text-muted">{{ translate('Oldest active') }}:</span>
+                @if(!empty($auto['active_batch']))
+                    <strong>#{{ $auto['active_batch']['id'] }}</strong>
+                    {{ $auto['active_batch']['status'] }} {{ $auto['active_batch']['percent'] }}%
+                    <span class="text-muted">({{ $auto['active_batch']['remaining'] }} {{ translate('remaining') }}, {{ $auto['active_batch']['heartbeat'] ?? '-' }})</span>
+                @else
+                    <strong class="text-success">{{ translate('None') }}</strong>
+                @endif
+            </span>
+            <span>
+                <span class="text-muted">{{ translate('7d failed/cancelled') }}:</span>
+                <strong>{{ $auto['recent_failure_count'] ?? 0 }}</strong>
+            </span>
         </div>
     </div>
 </div>
@@ -169,10 +185,10 @@
                 @php
                     $bucketTotal = max(1, array_sum($buckets));
                 @endphp
-                <div class="kv-row"><span class="k"><span class="badge badge-soft-danger mr-1">●</span>{{ translate('Critical (<50)') }}</span><span>{{ $buckets['critical'] }}</span></div>
-                <div class="kv-row"><span class="k"><span class="badge badge-soft-warning mr-1">●</span>{{ translate('Warning (50–79)') }}</span><span>{{ $buckets['warning'] }}</span></div>
-                <div class="kv-row"><span class="k"><span class="badge badge-soft-success mr-1">●</span>{{ translate('Good (80+)') }}</span><span>{{ $buckets['good'] }}</span></div>
-                <div class="kv-row"><span class="k"><span class="badge badge-soft-secondary mr-1">●</span>{{ translate('Unrated') }}</span><span>{{ $buckets['unrated'] }}</span></div>
+                <div class="kv-row"><span class="k"><span class="text-danger mr-1">&#9679;</span>{{ translate('Critical (<50)') }}</span><span>{{ $buckets['critical'] }}</span></div>
+                <div class="kv-row"><span class="k"><span class="text-warning mr-1">&#9679;</span>{{ translate('Warning (50-79)') }}</span><span>{{ $buckets['warning'] }}</span></div>
+                <div class="kv-row"><span class="k"><span class="text-success mr-1">&#9679;</span>{{ translate('Good (80+)') }}</span><span>{{ $buckets['good'] }}</span></div>
+                <div class="kv-row"><span class="k"><span class="text-secondary mr-1">&#9679;</span>{{ translate('Unrated') }}</span><span>{{ $buckets['unrated'] }}</span></div>
                 <div class="bucket-bar">
                     <div style="background:#e74a3b; width:{{ round($buckets['critical']/$bucketTotal*100, 1) }}%"></div>
                     <div style="background:#f6c23e; width:{{ round($buckets['warning']/$bucketTotal*100, 1) }}%"></div>

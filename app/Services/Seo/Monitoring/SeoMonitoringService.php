@@ -58,6 +58,7 @@ class SeoMonitoringService
         $breakdown = [];
         $pendingTotal = 0;
         $activeBatch = null;
+        $activeBatches = collect();
         $recentFailureCount = 0;
 
         try {
@@ -66,10 +67,11 @@ class SeoMonitoringService
                 $pendingTotal = collect($breakdown)->sum('pending');
             }
             if (Schema::hasTable('seo_fix_batches')) {
-                $activeBatch = SeoFixBatch::query()
+                $activeBatches = SeoFixBatch::query()
                     ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
                     ->orderBy('id')
-                    ->first();
+                    ->get();
+                $activeBatch = $activeBatches->first();
                 $recentFailureCount = SeoFixBatch::query()
                     ->where('created_at', '>=', now()->subDays(7))
                     ->whereIn('status', [SeoFixBatch::STATUS_FAILED, SeoFixBatch::STATUS_CANCELLED])
@@ -82,18 +84,30 @@ class SeoMonitoringService
         $budget = app(SeoBudgetGuard::class);
         $cap = $budget->dailyCapUsd();
         $spent = round($budget->spendToday(), 4);
+        $activeBacklog = $activeBatches->sum(fn(SeoFixBatch $batch) => $batch->remainingCount());
+        $stalledBatchCount = $activeBatches->filter(fn(SeoFixBatch $batch) => $batch->isStalled())->count();
+        $queueDrainMinutes = $activeBacklog > 0 ? (int) ceil($activeBacklog / 30) * 5 : 0;
+        $freshQueueHours = $batchSize > 0 ? (int) ceil(max(0, $pendingTotal - $activeBacklog) / $batchSize) : null;
+        $queueDrainHours = (int) ceil($queueDrainMinutes / 60);
 
         return [
             'enabled' => $enabled,
             'batch_size' => $batchSize,
             'pending_total' => $pendingTotal,
-            'days_to_completion' => $batchSize > 0 ? (int) ceil($pendingTotal / $batchSize) : null,
+            'days_to_completion' => !is_null($freshQueueHours) ? (int) ceil(max($queueDrainHours, $freshQueueHours) / 24) : null,
+            'active_batch_count' => $activeBatches->count(),
+            'active_backlog_urls' => $activeBacklog,
+            'stalled_batch_count' => $stalledBatchCount,
+            'queue_drain_minutes' => $queueDrainMinutes,
             'active_batch' => $activeBatch ? [
                 'id' => $activeBatch->id,
                 'status' => $activeBatch->status,
                 'percent' => $activeBatch->progressPercent(),
                 'processed' => $activeBatch->processed,
                 'total' => $activeBatch->total,
+                'remaining' => $activeBatch->remainingCount(),
+                'stalled' => $activeBatch->isStalled(),
+                'heartbeat' => optional($activeBatch->updated_at)->diffForHumans(),
             ] : null,
             'recent_failure_count' => $recentFailureCount,
             'budget_cap' => $cap,

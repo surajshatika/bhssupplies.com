@@ -3,9 +3,25 @@
 return [
     'default_provider' => env('SEO_AI_PROVIDER', 'openai'),
 
-    // Disable SSL cert verification for local/WAMP development.
-    // Set SEO_SSL_VERIFY=true in production.
-    'ssl_verify' => env('SEO_SSL_VERIFY', false),
+    // Local WAMP installs can opt out explicitly. Production verifies remote
+    // AI, Google, Bing, and PageSpeed TLS certificates by default.
+    'ssl_verify' => env('SEO_SSL_VERIFY', env('APP_ENV', 'production') === 'production'),
+
+    'provider_failover' => [
+        'enabled' => env('SEO_AI_FAILOVER_ENABLED', true),
+        'order' => array_values(array_filter(array_map('trim', explode(',', env('SEO_AI_FAILOVER_ORDER', 'claude,openai,gemini,grok'))))),
+        'max_attempts' => env('SEO_AI_FAILOVER_MAX_ATTEMPTS', 4),
+        'cooldown_enabled' => env('SEO_AI_PROVIDER_COOLDOWN_ENABLED', true),
+        'failure_threshold' => env('SEO_AI_PROVIDER_FAILURE_THRESHOLD', 3),
+        'cooldown_minutes' => env('SEO_AI_PROVIDER_COOLDOWN_MINUTES', 15),
+        'attempt_cost_usd' => [
+            'openai' => env('SEO_OPENAI_ESTIMATED_REQUEST_USD', 0.0009),
+            'claude' => env('SEO_CLAUDE_ESTIMATED_REQUEST_USD', 0.0207),
+            'gemini' => env('SEO_GEMINI_ESTIMATED_REQUEST_USD', 0.0004),
+            'grok' => env('SEO_GROK_ESTIMATED_REQUEST_USD', 0.0023),
+        ],
+        'database_settings' => true,
+    ],
 
     'providers' => [
         'openai' => [

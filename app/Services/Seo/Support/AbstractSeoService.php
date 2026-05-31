@@ -26,25 +26,37 @@ abstract class AbstractSeoService
 
     protected function askForJson($prompt, $systemPrompt, array $fallback)
     {
-        $response = $this->provider->generate($prompt, $systemPrompt);
+        $response = $this->provider->generate($prompt, $systemPrompt, ['expect_json' => true]);
+        $this->refreshProviderName();
         $parsed = $this->parseJson($response);
 
         if (!is_array($parsed) || empty($parsed)) {
             return $fallback;
         }
 
-        return array_replace_recursive($fallback, $parsed);
+        $result = array_replace_recursive($fallback, $parsed);
+        if (array_key_exists('provider', $result)) {
+            $result['provider'] = $this->providerName;
+        }
+
+        return $result;
     }
 
     protected function askForText($prompt, $systemPrompt, $fallback)
     {
         $response = $this->provider->generate($prompt, $systemPrompt);
+        $this->refreshProviderName();
 
         if (!is_string($response) || trim($response) === '') {
             return $fallback;
         }
 
         return trim($response);
+    }
+
+    protected function refreshProviderName(): void
+    {
+        $this->providerName = $this->provider->getName();
     }
 
     protected function parseJson($content)

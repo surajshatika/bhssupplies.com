@@ -33,6 +33,7 @@
     $advancedActions   = $advancedDashboard['actions'] ?? [];
     $advancedFiles     = $advancedDashboard['files'] ?? [];
     $providerHealth    = $advancedDashboard['providers'] ?? [];
+    $providerReliability = $advancedDashboard['provider_reliability'] ?? [];
     $automationReady   = $advancedDashboard['automation_readiness'] ?? 0;
     $successRate       = $advancedDashboard['success_rate'] ?? 0;
     $trendDelta        = $advancedDashboard['trend_delta'] ?? 0;
@@ -67,6 +68,7 @@
 .advanced-action.low { border-left-color: #858796; }
 .seo-file-health { border: 1px solid #edf0f5; border-radius: 8px; padding: 12px; height: 100%; }
 .seo-status-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.provider-reliability-table td, .provider-reliability-table th { white-space: nowrap; vertical-align: middle; }
 </style>
 
 <div class="mm-hero mm-hero--seo">
@@ -339,6 +341,14 @@
                                 </span>
                             </div>
                         @endforeach
+                        <div class="border-top pt-2 mt-2 small">
+                            <span class="badge badge-{{ !empty($settings['ai_failover_enabled']) ? 'success' : 'secondary' }}">
+                                {{ !empty($settings['ai_failover_enabled']) ? translate('Automatic failover ON') : translate('Automatic failover OFF') }}
+                            </span>
+                            @if(!empty($settings['ai_failover_enabled']))
+                                <span class="d-block text-muted mt-1">{{ $settings['ai_failover_order'] ?? 'claude,openai,gemini,grok' }}</span>
+                            @endif
+                        </div>
                         <a href="{{ route('admin.seo-suite.settings.view') }}" class="btn btn-xs btn-soft-primary mt-2">
                             <i class="las la-sliders-h mr-1"></i>{{ translate('Manage Providers') }}
                         </a>
@@ -370,6 +380,63 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <div class="border-top mt-4 pt-3">
+            <div class="d-flex flex-wrap align-items-center justify-content-between mb-2">
+                <div>
+                    <h6 class="font-weight-600 mb-1">{{ translate('AI Reliability Center') }}</h6>
+                    <small class="text-muted">{{ translate('Live provider health for automated SEO requests. Unhealthy endpoints cool down while configured fallbacks continue the queue.') }}</small>
+                </div>
+                <span class="badge badge-{{ !empty($settings['ai_provider_cooldown_enabled']) ? 'success' : 'secondary' }} mt-2 mt-md-0">
+                    {{ !empty($settings['ai_provider_cooldown_enabled']) ? translate('Cooldown protection ON') : translate('Cooldown protection OFF') }}
+                </span>
+            </div>
+            <div class="table-responsive border rounded">
+                <table class="table table-sm mb-0 provider-reliability-table">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>{{ translate('Provider') }}</th>
+                            <th>{{ translate('Status') }}</th>
+                            <th>{{ translate('Attempts') }}</th>
+                            <th>{{ translate('Success') }}</th>
+                            <th>{{ translate('Failures') }}</th>
+                            <th>{{ translate('Fallback Wins') }}</th>
+                            <th>{{ translate('Last Latency') }}</th>
+                            <th>{{ translate('Est. Spend') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($providerReliability as $provider => $health)
+                            <tr>
+                                <td class="text-uppercase font-weight-bold">{{ $provider }}</td>
+                                <td>
+                                    @if(empty($health['configured']))
+                                        <span class="badge badge-secondary">{{ translate('Missing key') }}</span>
+                                    @elseif(!empty($health['cooling_down']))
+                                        <span class="badge badge-warning">{{ translate('Cooling down') }}</span>
+                                        <small class="d-block text-muted">{{ $health['cooldown_until'] }}</small>
+                                    @else
+                                        <span class="badge badge-success">{{ translate('Ready') }}</span>
+                                    @endif
+                                </td>
+                                <td>{{ number_format($health['attempts'] ?? 0) }}</td>
+                                <td>
+                                    @if(is_null($health['success_rate'] ?? null))
+                                        -
+                                    @else
+                                        {{ $health['success_rate'] }}%
+                                    @endif
+                                </td>
+                                <td>{{ number_format($health['failures'] ?? 0) }}</td>
+                                <td>{{ number_format($health['fallback_selections'] ?? 0) }}</td>
+                                <td>{{ !is_null($health['last_duration_ms'] ?? null) ? number_format($health['last_duration_ms']) . ' ms' : '-' }}</td>
+                                <td>${{ number_format($health['estimated_cost_usd'] ?? 0, 4) }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -522,6 +589,7 @@
                     <small class="text-muted">
                         @if(($autopilot['budget_cap'] ?? 0) > 0)
                             {{ translate('cap') }} ${{ number_format($autopilot['budget_cap'], 2) }}
+                            <span class="d-block">{{ translate('remaining') }} ${{ number_format($autopilot['remaining_today'] ?? 0, 4) }}</span>
                         @else
                             {{ translate('no cap') }}
                         @endif
@@ -546,6 +614,15 @@
                                     {{ (int) ($activeStats['improved'] ?? 0) }} {{ translate('improved') }}
                                     / {{ (int) ($activeStats['seo_done'] ?? 0) }} {{ translate('done') }}
                                     / {{ (int) ($activeStats['no_gain'] ?? 0) }} {{ translate('no gain') }}
+                                    @if((int) ($activeStats['provider_failovers'] ?? 0) > 0)
+                                        <span class="d-block text-info">{{ (int) $activeStats['provider_failovers'] }} {{ translate('AI provider failovers') }}</span>
+                                    @endif
+                                    @if((int) ($activeStats['provider_attempts'] ?? 0) > 0)
+                                        <span class="d-block text-muted">{{ (int) $activeStats['provider_attempts'] }} {{ translate('AI requests') }} / ${{ number_format($activeStats['estimated_ai_spend_usd'] ?? 0, 4) }}</span>
+                                    @endif
+                                    @if((int) ($activeStats['budget_pauses'] ?? 0) > 0)
+                                        <span class="d-block text-danger">{{ translate('Paused by daily AI budget cap') }}</span>
+                                    @endif
                                 </span>
                             @else
                                 <span class="d-block">{{ translate('Impact tracking starts on next chunk') }}</span>
@@ -617,9 +694,25 @@
                         <h6 class="font-weight-600 mb-0">{{ translate('Active Queue Recovery') }}</h6>
                         <small class="text-muted">{{ translate('Oldest unfinished batches drain first. Duplicate pending URLs in newer batches are compacted automatically by cron.') }}</small>
                     </div>
-                    <span class="badge badge-{{ ($autopilot['stalled_batch_count'] ?? 0) > 0 ? 'danger' : 'success' }}">
-                        {{ ($autopilot['stalled_batch_count'] ?? 0) > 0 ? translate('Recovery attention') : translate('Healthy') }}
-                    </span>
+                    <div class="d-flex flex-wrap align-items-center mt-2 mt-md-0" style="gap:.4rem;">
+                        <span class="badge badge-{{ ($autopilot['stalled_batch_count'] ?? 0) > 0 ? 'danger' : 'success' }}">
+                            {{ ($autopilot['stalled_batch_count'] ?? 0) > 0 ? translate('Recovery attention') : translate('Healthy') }}
+                        </span>
+                        <form method="POST" action="{{ route('admin.seo-suite.queue.recover') }}" class="d-inline">
+                            @csrf
+                            <input type="hidden" name="mode" value="compact">
+                            <button type="submit" class="btn btn-xs btn-soft-secondary">
+                                <i class="las la-compress-arrows-alt mr-1"></i>{{ translate('Compact Duplicates') }}
+                            </button>
+                        </form>
+                        <form method="POST" action="{{ route('admin.seo-suite.queue.recover') }}" class="d-inline" onsubmit="return confirm('{{ translate('Process exactly one next pending SEO URL now? Completed SEO URLs remain protected.') }}');">
+                            @csrf
+                            <input type="hidden" name="mode" value="process_next">
+                            <button type="submit" class="btn btn-xs btn-soft-primary">
+                                <i class="las la-play mr-1"></i>{{ translate('Process Next URL') }}
+                            </button>
+                        </form>
+                    </div>
                 </div>
                 <div class="table-responsive border rounded">
                     <table class="table table-sm mb-0">
@@ -766,7 +859,12 @@
                                             ({{ $delta > 0 ? '+' : '' }}{{ $delta }})
                                         </span>
                                     </td>
-                                    <td class="small text-muted">{{ $row['provider'] ?? $row['source'] ?? '-' }}</td>
+                                    <td class="small text-muted">
+                                        {{ $row['provider'] ?? $row['source'] ?? '-' }}
+                                        @if(count($row['provider_attempts'] ?? []) > 1)
+                                            <span class="d-block text-info">{{ translate('Fallback') }}: {{ implode(' -> ', $row['provider_attempts']) }}</span>
+                                        @endif
+                                    </td>
                                     <td>
                                         <span class="badge badge-{{ !empty($row['seo_done']) ? 'success' : 'warning' }}">
                                             {{ !empty($row['seo_done']) ? translate('SEO Done') : translate('Still Pending') }}

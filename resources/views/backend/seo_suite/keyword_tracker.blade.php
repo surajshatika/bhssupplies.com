@@ -30,8 +30,10 @@
         [translate('Tracked Keywords'), $keywordIntelligence['tracked_count'] ?? 0, 'info'],
         [translate('Ranking Keywords'), $keywordIntelligence['ranked_count'] ?? 0, 'success'],
         [translate('Google Page 1'), $keywordIntelligence['page_one_count'] ?? 0, 'warning'],
+        [translate('Autopilot Focus'), $keywordIntelligence['generated_focus_keyword_count'] ?? 0, 'secondary'],
+        [translate('GSC Query URLs'), $keywordIntelligence['gsc_keyword_page_count'] ?? 0, 'danger'],
     ] as [$label, $value, $color])
-        <div class="col-sm-6 col-lg-3">
+        <div class="col-sm-6 col-lg-4 col-xl-2">
             <div class="card">
                 <div class="card-body py-3">
                     <div class="text-muted small">{{ $label }}</div>
@@ -41,6 +43,16 @@
         </div>
     @endforeach
 </div>
+
+@if(($keywordIntelligence['gsc_keyword_page_count'] ?? 0) === 0)
+    <div class="alert alert-soft-info d-flex flex-wrap align-items-center justify-content-between mb-3">
+        <span>
+            <i class="las la-info-circle mr-1"></i>
+            {{ translate('Google Search Console landing-page data is not synced yet. Connect GSC to see which keyword displays which website page in Google.') }}
+        </span>
+        <a href="{{ route('admin.seo-suite.settings.view') }}" class="btn btn-xs btn-soft-primary mt-2 mt-md-0">{{ translate('Open GSC Settings') }}</a>
+    </div>
+@endif
 
 <div class="row">
     <div class="col-lg-4">

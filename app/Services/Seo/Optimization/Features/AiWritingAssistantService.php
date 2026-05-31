@@ -52,6 +52,9 @@ class AiWritingAssistantService extends AbstractSeoService
             'content_type' => $type,
             'format'       => in_array($task, $this->htmlModes, true) ? 'html' : 'text',
             'word_count'   => str_word_count(strip_tags($result)),
+            'provider'     => $ai->getName(),
+            'provider_attempts' => method_exists($ai, 'getAttempts') ? $ai->getAttempts() : [],
+            'failover_used' => method_exists($ai, 'usedFallback') ? $ai->usedFallback() : false,
         ];
     }
 

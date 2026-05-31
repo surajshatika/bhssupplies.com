@@ -61,6 +61,55 @@
                     </select>
                 </div>
 
+                <div class="border rounded p-3 mb-3 bg-light">
+                    <div class="custom-control custom-switch mb-2">
+                        <input type="checkbox" class="custom-control-input" id="ai-failover-enabled" name="ai_failover_enabled" value="1" {{ !empty($settings['ai_failover_enabled']) ? 'checked' : '' }}>
+                        <label class="custom-control-label font-weight-bold" for="ai-failover-enabled">{{ translate('Automatic AI provider failover') }}</label>
+                    </div>
+                    <small class="text-muted d-block mb-3">{{ translate('If the selected AI is unavailable, times out, or returns unusable JSON, SEO automation tries the next configured provider.') }}</small>
+                    <div class="form-group">
+                        <label>{{ translate('Fallback quality order') }}</label>
+                        <input type="text" class="form-control" name="ai_failover_order" value="{{ $settings['ai_failover_order'] ?? 'claude,openai,gemini,grok' }}" placeholder="claude,openai,gemini,grok">
+                        <small class="text-muted">{{ translate('The selected default provider is always attempted first. Use comma-separated provider names.') }}</small>
+                    </div>
+                    <div class="form-group mb-0">
+                        <label>{{ translate('Maximum AI attempts per request') }}</label>
+                        <select class="form-control" name="ai_failover_max_attempts">
+                            @foreach([1, 2, 3, 4] as $attempts)
+                                <option value="{{ $attempts }}" {{ (int) ($settings['ai_failover_max_attempts'] ?? 4) === $attempts ? 'selected' : '' }}>{{ $attempts }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <hr>
+                    <div class="custom-control custom-switch mb-3">
+                        <input type="checkbox" class="custom-control-input" id="ai-provider-cooldown-enabled" name="ai_provider_cooldown_enabled" value="1" {{ !empty($settings['ai_provider_cooldown_enabled']) ? 'checked' : '' }}>
+                        <label class="custom-control-label font-weight-bold" for="ai-provider-cooldown-enabled">{{ translate('Cool down unhealthy AI providers') }}</label>
+                        <small class="text-muted d-block mt-1">{{ translate('Temporarily skips a provider after repeated unusable responses so scheduled SEO can continue with a healthy fallback.') }}</small>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-6">
+                            <div class="form-group mb-0">
+                                <label>{{ translate('Failures before cooldown') }}</label>
+                                <select class="form-control" name="ai_provider_failure_threshold">
+                                    @foreach([2, 3, 4, 5, 10] as $threshold)
+                                        <option value="{{ $threshold }}" {{ (int) ($settings['ai_provider_failure_threshold'] ?? 3) === $threshold ? 'selected' : '' }}>{{ $threshold }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-sm-6">
+                            <div class="form-group mb-0">
+                                <label>{{ translate('Cooldown duration') }}</label>
+                                <select class="form-control" name="ai_provider_cooldown_minutes">
+                                    @foreach([5, 10, 15, 30, 60] as $minutes)
+                                        <option value="{{ $minutes }}" {{ (int) ($settings['ai_provider_cooldown_minutes'] ?? 15) === $minutes ? 'selected' : '' }}>{{ $minutes }} {{ translate('minutes') }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label>
                         <span class="badge badge-success mr-1">OpenAI</span>

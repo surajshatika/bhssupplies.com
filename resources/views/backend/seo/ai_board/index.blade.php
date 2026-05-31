@@ -461,12 +461,6 @@
     const applyApprovedEndpoint = '{{ route("admin.seo.ai_board.apply_approved") }}';
     let previewCtx = null; // {type, id}
 
-    function escapeHtml(value) {
-        return String(value || '').replace(/[&<>"']/g, function (char) {
-            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
-        });
-    }
-
     function safeHttpUrl(value) {
         const raw = String(value == null ? '' : value).trim();
         if (!raw) return '';

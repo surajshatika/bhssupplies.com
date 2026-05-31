@@ -6,6 +6,7 @@ use App\Jobs\Seo\AiAutoFixSeoJob;
 use App\Models\SeoFixBatch;
 use App\Services\Seo\Board\AiSeoBoardService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -15,6 +16,7 @@ class ProcessAiSeoBatchesCommand extends Command
                             {--batch= : Process one specific batch ID}
                             {--limit=10 : Maximum URLs to process in this run}
                             {--max-batches=3 : Maximum active batches to process per run}
+                            {--compact-only : Remove duplicate pending URLs without processing AI fixes}
                             {--dry-run : Show the next batch without changing data}';
 
     protected $description = 'Process queued AI SEO Board batches in small cron-friendly chunks.';
@@ -33,15 +35,24 @@ class ProcessAiSeoBatchesCommand extends Command
 
         $query = SeoFixBatch::query()
             ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
-            ->orderByRaw("CASE WHEN status = ? THEN 0 ELSE 1 END", [SeoFixBatch::STATUS_QUEUED])
-            ->orderBy('updated_at')
             ->orderBy('id');
 
         if ($this->option('batch')) {
             $query->where('id', (int) $this->option('batch'));
         }
 
-        $batches = $query->limit($maxBatches)->get();
+        $activeBatches = (clone $query)->get();
+        $duplicates = $this->compactDuplicatePendingTargets($activeBatches, !$this->option('dry-run'));
+        if ($duplicates > 0) {
+            $verb = $this->option('dry-run') ? 'can be removed' : 'removed';
+            $this->info("Queue compaction: {$duplicates} duplicate pending URLs {$verb} from newer active batches.");
+        }
+        if ($this->option('compact-only')) {
+            $this->info('Queue compaction finished without processing AI fixes.');
+            return self::SUCCESS;
+        }
+
+        $batches = (clone $query)->limit($maxBatches)->get();
         if ($batches->isEmpty()) {
             $this->info('No queued or running AI SEO batches found.');
             return self::SUCCESS;
@@ -90,5 +101,60 @@ class ProcessAiSeoBatchesCommand extends Command
         }
 
         return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    protected function compactDuplicatePendingTargets(Collection $batches, bool $persist): int
+    {
+        $claimed = [];
+        $removed = 0;
+
+        foreach ($batches as $batch) {
+            $targets = array_values($batch->target_ids ?? []);
+            $processed = min((int) $batch->processed, count($targets));
+            $prefix = array_slice($targets, 0, $processed);
+            $pending = [];
+
+            foreach ($prefix as $target) {
+                $claimed[$this->targetKey($target)] = true;
+            }
+
+            foreach (array_slice($targets, $processed) as $target) {
+                $key = $this->targetKey($target);
+                if (isset($claimed[$key])) {
+                    $removed++;
+                    continue;
+                }
+
+                $claimed[$key] = true;
+                $pending[] = $target;
+            }
+
+            $compacted = array_merge($prefix, $pending);
+            if (!$persist || count($compacted) === count($targets)) {
+                continue;
+            }
+
+            $patch = [
+                'target_ids' => $compacted,
+                'total' => count($compacted),
+            ];
+            if (count($compacted) <= $processed) {
+                $patch['status'] = SeoFixBatch::STATUS_COMPLETED;
+                $patch['current_label'] = null;
+                $patch['completed_at'] = now();
+            }
+            $batch->update($patch);
+        }
+
+        return $removed;
+    }
+
+    protected function targetKey($target): string
+    {
+        if (!is_array($target)) {
+            return 'invalid:' . md5(serialize($target));
+        }
+
+        return (string) ($target['type'] ?? '') . ':' . (int) ($target['id'] ?? 0);
     }
 }

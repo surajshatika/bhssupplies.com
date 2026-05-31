@@ -34,7 +34,7 @@ class AutoGenerateOffPageSeoCommand extends Command
         $limit = (int) ($this->option('limit') ?: get_setting('seo_auto_offpage_batch_size', 3));
         $limit = max(1, min(10, $limit));
         $provider = $this->option('provider') ?: get_setting('seo_suite_default_provider', config('seo.default_provider', 'openai'));
-        $targets = $board->offPageCampaignTargetPreview($limit, ['product', 'category', 'page']);
+        $targets = $board->offPageCampaignTargetPreview($limit, ['page', 'category', 'product']);
 
         if ($targets->isEmpty()) {
             $this->info('No SEO-ready URLs found for off-page campaign generation.');

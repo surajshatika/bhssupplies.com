@@ -15,7 +15,7 @@ class AutoOptimizePendingSeoCommand extends Command
                             {--provider= : AI provider override}
                             {--dry-run : Show what would be queued without creating a batch}';
 
-    protected $description = 'Automatically generate advanced Canada SEO for pending Product, Category, and Page URLs only.';
+    protected $description = 'Automatically generate advanced Canada SEO for pending Page, Category, and Product URLs in priority order.';
 
     public function handle(AiSeoBoardService $board, SeoBudgetGuard $budget): int
     {
@@ -31,7 +31,7 @@ class AutoOptimizePendingSeoCommand extends Command
 
         $activeBatch = SeoFixBatch::query()
             ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
-            ->latest()
+            ->orderBy('id')
             ->first();
 
         if ($activeBatch && !$this->option('dry-run')) {
@@ -46,14 +46,14 @@ class AutoOptimizePendingSeoCommand extends Command
         $limit = max(1, min(100, $limit));
 
         $provider = $this->option('provider') ?: get_setting('seo_suite_default_provider', config('seo.default_provider', 'openai'));
-        $targetRows = $board->nextAutopilotTargetPreview($limit, ['product', 'category', 'page']);
+        $targetRows = $board->nextAutopilotTargetPreview($limit, ['page', 'category', 'product']);
         $targets = $targetRows
             ->map(fn(array $row) => ['type' => $row['type'], 'id' => (int) $row['id']])
             ->values()
             ->all();
 
         if (empty($targets)) {
-            $this->info('No pending Product, Category, or Page URLs found.');
+            $this->info('No pending Page, Category, or Product URLs found.');
             return self::SUCCESS;
         }
 
@@ -62,12 +62,14 @@ class AutoOptimizePendingSeoCommand extends Command
         $this->info('Provider: ' . $estimate['provider'] . ' | Estimated cost: $' . number_format($estimate['usd'], 4));
 
         if ($this->option('dry-run')) {
-            $this->line('Dry-run preview. Priority is queue urgency, not the current SEO score.');
+            $this->line('Dry-run preview. Previous pending queue URLs retry first. Fresh URLs then run Pages, Categories, and Products. Weak SEO URLs below 80 can be refined.');
             foreach ($targetRows as $target) {
                 $this->line(sprintf(
-                    '- %s#%d | priority %d/100 | current SEO %d/100 | issues: %s',
+                    '- %s#%d | source %s%s | priority %d/100 | current SEO %d/100 | issues: %s',
                     $target['type'],
                     (int) $target['id'],
+                    $target['queue_source'] ?? 'fresh',
+                    !empty($target['retry_from_batch']) ? ' batch#' . (int) $target['retry_from_batch'] : '',
                     (int) ($target['priority_score'] ?? 0),
                     (int) ($target['score'] ?? 0),
                     implode(', ', $target['priority_reasons'] ?? [])

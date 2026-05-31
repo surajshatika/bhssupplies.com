@@ -27,13 +27,13 @@
     $seoActiveBatch = null;
     try {
         if (\Illuminate\Support\Facades\Schema::hasTable('seo_meta')) {
-            $seoBreakdown = app(\App\Services\Seo\Board\AiSeoBoardService::class)->pendingBreakdownByType(['product', 'category', 'page']);
+            $seoBreakdown = app(\App\Services\Seo\Board\AiSeoBoardService::class)->pendingBreakdownByType(['page', 'category', 'product']);
             $seoAutopilotPending = collect($seoBreakdown)->sum('pending');
         }
         if (\Illuminate\Support\Facades\Schema::hasTable('seo_fix_batches')) {
             $seoActiveBatch = \App\Models\SeoFixBatch::query()
                 ->whereIn('status', [\App\Models\SeoFixBatch::STATUS_QUEUED, \App\Models\SeoFixBatch::STATUS_RUNNING])
-                ->latest()
+                ->orderBy('id')
                 ->first();
         }
     } catch (\Throwable $e) {

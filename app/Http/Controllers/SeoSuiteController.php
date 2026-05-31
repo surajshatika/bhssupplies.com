@@ -6,6 +6,9 @@ use App\Jobs\GenerateOnPageSeoJob;
 use App\Jobs\GenerateOptimizationJob;
 use App\Jobs\GenerateSeoContentJob;
 use App\Models\BusinessSetting;
+use App\Models\SeoAnalytic;
+use App\Models\SeoKeyword;
+use App\Models\SeoMeta;
 use App\Models\SeoProject;
 use App\Models\SeoRedirect;
 use App\Models\SeoFixBatch;
@@ -61,6 +64,7 @@ class SeoSuiteController extends Controller
         $autopilot = $setupRequired
             ? $this->emptyAutopilotDashboard($settings)
             : $this->buildAutopilotDashboard($settings);
+        $keywordIntelligence = $setupRequired ? $this->emptyKeywordIntelligence() : $this->buildKeywordIntelligence();
 
         return view('backend.seo_suite.index', compact(
             'project',
@@ -73,7 +77,8 @@ class SeoSuiteController extends Controller
             'setupRequired',
             'advancedDashboard',
             'urlInventory',
-            'autopilot'
+            'autopilot',
+            'keywordIntelligence'
         ));
     }
 
@@ -90,7 +95,7 @@ class SeoSuiteController extends Controller
         ]);
 
         $limit = (int) $request->input('limit', 10);
-        $targets = app(AiSeoBoardService::class)->collectPendingTargetsAcrossTypes($limit, ['product', 'category', 'page']);
+        $targets = app(AiSeoBoardService::class)->collectPendingTargetsAcrossTypes($limit, ['page', 'category', 'product']);
 
         if (empty($targets)) {
             flash(translate('No pending Product, Category, or Page URLs found for SEO generation.'))->warning();
@@ -463,7 +468,8 @@ class SeoSuiteController extends Controller
         try {
             $histories = SeoScoreHistory::query()->latest('recorded_at')->limit(20)->get()->toArray();
         } catch (\Throwable $e) {}
-        return view('backend.seo_suite.keyword_tracker', compact('settings', 'histories'));
+        $keywordIntelligence = $this->buildKeywordIntelligence(250, 100);
+        return view('backend.seo_suite.keyword_tracker', compact('settings', 'histories', 'keywordIntelligence'));
     }
 
     public function checkKeywordRanks(Request $request)
@@ -474,6 +480,7 @@ class SeoSuiteController extends Controller
             'keywords' => $request->input('keywords'),
             'domain'   => parse_url(url('/'), PHP_URL_HOST),
             'engine'   => $request->input('engine', 'google'),
+            'country'  => 'ca',
         ]);
 
         return response()->json($result);
@@ -769,6 +776,141 @@ class SeoSuiteController extends Controller
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
+    protected function buildKeywordIntelligence(int $trackedLimit = 20, int $gscLimit = 20): array
+    {
+        $groups = [
+            'Primary locations' => ['Mississauga', 'Brampton', 'Toronto'],
+            'Supporting locations' => ['Etobicoke', 'Vaughan', 'Oakville', 'Scarborough', 'Markham', 'North York', 'Burlington'],
+            'Conversion intents' => ['Trade Account', 'Leave a Review'],
+        ];
+        $topics = ['HVAC supplies', 'Plumbing supplies', 'Electrical supplies', 'Hardware supplies', 'Contractor supplies', 'Wholesale supplies'];
+        $locations = array_merge($groups['Primary locations'], $groups['Supporting locations']);
+        $targetKeywords = collect($locations)
+            ->flatMap(fn(string $location) => collect($topics)->map(fn(string $topic) => "{$topic} {$location}"))
+            ->merge([
+                'BHS Supplies Trade Account',
+                'HVAC Trade Account',
+                'Plumbing Trade Account',
+                'Electrical Trade Account',
+                'Hardware Trade Account',
+                'Leave a Review BHS Supplies',
+            ])
+            ->unique()
+            ->values();
+
+        $trackedKeywords = collect();
+        $trackedCount = 0;
+        $rankedCount = 0;
+        $pageOneCount = 0;
+
+        if (Schema::hasTable('seo_keywords')) {
+            $trackedQuery = SeoKeyword::query()->where('is_active', true);
+            $trackedCount = (clone $trackedQuery)->count();
+            $rankedCount = (clone $trackedQuery)->where('rank_current', '>', 0)->count();
+            $pageOneCount = (clone $trackedQuery)->whereBetween('rank_current', [1, 10])->count();
+            $trackedKeywords = $trackedQuery
+                ->orderByRaw('rank_current IS NULL, rank_current = 0, rank_current ASC')
+                ->limit($trackedLimit)
+                ->get()
+                ->map(function (SeoKeyword $keyword): array {
+                    $rank = (int) ($keyword->rank_current ?? 0);
+                    $previous = (int) ($keyword->rank_previous ?? 0);
+
+                    return [
+                        'keyword' => $keyword->keyword,
+                        'rank' => $rank,
+                        'previous_rank' => $previous ?: null,
+                        'movement' => $rank > 0 && $previous > 0 ? $previous - $rank : null,
+                        'google_page' => $rank > 0 ? (int) ceil($rank / 10) : null,
+                        'google_page_label' => $rank > 0 ? 'Page ' . (int) ceil($rank / 10) : 'Not found in top 100',
+                        'url' => $keyword->target_url,
+                        'country' => strtoupper((string) $keyword->country),
+                        'engine' => $keyword->engine,
+                        'checked_at' => $keyword->last_checked_at,
+                    ];
+                })
+                ->values();
+        }
+
+        $gscKeywordPages = collect();
+        $gscKeywordPageCount = 0;
+        if (Schema::hasTable('seo_analytics')) {
+            $gscKeywordPages = SeoAnalytic::query()
+                ->where('source', 'gsc')
+                ->where('dimension', 'query_page')
+                ->where('date', '>=', now()->subDays(28)->toDateString())
+                ->get()
+                ->map(function (SeoAnalytic $row): ?array {
+                    $pair = json_decode((string) $row->value, true);
+                    if (empty($pair['query']) || empty($pair['page'])) {
+                        return null;
+                    }
+
+                    return [
+                        'query' => $pair['query'],
+                        'page' => $pair['page'],
+                        'clicks' => (int) $row->clicks,
+                        'impressions' => (int) $row->impressions,
+                        'ctr' => (float) $row->ctr,
+                        'position' => (float) $row->position,
+                    ];
+                })
+                ->filter()
+                ->groupBy(fn(array $row) => $row['query'] . '|' . $row['page'])
+                ->map(function ($rows): array {
+                    $impressions = $rows->sum('impressions');
+                    $positionWeight = $rows->sum(fn(array $row) => max(1, $row['impressions']));
+                    $position = round($rows->sum(fn(array $row) => $row['position'] * max(1, $row['impressions'])) / $positionWeight, 1);
+                    $clicks = $rows->sum('clicks');
+
+                    return [
+                        'query' => $rows->first()['query'],
+                        'page' => $rows->first()['page'],
+                        'clicks' => $clicks,
+                        'impressions' => $impressions,
+                        'ctr' => $impressions > 0 ? round(($clicks / $impressions) * 100, 2) : 0,
+                        'position' => $position,
+                        'google_page' => $position > 0 ? (int) ceil($position / 10) : null,
+                    ];
+                })
+                ->sortByDesc('impressions')
+                ->values();
+            $gscKeywordPageCount = $gscKeywordPages->count();
+            $gscKeywordPages = $gscKeywordPages->take($gscLimit)->values();
+        }
+
+        return [
+            'groups' => $groups,
+            'target_keywords' => $targetKeywords,
+            'target_keyword_count' => $targetKeywords->count(),
+            'tracked_keywords' => $trackedKeywords,
+            'tracked_count' => $trackedCount,
+            'ranked_count' => $rankedCount,
+            'page_one_count' => $pageOneCount,
+            'gsc_keyword_pages' => $gscKeywordPages,
+            'gsc_keyword_page_count' => $gscKeywordPageCount,
+            'generated_focus_keyword_count' => Schema::hasTable('seo_meta')
+                ? SeoMeta::query()->whereNotNull('focus_keyword')->distinct()->count('focus_keyword')
+                : 0,
+        ];
+    }
+
+    protected function emptyKeywordIntelligence(): array
+    {
+        return [
+            'groups' => [],
+            'target_keywords' => collect(),
+            'target_keyword_count' => 0,
+            'tracked_keywords' => collect(),
+            'tracked_count' => 0,
+            'ranked_count' => 0,
+            'page_one_count' => 0,
+            'gsc_keyword_pages' => collect(),
+            'gsc_keyword_page_count' => 0,
+            'generated_focus_keyword_count' => 0,
+        ];
+    }
+
     protected function loadSettings(): array
     {
         return [
@@ -968,29 +1110,35 @@ class SeoSuiteController extends Controller
     {
         $board = app(AiSeoBoardService::class);
         $budget = app(SeoBudgetGuard::class);
-        $breakdown = $board->pendingBreakdownByType(['product', 'category', 'page']);
+        $breakdown = $board->pendingBreakdownByType(['page', 'category', 'product']);
         $batchSize = (int) ($settings['auto_seo_batch_size'] ?? 10);
         $pendingTotal = collect($breakdown)->sum('pending');
-        $nextPreview = $board->nextAutopilotTargetPreview(max(10, $batchSize), ['product', 'category', 'page']);
+        $nextPreview = $board->nextAutopilotTargetPreview(max(10, $batchSize), ['page', 'category', 'product']);
         $nextTargets = $nextPreview
             ->take($batchSize)
             ->map(fn(array $row) => ['type' => $row['type'], 'id' => (int) $row['id']])
             ->values()
             ->all();
         $nextEstimate = $board->estimateBatchCost($nextTargets, $settings['default_provider'] ?? null);
-        $offpageTargets = $board->offPageCampaignTargetPreview(10, ['product', 'category', 'page']);
+        $offpageTargets = $board->offPageCampaignTargetPreview(10, ['page', 'category', 'product']);
         $recentScoreActivity = $this->recentSeoScoreActivity(60, 300);
         $recentScoreChanges = $recentScoreActivity
             ->filter(fn(array $row) => ((int) ($row['delta'] ?? 0) > 0) || !empty($row['seo_done']))
             ->take(12)
             ->values();
 
-        $activeBatch = Schema::hasTable('seo_fix_batches')
+        $activeBatches = Schema::hasTable('seo_fix_batches')
             ? SeoFixBatch::query()
                 ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
-                ->latest()
-                ->first()
-            : null;
+                ->orderBy('id')
+                ->get()
+            : collect();
+        $activeBatch = $activeBatches->first();
+        $activeBacklog = $activeBatches->sum(fn(SeoFixBatch $batch) => $batch->remainingCount());
+        $stalledBatches = $activeBatches->filter(fn(SeoFixBatch $batch) => $batch->isStalled());
+        $queueDrainMinutes = $activeBacklog > 0 ? (int) ceil($activeBacklog / 30) * 5 : 0;
+        $freshQueueHours = $batchSize > 0 ? (int) ceil(max(0, $pendingTotal - $activeBacklog) / $batchSize) : null;
+        $queueDrainHours = (int) ceil($queueDrainMinutes / 60);
 
         $recentBatches = Schema::hasTable('seo_fix_batches')
             ? SeoFixBatch::query()->latest()->limit(5)->get()
@@ -999,9 +1147,15 @@ class SeoSuiteController extends Controller
         return [
             'enabled' => (int) ($settings['auto_seo_enabled'] ?? 1) === 1,
             'batch_size' => $batchSize,
-            'next_run' => 'Daily 02:45',
+            'next_run' => 'Hourly via cron',
             'queue_driver' => config('queue.default'),
             'active_batch' => $activeBatch,
+            'active_batches' => $activeBatches,
+            'active_batch_count' => $activeBatches->count(),
+            'active_backlog_urls' => $activeBacklog,
+            'stalled_batches' => $stalledBatches,
+            'stalled_batch_count' => $stalledBatches->count(),
+            'queue_drain_minutes' => $queueDrainMinutes,
             'recent_batches' => $recentBatches,
             'breakdown' => $breakdown,
             'next_targets' => $nextPreview->take(10)->values(),
@@ -1014,7 +1168,7 @@ class SeoSuiteController extends Controller
                 ->filter(fn(array $row) => (int) ($row['delta'] ?? 0) === 0 && empty($row['seo_done']))
                 ->count(),
             'pending_total' => $pendingTotal,
-            'days_to_completion' => $batchSize > 0 ? (int) ceil($pendingTotal / $batchSize) : null,
+            'days_to_completion' => !is_null($freshQueueHours) ? (int) ceil(max($queueDrainHours, $freshQueueHours) / 24) : null,
             'next_run_count' => count($nextTargets),
             'next_run_estimated_cost' => $nextEstimate['usd'] ?? 0,
             'next_run_ai_call' => $nextEstimate['ai_call'] ?? false,
@@ -1029,9 +1183,15 @@ class SeoSuiteController extends Controller
         return [
             'enabled' => (int) ($settings['auto_seo_enabled'] ?? 1) === 1,
             'batch_size' => (int) ($settings['auto_seo_batch_size'] ?? 10),
-            'next_run' => 'Daily 02:45',
+            'next_run' => 'Hourly via cron',
             'queue_driver' => config('queue.default'),
             'active_batch' => null,
+            'active_batches' => collect(),
+            'active_batch_count' => 0,
+            'active_backlog_urls' => 0,
+            'stalled_batches' => collect(),
+            'stalled_batch_count' => 0,
+            'queue_drain_minutes' => 0,
             'recent_batches' => collect(),
             'breakdown' => [],
             'next_targets' => collect(),
@@ -1103,7 +1263,7 @@ class SeoSuiteController extends Controller
                 'score_before' => $before,
                 'score_after' => $after,
                 'delta' => $before === null ? null : $after - $before,
-                'seo_done' => $after >= 70,
+                'seo_done' => $after >= AiSeoBoardService::SEO_DONE_SCORE,
                 'recorded_at' => $history->recorded_at,
             ]);
 

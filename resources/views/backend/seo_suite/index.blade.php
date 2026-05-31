@@ -39,6 +39,10 @@
     $riskLevel         = $advancedDashboard['risk_level'] ?? 'high';
     $competitorCount   = count(array_filter(array_map('trim', preg_split('/[\r\n,]+/', (string) ($settings['competitor_urls'] ?? '')))));
     $offpageAutoOn     = !empty($settings['auto_offpage_enabled']);
+    $keywordIntelligence = $keywordIntelligence ?? [];
+    $targetKeywords = collect($keywordIntelligence['target_keywords'] ?? []);
+    $trackedKeywords = collect($keywordIntelligence['tracked_keywords'] ?? []);
+    $gscKeywordPages = collect($keywordIntelligence['gsc_keyword_pages'] ?? []);
 @endphp
 
 <style>
@@ -362,18 +366,112 @@
     </div>
 </div>
 
+{{-- KEYWORD INTELLIGENCE --}}
+<div class="card mb-4">
+    <div class="card-header d-flex flex-wrap align-items-center justify-content-between">
+        <div>
+            <h5 class="mb-0 h6">{{ translate('Target Keyword Intelligence') }}</h5>
+            <small class="text-muted">{{ translate('Canada/GTA keyword plan, saved Google ranks, result pages, and the URLs receiving real Search Console visibility.') }}</small>
+        </div>
+        <a href="{{ route('admin.seo-suite.keyword_tracker') }}" class="btn btn-sm btn-soft-primary mt-2 mt-md-0">
+            <i class="las la-chart-line mr-1"></i>{{ translate('Open Keyword Tracker') }}
+        </a>
+    </div>
+    <div class="card-body">
+        <div class="row gutters-10 mb-3">
+            @foreach([
+                [translate('Target Keywords'), $keywordIntelligence['target_keyword_count'] ?? 0, 'primary'],
+                [translate('Tracked'), $keywordIntelligence['tracked_count'] ?? 0, 'info'],
+                [translate('Google Page 1'), $keywordIntelligence['page_one_count'] ?? 0, 'success'],
+                [translate('GSC Query URLs'), $keywordIntelligence['gsc_keyword_page_count'] ?? 0, 'warning'],
+            ] as [$label, $value, $color])
+                <div class="col-6 col-lg-3">
+                    <div class="advanced-metric">
+                        <div class="small text-muted">{{ $label }}</div>
+                        <div class="metric-value text-{{ $color }} mt-3">{{ number_format($value) }}</div>
+                    </div>
+                </div>
+            @endforeach
+        </div>
+
+        <div class="mb-3">
+            @foreach(($keywordIntelligence['groups'] ?? []) as $label => $values)
+                <div class="mb-2">
+                    <span class="small font-weight-bold text-muted mr-2">{{ translate($label) }}:</span>
+                    @foreach($values as $value)
+                        <span class="badge badge-soft-primary mr-1 mb-1">{{ $value }}</span>
+                    @endforeach
+                </div>
+            @endforeach
+            <details class="small">
+                <summary class="text-primary" style="cursor:pointer;">{{ translate('Display all targeted keywords') }} ({{ number_format($targetKeywords->count()) }})</summary>
+                <div class="border rounded p-2 mt-2 d-flex flex-wrap" style="gap:.35rem; max-height:220px; overflow:auto;">
+                    @foreach($targetKeywords as $keyword)
+                        <span class="badge badge-soft-secondary px-2 py-2">{{ $keyword }}</span>
+                    @endforeach
+                </div>
+            </details>
+        </div>
+
+        <div class="row">
+            <div class="col-lg-6">
+                <h6>{{ translate('Saved Google Rankings') }}</h6>
+                <div class="table-responsive border rounded">
+                    <table class="table table-sm mb-0">
+                        <thead class="thead-light"><tr><th>{{ translate('Keyword') }}</th><th>{{ translate('Rank') }}</th><th>{{ translate('Google Page') }}</th><th>{{ translate('Ranking URL') }}</th></tr></thead>
+                        <tbody>
+                            @forelse($trackedKeywords->take(8) as $row)
+                                <tr>
+                                    <td><strong>{{ $row['keyword'] }}</strong></td>
+                                    <td>{{ $row['rank'] > 0 ? '#' . $row['rank'] : '-' }}</td>
+                                    <td>{{ $row['google_page_label'] }}</td>
+                                    <td class="text-truncate" style="max-width:180px;">
+                                        @if(!empty($row['url']))<a href="{{ $row['url'] }}" target="_blank" rel="noopener">{{ $row['url'] }}</a>@else - @endif
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="4" class="text-center text-muted py-3">{{ translate('No saved ranking checks yet.') }}</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="col-lg-6 mt-3 mt-lg-0">
+                <h6>{{ translate('Google Query to Website Page') }}</h6>
+                <div class="table-responsive border rounded">
+                    <table class="table table-sm mb-0">
+                        <thead class="thead-light"><tr><th>{{ translate('Query') }}</th><th>{{ translate('Position') }}</th><th>{{ translate('Google Page') }}</th><th>{{ translate('Landing URL') }}</th></tr></thead>
+                        <tbody>
+                            @forelse($gscKeywordPages->take(8) as $row)
+                                <tr>
+                                    <td><strong>{{ $row['query'] }}</strong></td>
+                                    <td>{{ number_format($row['position'], 1) }}</td>
+                                    <td>{{ $row['google_page'] ? 'Page ' . $row['google_page'] : '-' }}</td>
+                                    <td class="text-truncate" style="max-width:180px;"><a href="{{ $row['page'] }}" target="_blank" rel="noopener">{{ $row['page'] }}</a></td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="4" class="text-center text-muted py-3">{{ translate('Run Search Console sync to populate real Google query-to-page data.') }}</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 {{-- SEO AUTOPILOT CENTER --}}
 <div class="card mb-4">
     <div class="card-header d-flex flex-wrap align-items-center justify-content-between">
         <div>
             <h5 class="mb-0 h6">{{ translate('SEO Autopilot Center') }}</h5>
-            <small class="text-muted">{{ translate('Fully automated Canada SEO for pending URLs only. Completed SEO URLs stay protected.') }}</small>
+            <small class="text-muted">{{ translate('Pages first, then Categories, then Products. Strong completed SEO URLs (80+) stay protected; weaker scores can be refined.') }}</small>
         </div>
         <div class="d-flex flex-wrap mt-2 mt-md-0" style="gap:.4rem;">
             <span class="badge badge-{{ !empty($autopilot['enabled']) ? 'success' : 'secondary' }}">
                 {{ !empty($autopilot['enabled']) ? translate('Autopilot ON') : translate('Autopilot OFF') }}
             </span>
-            <span class="badge badge-soft-info">{{ translate('Next Run') }}: {{ $autopilot['next_run'] ?? 'Daily 02:45' }}</span>
+            <span class="badge badge-soft-info">{{ translate('Next Run') }}: {{ $autopilot['next_run'] ?? 'Hourly via cron' }}</span>
             <span class="badge badge-{{ $offpageAutoOn ? 'success' : 'secondary' }}">{{ translate('Off-Page') }}: {{ $offpageAutoOn ? translate('ON') : translate('OFF') }}</span>
             <span class="badge badge-soft-info">{{ translate('Off-Page Run') }}: {{ translate('Daily 03:10') }}</span>
             <span class="badge badge-soft-secondary">{{ translate('Queue') }}: {{ $autopilot['queue_driver'] ?? '-' }}</span>
@@ -451,6 +549,27 @@
             </div>
             <div class="col-md-3 mb-3 mb-md-0">
                 <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Recovery Backlog') }}</span>
+                    <div class="metric-value {{ ($autopilot['active_backlog_urls'] ?? 0) > 0 ? 'text-warning' : 'text-success' }} mt-3">
+                        {{ number_format($autopilot['active_backlog_urls'] ?? 0) }}
+                    </div>
+                    <small class="text-muted">
+                        {{ $autopilot['active_batch_count'] ?? 0 }} {{ translate('active batches') }}
+                        @if(($autopilot['stalled_batch_count'] ?? 0) > 0)
+                            <span class="d-block text-danger">{{ $autopilot['stalled_batch_count'] }} {{ translate('need recovery attention') }}</span>
+                        @endif
+                    </small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Backlog Drain Estimate') }}</span>
+                    <div class="metric-value text-info mt-3">{{ number_format($autopilot['queue_drain_minutes'] ?? 0) }}</div>
+                    <small class="text-muted">{{ translate('minutes at 3 batches x 10 URLs every 5 minutes') }}</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="advanced-metric">
                     <span class="text-muted small">{{ translate('Next Run Estimate') }}</span>
                     <div class="metric-value text-primary mt-3">{{ $autopilot['next_run_count'] ?? 0 }}</div>
                     <small class="text-muted">
@@ -481,6 +600,50 @@
                 </div>
             </div>
         </div>
+
+        @if(($autopilot['active_batch_count'] ?? 0) > 0)
+            <div class="mb-4">
+                <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
+                    <div>
+                        <h6 class="font-weight-600 mb-0">{{ translate('Active Queue Recovery') }}</h6>
+                        <small class="text-muted">{{ translate('Oldest unfinished batches drain first. Duplicate pending URLs in newer batches are compacted automatically by cron.') }}</small>
+                    </div>
+                    <span class="badge badge-{{ ($autopilot['stalled_batch_count'] ?? 0) > 0 ? 'danger' : 'success' }}">
+                        {{ ($autopilot['stalled_batch_count'] ?? 0) > 0 ? translate('Recovery attention') : translate('Healthy') }}
+                    </span>
+                </div>
+                <div class="table-responsive border rounded">
+                    <table class="table table-sm mb-0">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>{{ translate('Batch') }}</th>
+                                <th>{{ translate('Status') }}</th>
+                                <th>{{ translate('Processed') }}</th>
+                                <th>{{ translate('Remaining') }}</th>
+                                <th>{{ translate('Heartbeat') }}</th>
+                                <th>{{ translate('Health') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach(($autopilot['active_batches'] ?? collect()) as $batch)
+                                <tr>
+                                    <td><strong>#{{ $batch->id }}</strong></td>
+                                    <td><span class="badge badge-warning">{{ $batch->status }}</span></td>
+                                    <td>{{ number_format($batch->processed) }} / {{ number_format($batch->total) }} ({{ $batch->progressPercent() }}%)</td>
+                                    <td>{{ number_format($batch->remainingCount()) }}</td>
+                                    <td class="small text-muted">{{ optional($batch->updated_at)->diffForHumans() }}</td>
+                                    <td>
+                                        <span class="badge badge-{{ $batch->isStalled() ? 'danger' : 'success' }}">
+                                            {{ $batch->isStalled() ? translate('Stalled - cron will resume') : translate('Active') }}
+                                        </span>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        @endif
 
         <div class="row gutters-16">
             <div class="col-lg-6 mb-3 mb-lg-0">
@@ -678,7 +841,7 @@
     <div class="card-header d-flex align-items-center justify-content-between">
         <div>
             <h5 class="mb-0 h6">{{ translate('Autopilot Next Targets Preview') }}</h5>
-            <small class="text-muted">{{ translate('Smart priority queue for the next automated run. Done SEO URLs are excluded.') }}</small>
+            <small class="text-muted">{{ translate('Previous incomplete queue URLs resume first. New targets then run Pages, Categories, and Products in order. Strong SEO URLs (80+) are excluded.') }}</small>
         </div>
         <a href="{{ route('admin.seo.ai_board.index', ['missing' => 'meta', 'sort' => 'score_asc']) }}" class="btn btn-xs btn-soft-primary">
             {{ translate('Open AI Board') }}
@@ -710,9 +873,21 @@
                                 <a href="{{ $row['url'] }}" target="_blank" class="small">{{ $row['title'] }}</a>
                                 <span class="d-block small text-muted">{{ $row['url'] }}</span>
                             </td>
-                            <td><span class="badge badge-soft-info">{{ ucfirst($row['type']) }}</span></td>
-                            <td><span class="badge badge-{{ $row['score'] >= 70 ? 'success' : ($row['score'] >= 50 ? 'warning' : 'danger') }}">{{ $row['score'] }}/100</span></td>
-                            <td class="small text-muted">{{ implode(', ', $row['priority_reasons'] ?? []) }}</td>
+                            <td>
+                                <span class="badge badge-soft-info">{{ ucfirst($row['type']) }}</span>
+                                @if(!empty($row['retry_from_batch']))
+                                    <span class="d-block badge badge-soft-warning mt-1">{{ translate('Retry batch') }} #{{ $row['retry_from_batch'] }}</span>
+                                @endif
+                            </td>
+                            <td><span class="badge badge-{{ $row['score'] >= 80 ? 'success' : ($row['score'] >= 50 ? 'warning' : 'danger') }}">{{ $row['score'] }}/100</span></td>
+                            <td class="small text-muted">
+                                @if(($row['queue_source'] ?? null) === 'active_resume')
+                                    <strong class="text-warning">{{ translate('Resume pending URL first.') }}</strong>
+                                @elseif(($row['queue_source'] ?? null) === 'previous_retry')
+                                    <strong class="text-warning">{{ translate('Retry previous pending URL first.') }}</strong>
+                                @endif
+                                {{ implode(', ', $row['priority_reasons'] ?? []) }}
+                            </td>
                         </tr>
                     @empty
                         <tr><td colspan="5" class="text-center text-muted py-4">{{ translate('No pending autopilot targets found.') }}</td></tr>

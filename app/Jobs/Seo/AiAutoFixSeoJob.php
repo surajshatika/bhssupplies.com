@@ -168,7 +168,7 @@ class AiAutoFixSeoJob implements ShouldQueue
         $done = !empty($row['has_meta'])
             && !empty($row['has_focus_kw'])
             && !empty($row['has_schema'])
-            && $after >= 70;
+            && $after >= AiSeoBoardService::SEO_DONE_SCORE;
 
         $options = $batch->options ?? [];
         $stats = $options['seo_stats'] ?? [];

@@ -62,13 +62,13 @@ class SeoMonitoringService
 
         try {
             if (Schema::hasTable('seo_meta')) {
-                $breakdown = app(AiSeoBoardService::class)->pendingBreakdownByType(['product', 'category', 'page']);
+                $breakdown = app(AiSeoBoardService::class)->pendingBreakdownByType(['page', 'category', 'product']);
                 $pendingTotal = collect($breakdown)->sum('pending');
             }
             if (Schema::hasTable('seo_fix_batches')) {
                 $activeBatch = SeoFixBatch::query()
                     ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
-                    ->latest()
+                    ->orderBy('id')
                     ->first();
                 $recentFailureCount = SeoFixBatch::query()
                     ->where('created_at', '>=', now()->subDays(7))

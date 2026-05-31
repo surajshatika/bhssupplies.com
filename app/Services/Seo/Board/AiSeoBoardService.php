@@ -33,6 +33,9 @@ use Throwable;
 class AiSeoBoardService
 {
     public const SUPPORTED_TYPES = ['product', 'category', 'page', 'blog'];
+    public const SEO_DONE_SCORE = 80;
+    public const AUTOPILOT_TYPES = ['page', 'category', 'product'];
+    public const MAX_AUTOPILOT_ATTEMPTS = 3;
 
     /** @var array<string,array{class:string,label:string,url:string,name:string,description:?string,image:?string}> */
     protected array $typeMap;
@@ -121,7 +124,7 @@ class AiSeoBoardService
         ];
     }
 
-    public function collectPendingTargetsAcrossTypes(int $limit = 10, array $types = ['product', 'category', 'page']): array
+    public function collectPendingTargetsAcrossTypes(int $limit = 10, array $types = self::AUTOPILOT_TYPES): array
     {
         $limit = max(1, min(100, $limit));
 
@@ -136,10 +139,10 @@ class AiSeoBoardService
         return !empty($row['has_meta'])
             && !empty($row['has_focus_kw'])
             && !empty($row['has_schema'])
-            && (int) ($row['score'] ?? 0) >= 70;
+            && (int) ($row['score'] ?? 0) >= self::SEO_DONE_SCORE;
     }
 
-    public function pendingBreakdownByType(array $types = ['product', 'category', 'page']): array
+    public function pendingBreakdownByType(array $types = self::AUTOPILOT_TYPES): array
     {
         $rows = [];
 
@@ -157,7 +160,7 @@ class AiSeoBoardService
                     ->whereNotNull('meta_description')
                     ->whereNotNull('focus_keyword')
                     ->whereNotNull('schema_json')
-                    ->where('seo_score', '>=', 70)
+                    ->where('seo_score', '>=', self::SEO_DONE_SCORE)
                     ->count()
                 : 0;
 
@@ -179,13 +182,131 @@ class AiSeoBoardService
         return $rows;
     }
 
-    public function nextAutopilotTargetPreview(int $limit = 10, array $types = ['product', 'category', 'page']): Collection
+    public function nextAutopilotTargetPreview(int $limit = 10, array $types = self::AUTOPILOT_TYPES): Collection
     {
         $limit = max(1, min(100, $limit));
+        $attempts = $this->recentBatchTargetAttempts();
+        $retryRows = $this->pendingRowsFromPreviousBatches($limit, $types, $attempts);
+        $retryKeys = $retryRows
+            ->mapWithKeys(fn(array $row) => [$this->targetKey($row) => true])
+            ->all();
 
-        return $this->pendingAutopilotRows($limit, $types)
+        return $retryRows
+            ->concat($this->pendingAutopilotRows($limit, $types)
+                ->reject(function (array $row) use ($attempts, $retryKeys): bool {
+                    $key = $this->targetKey($row);
+
+                    return isset($retryKeys[$key])
+                        || (int) ($attempts[$key] ?? 0) >= self::MAX_AUTOPILOT_ATTEMPTS;
+                }))
             ->take($limit)
             ->values();
+    }
+
+    protected function pendingRowsFromPreviousBatches(int $limit, array $types, array $attempts): Collection
+    {
+        if (!Schema::hasTable('seo_fix_batches')) {
+            return collect();
+        }
+
+        $allowedTypes = array_flip($this->orderedAutopilotTypes($types));
+        $rows = collect();
+
+        $batches = SeoFixBatch::query()
+            ->whereIn('status', [
+                SeoFixBatch::STATUS_QUEUED,
+                SeoFixBatch::STATUS_RUNNING,
+                SeoFixBatch::STATUS_COMPLETED,
+                SeoFixBatch::STATUS_FAILED,
+            ])
+            ->latest()
+            ->limit(30)
+            ->get()
+            ->sortBy(function (SeoFixBatch $batch): string {
+                $active = in_array($batch->status, [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING], true);
+
+                return $active
+                    ? '0-' . str_pad((string) $batch->id, 9, '0', STR_PAD_LEFT)
+                    : '1-' . str_pad((string) (999999999 - (int) $batch->id), 9, '0', STR_PAD_LEFT);
+            });
+
+        foreach ($batches as $batch) {
+            $active = in_array($batch->status, [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING], true);
+            $targets = $batch->target_ids ?? [];
+            $offset = $active ? (int) $batch->processed : 0;
+
+            foreach (array_slice($targets, $offset) as $target) {
+                $type = (string) ($target['type'] ?? '');
+                $id = (int) ($target['id'] ?? 0);
+                $key = $type . ':' . $id;
+
+                if (!$type || !$id || !isset($allowedTypes[$type]) || $rows->has($key)) {
+                    continue;
+                }
+                if (!$active && (int) ($attempts[$key] ?? 0) >= self::MAX_AUTOPILOT_ATTEMPTS) {
+                    continue;
+                }
+
+                $class = $this->typeMap[$type]['class'];
+                $entity = $class::find($id);
+                if (!$entity) {
+                    continue;
+                }
+
+                $row = $this->buildRow($entity, $type);
+                if ($this->isSeoDoneRow($row)) {
+                    continue;
+                }
+
+                $row = $this->buildAutopilotPreviewRow($row);
+                $row['queue_source'] = $active ? 'active_resume' : 'previous_retry';
+                $row['retry_from_batch'] = (int) $batch->id;
+                $row['attempt'] = (int) ($attempts[$key] ?? 0) + ($active ? 0 : 1);
+                $rows->put($key, $row);
+
+                if ($rows->count() >= $limit) {
+                    return $rows->values();
+                }
+            }
+        }
+
+        return $rows->values();
+    }
+
+    protected function recentBatchTargetAttempts(): array
+    {
+        if (!Schema::hasTable('seo_fix_batches')) {
+            return [];
+        }
+
+        $attempts = [];
+        $batches = SeoFixBatch::query()
+            ->whereIn('status', [
+                SeoFixBatch::STATUS_QUEUED,
+                SeoFixBatch::STATUS_RUNNING,
+                SeoFixBatch::STATUS_COMPLETED,
+                SeoFixBatch::STATUS_FAILED,
+            ])
+            ->latest()
+            ->limit(100)
+            ->get();
+
+        foreach ($batches as $batch) {
+            foreach (($batch->target_ids ?? []) as $target) {
+                $key = $this->targetKey($target);
+                if ($key === ':0') {
+                    continue;
+                }
+                $attempts[$key] = (int) ($attempts[$key] ?? 0) + 1;
+            }
+        }
+
+        return $attempts;
+    }
+
+    protected function targetKey(array $target): string
+    {
+        return (string) ($target['type'] ?? '') . ':' . (int) ($target['id'] ?? 0);
     }
 
     protected function pendingAutopilotRows(int $limit, array $types): Collection
@@ -193,7 +314,7 @@ class AiSeoBoardService
         $preview = collect();
         $candidateLimit = max(40, $limit * 8);
 
-        foreach ($types as $type) {
+        foreach ($this->orderedAutopilotTypes($types) as $type) {
             if (!isset($this->typeMap[$type])) {
                 continue;
             }
@@ -224,8 +345,26 @@ class AiSeoBoardService
         }
 
         return $preview
-            ->sortByDesc('priority_score')
+            ->sort(function (array $left, array $right): int {
+                $typePriority = array_flip(self::AUTOPILOT_TYPES);
+                $leftType = $typePriority[$left['type'] ?? ''] ?? PHP_INT_MAX;
+                $rightType = $typePriority[$right['type'] ?? ''] ?? PHP_INT_MAX;
+
+                return $leftType <=> $rightType
+                    ?: ((int) ($right['priority_score'] ?? 0) <=> (int) ($left['priority_score'] ?? 0));
+            })
             ->values();
+    }
+
+    protected function orderedAutopilotTypes(array $types): array
+    {
+        $typePriority = array_flip(self::AUTOPILOT_TYPES);
+
+        return collect($types)
+            ->unique()
+            ->sortBy(fn(string $type) => $typePriority[$type] ?? PHP_INT_MAX)
+            ->values()
+            ->all();
     }
 
     protected function buildAutopilotPreviewRow(array $row): array
@@ -280,7 +419,7 @@ class AiSeoBoardService
         return array_slice(array_values(array_unique($reasons ?: ['Needs review'])), 0, 5);
     }
 
-    public function offPageCampaignTargetPreview(int $limit = 10, array $types = ['product', 'category', 'page']): Collection
+    public function offPageCampaignTargetPreview(int $limit = 10, array $types = self::AUTOPILOT_TYPES): Collection
     {
         $preview = collect();
         $limit = max(1, min(20, $limit));
@@ -338,7 +477,7 @@ class AiSeoBoardService
             $score += 8;
         }
 
-        $typeBoost = ['product' => 8, 'category' => 6, 'page' => 4, 'blog' => 2];
+        $typeBoost = ['page' => 12, 'category' => 8, 'product' => 4, 'blog' => 2];
         $score += $typeBoost[$row['type'] ?? ''] ?? 0;
 
         $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
@@ -1013,7 +1152,7 @@ class AiSeoBoardService
             ->whereNotNull('meta_description')
             ->whereNotNull('focus_keyword')
             ->whereNotNull('schema_json')
-            ->where('seo_score', '>=', 70)
+            ->where('seo_score', '>=', self::SEO_DONE_SCORE)
             ->count();
     }
 
@@ -2247,7 +2386,13 @@ class AiSeoBoardService
      */
     public function createBatch(array $targets, ?string $providerName = null, ?int $userId = null, ?string $label = null, bool $dispatch = true): SeoFixBatch
     {
+        $targets = $this->normalizeNewBatchTargets($targets);
+        if (empty($targets)) {
+            throw new \InvalidArgumentException('All selected URLs are already queued or invalid. Let the active cron batches finish first.');
+        }
+
         $estimate = $this->estimateBatchCost($targets, $providerName);
+        $cronChunked = config('queue.default') === 'sync';
 
         $batch = SeoFixBatch::create([
             'project_id'         => null,
@@ -2259,21 +2404,60 @@ class AiSeoBoardService
             'succeeded'          => 0,
             'failed'             => 0,
             'skipped'            => 0,
+            'current_label'      => $cronChunked ? 'Queued for cron chunk processor' : null,
             'estimated_cost_usd' => $estimate['usd'],
             'actual_cost_usd'    => 0,
             'target_ids'         => $targets,
             'options'            => [
                 'ai_call' => $estimate['ai_call'],
                 'rates'   => $this->providerRates($estimate['provider']),
+                'cron_chunked' => $cronChunked,
             ],
             'created_by'         => $userId,
         ]);
 
-        if ($dispatch) {
+        if ($dispatch && !$cronChunked) {
             AiAutoFixSeoJob::dispatch($batch->id);
         }
 
         return $batch->fresh();
+    }
+
+    protected function normalizeNewBatchTargets(array $targets): array
+    {
+        $activeTargetKeys = [];
+        if (Schema::hasTable('seo_fix_batches')) {
+            $activeTargetKeys = SeoFixBatch::query()
+                ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
+                ->get()
+                ->flatMap(fn(SeoFixBatch $batch) => $batch->target_ids ?? [])
+                ->mapWithKeys(fn(array $target) => [$this->targetKey($target) => true])
+                ->all();
+        }
+
+        $seen = [];
+
+        return collect($targets)
+            ->filter(function ($target) use (&$seen, $activeTargetKeys): bool {
+                if (!is_array($target)) {
+                    return false;
+                }
+
+                $type = (string) ($target['type'] ?? '');
+                $id = (int) ($target['id'] ?? 0);
+                $key = $type . ':' . $id;
+
+                if (!$id || !isset($this->typeMap[$type]) || isset($seen[$key]) || isset($activeTargetKeys[$key])) {
+                    return false;
+                }
+
+                $seen[$key] = true;
+
+                return true;
+            })
+            ->map(fn(array $target) => ['type' => (string) $target['type'], 'id' => (int) $target['id']])
+            ->values()
+            ->all();
     }
 
     public function cancelBatch(SeoFixBatch $batch): SeoFixBatch

@@ -58,6 +58,9 @@ class CheckKeywordRanksCommand extends Command
                 if ($result['error']) {
                     $errors++;
                 } else {
+                    if (!empty($result['found_url'])) {
+                        $kw->target_url = $result['found_url'];
+                    }
                     $kw->recordRank((int) ($result['rank'] ?? 0));
                     $checked++;
                 }

@@ -96,8 +96,10 @@ class DoctorCommand extends Command
         $isSync = $driver === 'sync';
 
         $this->result('queue',
-            $isSync ? 'warn' : 'ok',
-            'Driver=' . $driver . ($isSync ? ' (bulk fixes block the browser — set up queue worker for async)' : '')
+            'ok',
+            'Driver=' . $driver . ($isSync
+                ? ' (SEO bulk fixes are queued for the five-minute cron chunk processor)'
+                : ' (queue worker dispatch enabled)')
         );
     }
 

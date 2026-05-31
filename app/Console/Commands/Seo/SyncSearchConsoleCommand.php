@@ -13,7 +13,7 @@ class SyncSearchConsoleCommand extends Command
 {
     protected $signature = 'seo:sync-search-console
                             {--days=7 : Number of past days to fetch}
-                            {--dimensions=query,page : Comma-separated GSC dimensions to pull}';
+                            {--dimensions=query,page,query_page : Comma-separated GSC dimensions to pull}';
 
     protected $description = 'Sync Google Search Console performance data into seo_analytics.';
 
@@ -40,14 +40,20 @@ class SyncSearchConsoleCommand extends Command
         foreach ($dimensions as $dim) {
             $this->info("Fetching dimension={$dim} window {$start->toDateString()} → {$end->toDateString()}");
             try {
-                $result = $gsc->fetchPerformance($start->toDateString(), $end->toDateString(), [$dim], 5000);
+                $apiDimensions = $dim === 'query_page' ? ['query', 'page'] : [$dim];
+                $result = $gsc->fetchPerformance($start->toDateString(), $end->toDateString(), $apiDimensions, 5000);
                 if (!$result['success']) {
                     $this->error('  ' . ($result['error'] ?? 'unknown error'));
                     continue;
                 }
 
                 foreach ($result['rows'] as $row) {
-                    $value = $row['keys'][0] ?? null;
+                    $value = $dim === 'query_page'
+                        ? json_encode([
+                            'query' => mb_substr((string) ($row['keys'][0] ?? ''), 0, 180),
+                            'page' => mb_substr((string) ($row['keys'][1] ?? ''), 0, 280),
+                        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                        : ($row['keys'][0] ?? null);
                     if (!$value) {
                         continue;
                     }

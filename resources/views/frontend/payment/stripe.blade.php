@@ -45,15 +45,20 @@
     <div class="loader"></div>
     <br>
     <br>
-    <p style="width: 250px; margin: auto;">Don't close the tab. The payment is being processed . . .</p>
+    <p id="payment-status" style="width: 250px; margin: auto;">Don't close the tab. The payment is being processed . . .</p>
     <script type="text/javascript">
         // Create an instance of the Stripe object with your publishable API key
         var stripe = Stripe('{{ env('STRIPE_KEY') }}');
         var checkoutButton = document.getElementById('checkout-button');
 
+        function showError(message) {
+            document.querySelector('.loader').style.display = 'none';
+            document.getElementById('payment-status').innerText =
+                message || 'Payment could not be started. Please try again.';
+        }
+
         checkoutButton.addEventListener('click', function() {
-            // Create a new Checkout Session using the server-side endpoint you
-            // created in step 3.
+            // Create a new Checkout Session using the server-side endpoint.
             fetch('{{ route('stripe.get_token') }}', {
                     method: 'POST',
                 })
@@ -61,21 +66,25 @@
                     return response.json();
                 })
                 .then(function(session) {
-                    return stripe.redirectToCheckout({
-                        sessionId: session.id
-                    });
-                })
-                .then(function(result) {
-                    console.log(result);
-                    // If `redirectToCheckout` fails due to a browser or network
-                    // error, you should display the localized error message to your
-                    // customer using `error.message`.
-                    if (result.error) {
-                        alert(result.error.message);
+                    // Prefer the server-provided Checkout URL (redirectToCheckout is deprecated).
+                    if (session && session.url) {
+                        window.location.href = session.url;
+                        return;
                     }
+                    if (session && session.id) {
+                        return stripe.redirectToCheckout({
+                            sessionId: session.id
+                        }).then(function(result) {
+                            if (result && result.error) {
+                                showError(result.error.message);
+                            }
+                        });
+                    }
+                    showError();
                 })
                 .catch(function(error) {
                     console.error('Error:', error);
+                    showError();
                 });
         });
 

@@ -242,6 +242,17 @@ class CheckoutController extends Controller
             return $errors;
         }
 
+        $guest_shipping_info['state_id'] = $this->resolveCheckoutStateId(
+            $guest_shipping_info['state_id'] ?? null,
+            $guest_shipping_info['city_id']
+        );
+
+        if (!$guest_shipping_info['state_id']) {
+            $errors = $validator->errors();
+            $errors->add('city_name', translate('Please enter a city with a valid state.'));
+            return $errors;
+        }
+
         if (get_setting('billing_address_required') && !$sameAsShipping) {
             $guest_shipping_info['billing_city_id'] = $this->resolveCheckoutCityId(
                 (int) ($guest_shipping_info['billing_country_id'] ?? 0),
@@ -255,9 +266,19 @@ class CheckoutController extends Controller
                 $errors->add('billing_city_name', translate('Please enter a valid billing city.'));
                 return $errors;
             }
+
+            $guest_shipping_info['billing_state_id'] = $this->resolveCheckoutStateId(
+                $guest_shipping_info['billing_state_id'] ?? null,
+                $guest_shipping_info['billing_city_id']
+            );
+
+            if (!$guest_shipping_info['billing_state_id']) {
+                $errors = $validator->errors();
+                $errors->add('billing_city_name', translate('Please enter a billing city with a valid state.'));
+                return $errors;
+            }
         }
 
-        $success = 1;
         $password = substr(hash('sha512', rand()), 0, 8);
         $isEmailVerificationEnabled = get_setting('email_verification');
 
@@ -273,18 +294,17 @@ class CheckoutController extends Controller
         // Guest Account Opening and verification(if activated) eamil send
         try {
             EmailUtility::customer_registration_email('registration_from_system_email_to_customer', $user, $password);
-        } catch (\Exception $e) {
-            $success = 0;
-            $user->delete();
-        }
-
-        if($success == 0){
-            return $success;
+        } catch (\Throwable $e) {
+            report($e);
         }
 
         // Sending email verification Notification
         if($isEmailVerificationEnabled == 1){
-            EmailUtility::email_verification($user, 'customer');
+            try {
+                EmailUtility::email_verification($user, 'customer');
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         // Customer Account Opening Email to Admin
@@ -349,7 +369,7 @@ class CheckoutController extends Controller
         Session::forget('temp_user_id');
         Session::forget('guest_shipping_info');
 
-        return $success;
+        return 1;
     }
 
     //redirects to this method after a successfull checkout
@@ -817,6 +837,23 @@ class CheckoutController extends Controller
     protected function addressesHaveArea(): bool
     {
         return Schema::hasColumn('addresses', 'area_id');
+    }
+
+    protected function resolveCheckoutStateId($stateId, $cityId): ?int
+    {
+        $stateId = (int) $stateId;
+        if ($stateId > 0 && State::where('id', $stateId)->exists()) {
+            return $stateId;
+        }
+
+        $cityId = (int) $cityId;
+        if ($cityId <= 0 || !Schema::hasColumn('cities', 'state_id')) {
+            return null;
+        }
+
+        $cityStateId = (int) City::where('id', $cityId)->value('state_id');
+
+        return $cityStateId > 0 ? $cityStateId : null;
     }
 
     protected function resolveCheckoutCityId(int $countryId, int $stateId, $cityId, ?string $cityName): ?int

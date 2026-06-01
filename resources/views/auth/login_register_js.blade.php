@@ -65,7 +65,7 @@
 @if (addon_is_activated('otp_system'))
     <script type="text/javascript">
         // Country Code
-        var isPhoneShown = true,
+        var isPhoneShown = false,
             countryData = window.intlTelInputGlobals.getCountryData(),
             input = document.querySelector("#phone-code");
 

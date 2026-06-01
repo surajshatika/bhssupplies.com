@@ -46,7 +46,7 @@
                                         <div>
                                             <div id="emailOrPhoneDiv">
                                                 {{-- Show both fields with the toggle button if neither email nor phone is set --}}
-                                                <div class="form-group phone-form-group mb-1 ">
+                                                <div class="form-group phone-form-group mb-1 d-none">
                                                     <label for="phone" class="fs-12 fw-700 text-soft-dark">{{ translate('Phone') }}</label>
                                                     <div class="input-group registration-iti">
                                                         <input type="tel" phone-number id="phone-code" class="form-control rounded-0{{ $errors->has('phone') ? ' is-invalid' : '' }}"
@@ -62,7 +62,7 @@
                                         
                                                 <input type="hidden" id="country_code" name="country_code" value="">
                                         
-                                                <div class="form-group email-form-group mb-1 d-none">
+                                                <div class="form-group email-form-group mb-1">
                                                     <label for="email" class="fs-12 fw-700 text-soft-dark">{{ translate('Email') }}</label>
                                                     <div class="input-group">
                                                         <input type="email" class="form-control rounded-0 {{ $errors->has('email') ? ' is-invalid' : '' }} "
@@ -83,7 +83,7 @@
                                         
                                                 <div class="form-group text-right mb-0" id="mail_phone_toggle_btn">
                                                     <button class="btn btn-link p-0 text-primary" type="button" onclick="toggleEmailPhone(this)">
-                                                        <i>*{{ translate('Use Email Instead') }}</i>
+                                                        <i>*{{ translate('Use Phone Number Instead') }}</i>
                                                     </button>
                                                 </div>
                                             

@@ -1697,7 +1697,7 @@
     <script type="text/javascript">
         if ($('input[name=country_code]').length > 0){
             // Country Code
-            var isPhoneShown = true,
+            var isPhoneShown = false,
                 countryData = window.intlTelInputGlobals.getCountryData(),
                 input = document.querySelector("#phone-code");
 

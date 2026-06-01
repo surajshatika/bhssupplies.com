@@ -34,14 +34,14 @@
                                             
                                             <!-- Email or Phone -->
                                             @if (addon_is_activated('otp_system'))
-                                                <div class="form-group phone-form-group mb-1">
+                                                <div class="form-group phone-form-group mb-1 d-none">
                                                     <label for="phone" class="fs-12 fw-700 text-soft-dark">{{  translate('Phone') }}</label>
                                                     <input type="tel" phone-number id="phone-code" class="form-control{{ $errors->has('phone') ? ' is-invalid' : '' }} rounded-0" value="{{ old('phone') }}" placeholder="" name="phone" autocomplete="off">
                                                 </div>
 
                                                 <input type="hidden" name="country_code" value="">
                                                 
-                                                <div class="form-group email-form-group mb-1 d-none">
+                                                <div class="form-group email-form-group mb-1">
                                                     <label for="email" class="fs-12 fw-700 text-soft-dark">{{  translate('Email') }}</label>
                                                     <input type="email" class="form-control rounded-0 {{ $errors->has('email') ? ' is-invalid' : '' }}" value="{{ old('email') }}" placeholder="{{  translate('johndoe@example.com') }}" name="email" id="email" autocomplete="off">
                                                     @if ($errors->has('email'))
@@ -52,7 +52,7 @@
                                                 </div>
                                                 
                                                 <div class="form-group text-right">
-                                                    <button class="btn btn-link p-0 text-primary" type="button" onclick="toggleEmailPhone(this)"><i>*{{ translate('Use Email Instead') }}</i></button>
+                                                    <button class="btn btn-link p-0 text-primary" type="button" onclick="toggleEmailPhone(this)"><i>*{{ translate('Use Phone Number Instead') }}</i></button>
                                                 </div>
                                             @else
                                                 <div class="form-group">

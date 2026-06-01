@@ -4,7 +4,6 @@ namespace App\Console\Commands\Seo;
 
 use App\Jobs\Seo\AiAutoFixSeoJob;
 use App\Models\SeoFixBatch;
-use App\Services\Seo\Board\AiSeoBoardService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
@@ -21,7 +20,7 @@ class ProcessAiSeoBatchesCommand extends Command
 
     protected $description = 'Process queued AI SEO Board batches in small cron-friendly chunks.';
 
-    public function handle(AiSeoBoardService $board): int
+    public function handle(): int
     {
         if (!Schema::hasTable('seo_fix_batches')) {
             $this->warn('seo_fix_batches table is missing. Run migrations first.');
@@ -79,7 +78,7 @@ class ProcessAiSeoBatchesCommand extends Command
             $job = new AiAutoFixSeoJob((int) $batch->id, $limit);
 
             try {
-                $job->handle($board);
+                app()->call([$job, 'handle']);
             } catch (Throwable $e) {
                 $job->failed($e);
                 $this->error('Batch #' . $batch->id . ' failed: ' . $e->getMessage());

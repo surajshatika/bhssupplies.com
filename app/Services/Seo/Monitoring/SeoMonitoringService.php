@@ -253,7 +253,7 @@ class SeoMonitoringService
         return SeoFixBatch::query()
             ->orderByDesc('id')
             ->limit($limit)
-            ->get(['id', 'label', 'status', 'total', 'succeeded', 'failed', 'skipped', 'actual_cost_usd', 'created_at', 'completed_at'])
+            ->get(['id', 'label', 'status', 'total', 'succeeded', 'failed', 'skipped', 'actual_cost_usd', 'error_log', 'created_at', 'completed_at'])
             ->map(fn($b) => [
                 'id'           => $b->id,
                 'label'        => $b->label,
@@ -263,6 +263,7 @@ class SeoMonitoringService
                 'failed'       => $b->failed,
                 'skipped'      => $b->skipped,
                 'cost_usd'     => round((float) $b->actual_cost_usd, 4),
+                'latest_error' => collect($b->error_log ?? [])->last()['msg'] ?? null,
                 'started_at'   => optional($b->created_at)->format('Y-m-d H:i'),
                 'completed_at' => optional($b->completed_at)->format('Y-m-d H:i'),
             ])

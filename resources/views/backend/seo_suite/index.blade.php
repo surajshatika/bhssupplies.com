@@ -790,6 +790,7 @@
                                 @php
                                     $batchStats = $batch->options['seo_stats'] ?? [];
                                     $batchStatsTracked = !empty($batchStats['last_checked_at']);
+                                    $batchLatestError = collect($batch->error_log ?? [])->last()['msg'] ?? null;
                                 @endphp
                                 <tr>
                                     <td class="small">#{{ $batch->id }}</td>
@@ -797,6 +798,11 @@
                                         <span class="badge badge-{{ $batch->status === 'completed' ? 'success' : (in_array($batch->status, ['failed','cancelled']) ? 'danger' : 'warning') }}">
                                             {{ $batch->status }}
                                         </span>
+                                        @if($batch->status === 'failed' && $batchLatestError)
+                                            <span class="d-block text-danger small text-truncate" style="max-width:220px;" title="{{ $batchLatestError }}">
+                                                {{ $batchLatestError }}
+                                            </span>
+                                        @endif
                                     </td>
                                     <td class="small">{{ $batch->processed }}/{{ $batch->total }} ({{ $batch->progressPercent() }}%)</td>
                                     <td class="small">

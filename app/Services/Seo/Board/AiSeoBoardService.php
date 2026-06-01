@@ -293,7 +293,7 @@ class AiSeoBoardService
             ->get();
 
         foreach ($batches as $batch) {
-            foreach (($batch->target_ids ?? []) as $target) {
+            foreach ($this->attemptedTargetsForBatch($batch) as $target) {
                 $key = $this->targetKey($target);
                 if ($key === ':0') {
                     continue;
@@ -303,6 +303,14 @@ class AiSeoBoardService
         }
 
         return $attempts;
+    }
+
+    protected function attemptedTargetsForBatch(SeoFixBatch $batch): array
+    {
+        $targets = array_values($batch->target_ids ?? []);
+        $processed = min(max(0, (int) $batch->processed), count($targets));
+
+        return array_slice($targets, 0, $processed);
     }
 
     protected function targetKey(array $target): string

@@ -26,6 +26,7 @@
             </div>
         @endforeach
 
+        
         <!-- Cash Payment -->
         @if (get_setting('cash_payment') == 1)
             @php

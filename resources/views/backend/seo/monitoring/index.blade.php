@@ -220,6 +220,9 @@
                                 @elseif ($b['status'] === 'failed') <span class="badge badge-soft-danger">{{ $b['status'] }}</span>
                                 @else <span class="badge badge-soft-secondary">{{ $b['status'] }}</span>
                                 @endif
+                                @if($b['status'] === 'failed' && !empty($b['latest_error']))
+                                    <span class="d-block text-danger small text-truncate" style="max-width:180px;" title="{{ $b['latest_error'] }}">{{ $b['latest_error'] }}</span>
+                                @endif
                             </td>
                             <td>{{ $b['succeeded'] }}/{{ $b['total'] }} <span class="text-muted small">({{ $b['failed'] }} fail)</span></td>
                             <td>${{ number_format($b['cost_usd'], 4) }}</td>

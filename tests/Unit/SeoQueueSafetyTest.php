@@ -89,6 +89,38 @@ class SeoQueueSafetyTest extends TestCase
         $this->assertSame(3, $newer->remainingCount());
     }
 
+    public function test_cron_batch_processor_uses_container_injection_for_job_dependencies(): void
+    {
+        $source = file_get_contents(app_path('Console/Commands/Seo/ProcessAiSeoBatchesCommand.php'));
+
+        $this->assertStringContainsString("app()->call([\$job, 'handle'])", $source);
+        $this->assertStringNotContainsString('$job->handle(', $source);
+    }
+
+    public function test_zero_progress_failed_batch_does_not_consume_url_retry_allowance(): void
+    {
+        $board = new AiSeoBoardService();
+        $method = new ReflectionMethod($board, 'attemptedTargetsForBatch');
+        $method->setAccessible(true);
+        $targets = [
+            ['type' => 'page', 'id' => 10],
+            ['type' => 'category', 'id' => 20],
+            ['type' => 'product', 'id' => 30],
+        ];
+
+        $this->assertSame([], $method->invoke($board, new SeoFixBatch([
+            'status' => SeoFixBatch::STATUS_FAILED,
+            'processed' => 0,
+            'target_ids' => $targets,
+        ])));
+
+        $this->assertSame([$targets[0]], $method->invoke($board, new SeoFixBatch([
+            'status' => SeoFixBatch::STATUS_FAILED,
+            'processed' => 1,
+            'target_ids' => $targets,
+        ])));
+    }
+
     public function test_fallback_attempts_are_charged_individually(): void
     {
         $job = new AiAutoFixSeoJob(1);

@@ -2,56 +2,56 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
-    <loc>http://127.0.0.1:8000/blog/category/AC-SUPPLIES</loc>
+    <loc>https://www.bhssupplies.com/blog/category/AC-SUPPLIES</loc>
     <lastmod>2023-07-06</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>http://127.0.0.1:8000/blog/category/ELECTRICAL-SUPPLIES</loc>
+    <loc>https://www.bhssupplies.com/blog/category/ELECTRICAL-SUPPLIES</loc>
     <lastmod>2023-07-06</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>http://127.0.0.1:8000/blog/category/TOOLSACCESSORIES</loc>
+    <loc>https://www.bhssupplies.com/blog/category/TOOLSACCESSORIES</loc>
     <lastmod>2023-07-06</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>http://127.0.0.1:8000/blog/category/PLUMBING-SUPPLIES</loc>
+    <loc>https://www.bhssupplies.com/blog/category/PLUMBING-SUPPLIES</loc>
     <lastmod>2023-07-06</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>http://127.0.0.1:8000/blog/category/HVAC-Supplies</loc>
+    <loc>https://www.bhssupplies.com/blog/category/HVAC-Supplies</loc>
     <lastmod>2023-07-07</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>http://127.0.0.1:8000/blog/category/knipex-hand-tools</loc>
+    <loc>https://www.bhssupplies.com/blog/category/knipex-hand-tools</loc>
     <lastmod>2026-05-03</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>http://127.0.0.1:8000/blog/category/storage-pouches</loc>
+    <loc>https://www.bhssupplies.com/blog/category/storage-pouches</loc>
     <lastmod>2026-05-10</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>http://127.0.0.1:8000/blog/category/humidifiers</loc>
+    <loc>https://www.bhssupplies.com/blog/category/humidifiers</loc>
     <lastmod>2026-05-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>http://127.0.0.1:8000/blog/category/hvac-plumbing-tips</loc>
-    <lastmod>2026-05-26</lastmod>
+    <loc>https://www.bhssupplies.com/blog/category/hvac-plumbing-tips</loc>
+    <lastmod>2026-05-25</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>

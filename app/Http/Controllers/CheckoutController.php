@@ -211,7 +211,7 @@ class CheckoutController extends Controller
 
         $validator = Validator::make($guest_shipping_info, [
             'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users|max:255',
+            'email' => 'required|email|max:255',
             'phone' => 'required|max:12',
             'address' => 'required|max:255',
             'country_id' => 'required|Integer',
@@ -279,39 +279,52 @@ class CheckoutController extends Controller
             }
         }
 
-        $password = substr(hash('sha512', rand()), 0, 8);
         $isEmailVerificationEnabled = get_setting('email_verification');
 
-        // User Create
-        $user = new User();
-        $user->name = $guest_shipping_info['name'];
-        $user->email = $guest_shipping_info['email'];
-        $user->phone = addon_is_activated('otp_system') ? '+'.$guest_shipping_info['country_code'].$guest_shipping_info['phone'] : null;
-        $user->password = Hash::make($password);
-        $user->email_verified_at = $isEmailVerificationEnabled != 1 ? date('Y-m-d H:m:s') : null;
-        $user->save();
+        // Returning guest: reuse the existing account (by email, or phone if OTP is on)
+        // instead of failing on a duplicate. New account is only created for first-time guests.
+        $existing_user = addon_is_activated('otp_system')
+            ? User::where('email', $guest_shipping_info['email'])
+                ->orWhere('phone', '+'.$guest_shipping_info['country_code'].$guest_shipping_info['phone'])->first()
+            : User::where('email', $guest_shipping_info['email'])->first();
 
-        // Guest Account Opening and verification(if activated) eamil send
-        try {
-            EmailUtility::customer_registration_email('registration_from_system_email_to_customer', $user, $password);
-        } catch (\Throwable $e) {
-            report($e);
-        }
+        if ($existing_user != null) {
+            // Existing customer/guest — place the order under their account, no new account or password email.
+            $user = $existing_user;
+        } else {
+            $password = substr(hash('sha512', rand()), 0, 8);
 
-        // Sending email verification Notification
-        if($isEmailVerificationEnabled == 1){
+            // User Create
+            $user = new User();
+            $user->name = $guest_shipping_info['name'];
+            $user->email = $guest_shipping_info['email'];
+            $user->phone = addon_is_activated('otp_system') ? '+'.$guest_shipping_info['country_code'].$guest_shipping_info['phone'] : null;
+            $user->password = Hash::make($password);
+            $user->email_verified_at = $isEmailVerificationEnabled != 1 ? date('Y-m-d H:m:s') : null;
+            $user->save();
+
+            // Guest Account Opening and verification(if activated) eamil send
             try {
-                EmailUtility::email_verification($user, 'customer');
+                EmailUtility::customer_registration_email('registration_from_system_email_to_customer', $user, $password);
             } catch (\Throwable $e) {
                 report($e);
             }
-        }
 
-        // Customer Account Opening Email to Admin
-        if ((get_email_template_data('customer_reg_email_to_admin', 'status') == 1)) {
-            try {
-                EmailUtility::customer_registration_email('customer_reg_email_to_admin', $user, null);
-            } catch (\Exception $e) {}
+            // Sending email verification Notification
+            if($isEmailVerificationEnabled == 1){
+                try {
+                    EmailUtility::email_verification($user, 'customer');
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            }
+
+            // Customer Account Opening Email to Admin
+            if ((get_email_template_data('customer_reg_email_to_admin', 'status') == 1)) {
+                try {
+                    EmailUtility::customer_registration_email('customer_reg_email_to_admin', $user, null);
+                } catch (\Exception $e) {}
+            }
         }
 
         // User Address Create

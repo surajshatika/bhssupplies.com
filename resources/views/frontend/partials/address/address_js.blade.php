@@ -14,13 +14,12 @@
                 phone : phone
             },
             success: function (response) {
-                if(response ==  1){
-                    $('#login_modal').modal();
-                    AIZ.plugins.notify('warning', '{{ translate('You already have an account with this information. Please Login first.') }}');
-                }
-                else{
-                    $('#shipping_info_form').submit();
-                }
+                // Returning guest: allow checkout to proceed; backend reuses the existing account.
+                $('#shipping_info_form').submit();
+            },
+            error: function () {
+                // On any failure, still let the user proceed to checkout.
+                $('#shipping_info_form').submit();
             }
         });
     }

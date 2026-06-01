@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Seo;
 
+use App\Services\Seo\Automation\SeoAutomationCoverage;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 
@@ -15,7 +16,7 @@ class AutomationRunCommand extends Command
                             {--force-all : Run interval-gated automation immediately}
                             {--dry-run : Show what would run without changing data}';
 
-    protected $description = 'Master hourly SEO automation runner for pending SEO, off-page campaigns, technical refresh, rankings, GSC, PageSpeed, and broken links.';
+    protected $description = 'Master hourly SEO automation runner for protected on-page SEO, white-hat off-page planning, technical refresh, index coverage, rankings, GSC, PageSpeed, and broken links.';
 
     public function handle(): int
     {
@@ -33,6 +34,8 @@ class AutomationRunCommand extends Command
         $hasFailures = false;
 
         $this->info('SEO automation run started' . ($dryRun ? ' (dry run)' : '') . '.');
+        $coverage = app(SeoAutomationCoverage::class)->summary();
+        $this->line('Coverage: ' . $coverage['automatic_count'] . ' automatic controls; ' . $coverage['approval_count'] . ' external or routing actions remain approval-gated.');
 
         $hasFailures = $this->callSeoCommand('seo:auto-optimize-pending', array_filter([
             '--limit' => $onpageLimit,
@@ -112,6 +115,18 @@ class AutomationRunCommand extends Command
                 } else {
                     $hasFailures = true;
                 }
+            }
+        }
+
+        if ($this->isDue('index_coverage', (int) get_setting('seo_auto_index_coverage_interval_hours', 24), $forceAll, $dryRun)) {
+            $exitCode = $this->callSeoCommand('seo:auto-index-coverage', [
+                '--limit' => get_setting('seo_auto_index_coverage_limit', 20),
+                '--dry-run' => $dryRun ?: null,
+            ]);
+            if ($exitCode === self::SUCCESS) {
+                $this->markRan('index_coverage', $dryRun);
+            } else {
+                $hasFailures = true;
             }
         }
 

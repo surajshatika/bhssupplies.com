@@ -32,6 +32,7 @@ use App\Services\Seo\Optimization\Features\SeoRevisionsService;
 use App\Services\Seo\Optimization\Features\LinkAssistantService;
 use App\Services\Seo\Board\AiSeoBoardService;
 use App\Services\Seo\Budget\SeoBudgetGuard;
+use App\Services\Seo\Automation\SeoAutomationCoverage;
 use App\Services\Seo\Providers\SeoProviderManager;
 use App\Services\Seo\Providers\SeoProviderReliability;
 use Illuminate\Http\Request;
@@ -68,6 +69,7 @@ class SeoSuiteController extends Controller
             ? $this->emptyAutopilotDashboard($settings)
             : $this->buildAutopilotDashboard($settings);
         $keywordIntelligence = $setupRequired ? $this->emptyKeywordIntelligence() : $this->buildKeywordIntelligence();
+        $automationCoverage = app(SeoAutomationCoverage::class)->summary();
 
         return view('backend.seo_suite.index', compact(
             'project',
@@ -81,7 +83,8 @@ class SeoSuiteController extends Controller
             'advancedDashboard',
             'urlInventory',
             'autopilot',
-            'keywordIntelligence'
+            'keywordIntelligence',
+            'automationCoverage'
         ));
     }
 
@@ -782,11 +785,15 @@ class SeoSuiteController extends Controller
             // Auto-actions + safety caps
             'seo_master_automation_enabled'  => $request->boolean('master_automation_enabled') ? 1 : 0,
             'seo_auto_indexnow'             => $request->boolean('auto_indexnow') ? 1 : 0,
+            'seo_auto_index_coverage_enabled' => $request->boolean('auto_index_coverage_enabled') ? 1 : 0,
+            'seo_auto_index_coverage_limit' => min(50, max(1, (int) $request->input('auto_index_coverage_limit', 20))),
+            'seo_auto_index_coverage_interval_hours' => min(168, max(1, (int) $request->input('auto_index_coverage_interval_hours', 24))),
             'seo_auto_optimization_enabled' => $request->boolean('auto_optimization_enabled') ? 1 : 0,
             'seo_auto_seo_enabled'          => $request->boolean('auto_seo_enabled') ? 1 : 0,
             'seo_auto_seo_batch_size'       => min(100, max(1, (int) $request->input('auto_seo_batch_size', 10))),
             'seo_auto_offpage_enabled'      => $request->boolean('auto_offpage_enabled') ? 1 : 0,
             'seo_auto_offpage_batch_size'   => min(10, max(1, (int) $request->input('auto_offpage_batch_size', 3))),
+            'seo_auto_offpage_interval_hours' => min(24, max(1, (int) $request->input('auto_offpage_interval_hours', 6))),
 
             // Automated sitemap regeneration
             'seo_auto_sitemap_realtime'       => $request->boolean('auto_sitemap_realtime') ? 1 : 0,
@@ -1048,11 +1055,15 @@ class SeoSuiteController extends Controller
             // Auto-actions + safety
             'master_automation_enabled' => (int) get_setting('seo_master_automation_enabled', 1),
             'auto_indexnow'          => (int) get_setting('seo_auto_indexnow', 0),
+            'auto_index_coverage_enabled' => (int) get_setting('seo_auto_index_coverage_enabled', 1),
+            'auto_index_coverage_limit' => (int) get_setting('seo_auto_index_coverage_limit', 20),
+            'auto_index_coverage_interval_hours' => (int) get_setting('seo_auto_index_coverage_interval_hours', 24),
             'auto_optimization_enabled' => (int) get_setting('seo_auto_optimization_enabled', 1),
             'auto_seo_enabled'       => (int) get_setting('seo_auto_seo_enabled', 1),
             'auto_seo_batch_size'    => (int) get_setting('seo_auto_seo_batch_size', 10),
             'auto_offpage_enabled'   => (int) get_setting('seo_auto_offpage_enabled', 1),
             'auto_offpage_batch_size'=> (int) get_setting('seo_auto_offpage_batch_size', 3),
+            'auto_offpage_interval_hours' => (int) get_setting('seo_auto_offpage_interval_hours', 6),
             'auto_sitemap_realtime'  => (int) get_setting('seo_auto_sitemap_realtime', 0),
             'auto_sitemap_interval_hours' => (int) get_setting('seo_auto_sitemap_interval_hours', 3),
             'competitor_urls'        => get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', '')),

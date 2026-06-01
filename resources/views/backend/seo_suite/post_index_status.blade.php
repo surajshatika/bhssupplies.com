@@ -33,8 +33,8 @@
                 </button>
                 <div class="mt-3 p-2 bg-light rounded small text-muted">
                     <strong>{{ translate('Methods Used:') }}</strong><br>
-                    <i class="las la-check text-success mr-1"></i>{{ translate('Google Custom Search API (if configured)') }}<br>
-                    <i class="las la-check text-warning mr-1"></i>{{ translate('Google Cache check (fallback)') }}
+                    <i class="las la-check text-success mr-1"></i>{{ translate('Google Custom Search API') }}<br>
+                    <i class="las la-info-circle text-info mr-1"></i>{{ translate('API-only verification avoids unreliable cache guesses') }}
                 </div>
             </div>
         </div>
@@ -72,6 +72,8 @@
                 </div>
             </div>
         </div>
+
+        <div id="idx-message" class="alert alert-warning d-none"></div>
 
         <div id="idx-ai-card" class="card mt-3 d-none">
             <div class="card-header"><h6 class="mb-0"><i class="las la-robot mr-1 text-primary"></i>{{ translate('AI Recommendations') }}</h6></div>
@@ -154,6 +156,7 @@ $(function() {
 
                 $('#idx-indexed-count').text(res.indexed + ' Indexed');
                 $('#idx-not-indexed-count').text(res.not_indexed + ' Not Indexed');
+                $('#idx-message').toggleClass('d-none', !res.message).text(res.message || '');
 
                 var tbody = $('#idx-results-tbody').empty();
                 (res.results || []).forEach(function(r) {
@@ -162,15 +165,17 @@ $(function() {
                     var urlCell = href
                         ? '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener" class="small">' + escapeHtml(rawUrl) + '</a>'
                         : '<span class="small">' + escapeHtml(rawUrl) + '</span>';
-                    var badge = r.indexed
-                        ? '<span class="badge badge-success"><i class="las la-check mr-1"></i>Indexed</span>'
-                        : '<span class="badge badge-danger"><i class="las la-times mr-1"></i>Not Indexed</span>';
+                    var badge = r.status === 'api_error'
+                        ? '<span class="badge badge-warning"><i class="las la-exclamation-triangle mr-1"></i>API Error</span>'
+                        : (r.indexed
+                            ? '<span class="badge badge-success"><i class="las la-check mr-1"></i>Indexed</span>'
+                            : '<span class="badge badge-danger"><i class="las la-times mr-1"></i>Not Indexed</span>');
                     tbody.append(
                         '<tr>' +
                         '<td class="text-truncate" style="max-width:260px;">' + urlCell + '</td>' +
                         '<td>' + badge + '</td>' +
                         '<td><small class="text-muted">' + escapeHtml(r.method) + '</small></td>' +
-                        '<td>' + (!r.indexed ? '<a href="https://search.google.com/search-console/inspect?resource_id=' + encodeURIComponent(rawUrl) + '" target="_blank" rel="noopener" class="btn btn-xs btn-soft-warning">Inspect</a>' : '') + '</td>' +
+                        '<td>' + (r.status === 'not_indexed' ? '<a href="https://search.google.com/search-console/inspect?resource_id=' + encodeURIComponent(rawUrl) + '" target="_blank" rel="noopener" class="btn btn-xs btn-soft-warning">Inspect</a>' : '') + '</td>' +
                         '</tr>'
                     );
                 });

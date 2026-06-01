@@ -426,7 +426,7 @@
                 <div class="form-group row mb-2">
                     <label class="col-9 col-form-label small">
                         {{ translate('Master hourly SEO automation command') }}
-                        <span class="d-block text-muted">{{ translate('Runs pending on-page SEO every hour and interval-gates heavier technical, rank, PageSpeed, and link checks.') }}</span>
+                        <span class="d-block text-muted">{{ translate('Runs protected pending on-page SEO every hour, white-hat off-page planning, and interval-gated technical, index coverage, rank, PageSpeed, and link checks.') }}</span>
                     </label>
                     <div class="col-3 text-right">
                         <label class="aiz-switch aiz-switch-success mb-0">
@@ -446,8 +446,31 @@
                 </div>
                 <div class="form-group row mb-2">
                     <label class="col-9 col-form-label small">
+                        {{ translate('Automated Google index coverage verification') }}
+                        <span class="d-block text-muted">{{ translate('Checks protected SEO-ready URLs through Google Custom Search API and optionally resubmits confirmed gaps through IndexNow.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="auto_index_coverage_enabled" value="1" @if(!empty($settings['auto_index_coverage_enabled'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Index Coverage URLs Per Check') }}</label>
+                    <input type="number" min="1" max="50" class="form-control" name="auto_index_coverage_limit"
+                        value="{{ $settings['auto_index_coverage_limit'] ?? '20' }}">
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Index Coverage Interval (hours)') }}</label>
+                    <input type="number" min="1" max="168" class="form-control" name="auto_index_coverage_interval_hours"
+                        value="{{ $settings['auto_index_coverage_interval_hours'] ?? '24' }}">
+                    <small class="text-muted">{{ translate('Recommended: 24 hours. Requires the Google Custom Search API key and CX configured above.') }}</small>
+                </div>
+                <div class="form-group row mb-2">
+                    <label class="col-9 col-form-label small">
                         {{ translate('Automated technical optimization refresh') }}
-                        <span class="d-block text-muted">{{ translate('Refreshes sitemap, robots.txt, llms.txt, RSS, SEO scores, and optional IndexNow pings.') }}</span>
+                        <span class="d-block text-muted">{{ translate('Refreshes smart, video, and news sitemaps; robots.txt; llms.txt; RSS; SEO scores; local, canonical, redirect, and webmaster audits; plus optional IndexNow pings.') }}</span>
                     </label>
                     <div class="col-3 text-right">
                         <label class="aiz-switch aiz-switch-success mb-0">
@@ -459,7 +482,7 @@
                 <div class="form-group row mb-2">
                     <label class="col-9 col-form-label small">
                         {{ translate('Fully automated Canada SEO for pending URLs') }}
-                        <span class="d-block text-muted">{{ translate('Runs nightly and skips already-done Product, Category, and Page SEO.') }}</span>
+                        <span class="d-block text-muted">{{ translate('Runs hourly through the master command and skips already-done Product, Category, and Page SEO.') }}</span>
                     </label>
                     <div class="col-3 text-right">
                         <label class="aiz-switch aiz-switch-success mb-0">
@@ -502,6 +525,12 @@
                     <input type="number" min="1" max="10" class="form-control" name="auto_offpage_batch_size"
                         value="{{ $settings['auto_offpage_batch_size'] ?? '3' }}">
                     <small class="text-muted">{{ translate('Recommended: 2-3. These are AI campaign plans and outreach templates, not spam auto-posted links.') }}</small>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Off-Page Campaign Interval (hours)') }}</label>
+                    <input type="number" min="1" max="24" class="form-control" name="auto_offpage_interval_hours"
+                        value="{{ $settings['auto_offpage_interval_hours'] ?? '6' }}">
+                    <small class="text-muted">{{ translate('How often the hourly master command prepares white-hat off-page campaigns for SEO-ready protected URLs. Recommended: 6-12.') }}</small>
                 </div>
 
                 <hr>

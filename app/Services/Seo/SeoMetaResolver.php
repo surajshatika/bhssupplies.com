@@ -82,7 +82,10 @@ class SeoMetaResolver
                 $schemas[] = $meta['schema_json'];
             }
         }
-        if (!empty($meta['breadcrumbs_json']) && is_array($meta['breadcrumbs_json'])) {
+        if (!empty($meta['breadcrumbs_json'])
+            && is_array($meta['breadcrumbs_json'])
+            && !$this->schemasContainType($schemas, (string) ($meta['breadcrumbs_json']['@type'] ?? ''))
+        ) {
             $schemas[] = $meta['breadcrumbs_json'];
         }
 
@@ -182,6 +185,21 @@ class SeoMetaResolver
         }
 
         return null;
+    }
+
+    protected function schemasContainType(array $schemas, string $type): bool
+    {
+        if ($type === '') {
+            return false;
+        }
+
+        foreach ($schemas as $schema) {
+            if (is_array($schema) && ($schema['@type'] ?? null) === $type) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function modelToType(Model $entity): string

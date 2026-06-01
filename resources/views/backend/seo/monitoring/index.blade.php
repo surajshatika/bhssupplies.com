@@ -29,6 +29,7 @@
 .mini-table tr:last-child td { border-bottom: 0; }
 .text-truncate-cell { max-width: 220px; }
 .queue-health-strip { display:flex; flex-wrap:wrap; gap:.45rem 1rem; margin-top:.75rem; padding-top:.65rem; border-top:1px solid #eef0f4; font-size:.8rem; }
+.coverage-num { font-size:1.45rem; font-weight:700; line-height:1.1; }
 </style>
 
 <div class="aiz-titlebar mt-2 mb-3">
@@ -145,6 +146,71 @@
                 <span class="text-muted">{{ translate('7d failed/cancelled') }}:</span>
                 <strong>{{ $auto['recent_failure_count'] ?? 0 }}</strong>
             </span>
+        </div>
+    </div>
+</div>
+
+{{-- Integration readiness + index coverage --}}
+@php
+    $readiness = $data['integration_readiness'] ?? ['score' => 0, 'ready_count' => 0, 'total_count' => 0, 'items' => []];
+    $indexCoverage = $data['latest_index_coverage'] ?? null;
+    $readinessTone = ($readiness['score'] ?? 0) >= 80 ? 'success' : (($readiness['score'] ?? 0) >= 50 ? 'warning' : 'danger');
+@endphp
+<div class="row gutters-16">
+    <div class="col-lg-7 mb-3">
+        <div class="mon-card h-100">
+            <div class="mon-card-head">
+                <span><i class="las la-plug mr-1"></i>{{ translate('Automation Integration Readiness') }}</span>
+                <span class="badge badge-{{ $readinessTone }}">{{ $readiness['score'] ?? 0 }}%</span>
+            </div>
+            <div class="mon-card-body">
+                <div class="d-flex flex-wrap justify-content-between mb-2 small text-muted">
+                    <span>{{ $readiness['ready_count'] ?? 0 }}/{{ $readiness['total_count'] ?? 0 }} {{ translate('integrations ready') }}</span>
+                    <span>{{ $readiness['automatic_controls'] ?? 0 }} {{ translate('automatic controls active') }}</span>
+                </div>
+                <div class="row gutters-8">
+                    @foreach(($readiness['items'] ?? []) as $item)
+                        <div class="col-md-6">
+                            <div class="kv-row align-items-start">
+                                <span>
+                                    <strong class="d-block">{{ translate($item['label']) }}</strong>
+                                    <small class="text-muted">{{ translate($item['detail']) }}</small>
+                                </span>
+                                <span class="badge badge-{{ !empty($item['ready']) ? 'success' : 'warning' }} ml-2">
+                                    {{ !empty($item['ready']) ? translate('Ready') : translate('Setup') }}
+                                </span>
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5 mb-3">
+        <div class="mon-card h-100">
+            <div class="mon-card-head">
+                <span><i class="las la-search mr-1"></i>{{ translate('Latest Google Index Coverage') }}</span>
+                <a href="{{ route('admin.seo-suite.index_status') }}" class="btn btn-xs btn-soft-primary">{{ translate('Open Checker') }}</a>
+            </div>
+            <div class="mon-card-body">
+                @if($indexCoverage)
+                    <div class="row gutters-8 text-center">
+                        <div class="col-3"><div class="coverage-num text-primary">{{ $indexCoverage['checked'] }}</div><small class="text-muted">{{ translate('checked') }}</small></div>
+                        <div class="col-3"><div class="coverage-num text-success">{{ $indexCoverage['indexed'] }}</div><small class="text-muted">{{ translate('indexed') }}</small></div>
+                        <div class="col-3"><div class="coverage-num text-danger">{{ $indexCoverage['not_indexed'] }}</div><small class="text-muted">{{ translate('gaps') }}</small></div>
+                        <div class="col-3"><div class="coverage-num text-warning">{{ $indexCoverage['errors'] }}</div><small class="text-muted">{{ translate('errors') }}</small></div>
+                    </div>
+                    <div class="queue-health-strip">
+                        <span><span class="text-muted">{{ translate('Last run') }}:</span> <strong>{{ $indexCoverage['completed_at'] ?? '-' }}</strong></span>
+                        <span><span class="text-muted">{{ translate('IndexNow resubmitted') }}:</span> <strong>{{ $indexCoverage['indexnow_submitted'] ?? 0 }}</strong></span>
+                    </div>
+                    @if(!empty($indexCoverage['message']))
+                        <div class="alert alert-warning py-2 px-3 mt-3 mb-0 small">{{ $indexCoverage['message'] }}</div>
+                    @endif
+                @else
+                    <div class="text-muted small py-3">{{ translate('No automated index coverage check has run yet. The hourly master command runs it on the configured interval once the Google Custom Search API key and CX are ready.') }}</div>
+                @endif
+            </div>
         </div>
     </div>
 </div>

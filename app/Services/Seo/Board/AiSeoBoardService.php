@@ -17,6 +17,7 @@ use App\Services\Seo\Providers\SeoProviderReliability;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -688,7 +689,7 @@ class AiSeoBoardService
      * Apply an AI-generated fix to a single pending entity. SEO-done rows are
      * protected, while weak pending rows can have bad meta/content repaired.
      *
-     * @return array{applied: array<string,string>, score_before:int, score_after:int, source: 'ai'|'template'}
+     * @return array{applied: array<string,string>, score_before:int, score_after:int, source:string}
      */
     public function applyAiFix(string $type, int $id, ?string $providerName = null): array
     {
@@ -711,6 +712,7 @@ class AiSeoBoardService
         }
 
         $before = $this->scoreEntity($entity, $type);
+        $snapshot = $this->mutationSnapshot($entity, $type);
         $meta   = $this->loadOrSynthesizeMeta($entity, $type);
         $name   = $this->displayName($entity, $type);
         $desc   = $this->plainContent($entity, $type);
@@ -772,6 +774,11 @@ class AiSeoBoardService
             }
         }
 
+        foreach ($this->advancedMetaPatch($entity, $type, $patch + $meta) as $field => $value) {
+            $patch[$field]   = $value;
+            $applied[$field] = $this->summarizeAppliedValue($value);
+        }
+
         // Write content BEFORE schema so FAQ visibility is known: FAQPage schema
         // is only emitted when the matching Q&A is actually on the page.
         $contentPatch = $this->contentPatch($entity, $type, $aiData, $patch + $meta);
@@ -819,6 +826,26 @@ class AiSeoBoardService
 
         $entity->refresh();
         $afterScore = $this->scoreEntity($entity, $type);
+        $qualityGateRolledBack = false;
+        if ($this->shouldRollbackSeoMutation($before, $afterScore)) {
+            $generatedScore = $afterScore['score'];
+            $this->restoreMutationSnapshot($entity, $type, $snapshot);
+            $entity->refresh();
+            $afterScore = $this->scoreEntity($entity, $type);
+            $qualityGateRolledBack = true;
+            $source = 'quality_gate_rollback';
+            $applied = [
+                'quality_gate' => 'Rolled back because the generated SEO score regressed.',
+            ];
+
+            logger()->warning('AI SEO Board quality gate rolled back a regression', [
+                'type' => $type,
+                'id' => $entity->getKey(),
+                'score_before' => $before['score'],
+                'score_after_generated' => $generatedScore,
+                'score_after_restore' => $afterScore['score'],
+            ]);
+        }
         $this->persistMeta($entity, $type, [
             'seo_score' => $afterScore['score'],
             'seo_grade' => $afterScore['grade'],
@@ -836,6 +863,7 @@ class AiSeoBoardService
             'source'       => $source,
             'ai_attempts'  => $aiAttempts,
             'ai_attempt_details' => $aiAttemptDetails,
+            'quality_gate_rolled_back' => $qualityGateRolledBack,
             'row'          => $afterRow,
         ];
     }
@@ -961,6 +989,11 @@ class AiSeoBoardService
                 $patch['twitter_image'] = $img;
                 $applied['og_image']    = $img;
             }
+        }
+
+        foreach ($this->advancedMetaPatch($entity, $type, $patch + $meta) as $field => $value) {
+            $patch[$field]   = $value;
+            $applied[$field] = $this->summarizeAppliedValue($value);
         }
 
         if (empty($meta['schema_json']) && !empty($approved['schema'])) {
@@ -1158,6 +1191,124 @@ class AiSeoBoardService
             ],
             $patch
         );
+    }
+
+    /**
+     * Fill page-level signals that are deterministic and safe to write without
+     * replacing curated values. Schema is handled separately after content so
+     * its FAQ markup stays aligned with the visible page.
+     */
+    protected function advancedMetaPatch(Model $entity, string $type, array $meta): array
+    {
+        $patch = [];
+        $title = trim((string) ($meta['meta_title'] ?? ''));
+        $description = trim((string) ($meta['meta_description'] ?? ''));
+        $image = $meta['og_image'] ?? $meta['twitter_image'] ?? $this->fallbackImage($entity, $type);
+        $desiredOgType = match ($type) {
+            'product' => 'product',
+            'blog' => 'article',
+            default => 'website',
+        };
+
+        if (empty($meta['canonical_url'])) {
+            $patch['canonical_url'] = $this->urlFor($entity, $type);
+        }
+        if (empty($meta['robots_meta'])) {
+            $patch['robots_meta'] = 'index, follow, max-image-preview:large, max-snippet:-1';
+        }
+        if (empty($meta['og_title']) && $title !== '') {
+            $patch['og_title'] = Str::limit($title, 80, '');
+        }
+        if (empty($meta['og_description']) && $description !== '') {
+            $patch['og_description'] = Str::limit($description, 200, '');
+        }
+        if (empty($meta['og_type']) || ($meta['og_type'] === 'website' && $desiredOgType !== 'website')) {
+            $patch['og_type'] = $desiredOgType;
+        }
+        if (empty($meta['twitter_card'])) {
+            $patch['twitter_card'] = 'summary_large_image';
+        }
+        if (empty($meta['twitter_title']) && $title !== '') {
+            $patch['twitter_title'] = Str::limit($title, 80, '');
+        }
+        if (empty($meta['twitter_description']) && $description !== '') {
+            $patch['twitter_description'] = Str::limit($description, 200, '');
+        }
+        if (empty($meta['twitter_image']) && $image) {
+            $patch['twitter_image'] = $image;
+        }
+        if (empty($meta['breadcrumbs_json']) && $breadcrumbs = $this->breadcrumbSchema($entity, $type)) {
+            $patch['breadcrumbs_json'] = $breadcrumbs;
+        }
+
+        return $patch;
+    }
+
+    protected function summarizeAppliedValue($value): string
+    {
+        if (is_array($value)) {
+            return Str::limit((string) json_encode($value, JSON_UNESCAPED_SLASHES), 120);
+        }
+
+        return Str::limit((string) $value, 120);
+    }
+
+    protected function shouldRollbackSeoMutation(array $before, array $after): bool
+    {
+        return (int) ($after['score'] ?? 0) < (int) ($before['score'] ?? 0);
+    }
+
+    protected function mutationSnapshot(Model $entity, string $type): array
+    {
+        $contentFields = match ($type) {
+            'product' => ['description', 'short_description'],
+            'category' => ['top_description', 'bottom_description'],
+            'page' => ['content'],
+            'blog' => ['description', 'short_description'],
+            default => [],
+        };
+        $entityValues = [];
+        foreach ($contentFields as $field) {
+            if (Schema::hasColumn($entity->getTable(), $field)) {
+                $entityValues[$field] = $entity->getAttribute($field);
+            }
+        }
+
+        $meta = $this->metaQuery($entity, $type)->first();
+
+        return [
+            'entity_values' => $entityValues,
+            'meta_exists' => (bool) $meta,
+            'meta_values' => $meta?->getAttributes() ?? [],
+        ];
+    }
+
+    protected function restoreMutationSnapshot(Model $entity, string $type, array $snapshot): void
+    {
+        if (!empty($snapshot['entity_values'])) {
+            $entity->forceFill($snapshot['entity_values'])->save();
+        }
+
+        $query = $this->metaQuery($entity, $type);
+        if (empty($snapshot['meta_exists'])) {
+            $query->delete();
+            return;
+        }
+
+        $row = $query->first() ?: new SeoMeta([
+            'model_type' => $this->typeMap[$type]['class'],
+            'model_id' => $entity->getKey(),
+            'lang' => config('app.locale', 'en'),
+        ]);
+        $row->forceFill(Arr::except($snapshot['meta_values'] ?? [], ['id', 'created_at', 'updated_at']))->save();
+    }
+
+    protected function metaQuery(Model $entity, string $type): Builder
+    {
+        return SeoMeta::query()
+            ->where('model_type', $this->typeMap[$type]['class'])
+            ->where('model_id', $entity->getKey())
+            ->where('lang', config('app.locale', 'en'));
     }
 
     protected function countSeoDoneUrls(): int
@@ -1881,11 +2032,11 @@ class AiSeoBoardService
     {
         $html = trim((string) ($aiData['content_html'] ?? ''));
         if ($html === '') {
-            $html = $this->templateContentHtml($this->displayName($entity, $type), $type, $meta);
+            $html = $this->templateContentHtml($this->displayName($entity, $type), $type, $meta, $entity);
         }
 
         $name = $this->displayName($entity, $type);
-        $html = $this->ensureSeoContentSignals($html, $name, $type, $meta);
+        $html = $this->ensureSeoContentSignals($html, $name, $type, $meta, $entity);
         $html = $this->cleanGeneratedHtml($html);
         if ($html === '') {
             return [];
@@ -1896,7 +2047,7 @@ class AiSeoBoardService
 
         if ($type === 'product') {
             if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 300)) {
-                $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta);
+                $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta, $entity, $type);
             }
             if (Schema::hasColumn($table, 'short_description') && $this->needsSeoContentRefresh($entity->short_description ?? null, $meta, 45, false)) {
                 $patch['short_description'] = $this->shortSeoText($name, $type, $meta);
@@ -1906,10 +2057,10 @@ class AiSeoBoardService
                 $patch['top_description'] = $this->categoryIntroHtml($name, $meta);
             }
             if (Schema::hasColumn($table, 'bottom_description') && $this->needsSeoContentRefresh($entity->bottom_description ?? null, $meta, 300)) {
-                $patch['bottom_description'] = $this->mergeSeoHtml($entity->bottom_description ?? null, $html, $meta);
+                $patch['bottom_description'] = $this->mergeSeoHtml($entity->bottom_description ?? null, $html, $meta, $entity, $type);
             }
         } elseif ($type === 'page' && Schema::hasColumn($table, 'content') && $this->needsSeoContentRefresh($entity->content ?? null, $meta, 300)) {
-            $patch['content'] = $this->mergeSeoHtml($entity->content ?? null, $html, $meta);
+            $patch['content'] = $this->mergeSeoHtml($entity->content ?? null, $html, $meta, $entity, $type);
         }
 
         return $patch;
@@ -1935,11 +2086,14 @@ class AiSeoBoardService
         if ($needHeading && $focus !== '' && !$this->htmlHeadingContains($html, $focus)) {
             return true;
         }
+        if ($needHeading && !str_contains($html, 'data-seo-context-links')) {
+            return true;
+        }
 
         return false;
     }
 
-    protected function mergeSeoHtml($current, string $generated, array $meta): string
+    protected function mergeSeoHtml($current, string $generated, array $meta, ?Model $entity = null, ?string $type = null): string
     {
         $current = trim((string) $current);
         if ($current === '') {
@@ -1949,6 +2103,9 @@ class AiSeoBoardService
         $focus = trim((string) ($meta['focus_keyword'] ?? ''));
         $plain = trim(preg_replace('/\s+/', ' ', strip_tags($current)));
         if ($focus !== '' && mb_stripos($plain, $focus) !== false && str_word_count($plain) >= 300 && $this->htmlHeadingContains($current, $focus)) {
+            if (!str_contains($current, 'data-seo-context-links')) {
+                return $current . "\n\n" . $this->seoLinkParagraph($meta, $entity, $type);
+            }
             return $current;
         }
 
@@ -1983,7 +2140,7 @@ class AiSeoBoardService
         return strip_tags($html, '<h2><h3><p><ul><ol><li><strong><em><br><a>');
     }
 
-    protected function ensureSeoContentSignals(string $html, string $name, string $type, array $meta): string
+    protected function ensureSeoContentSignals(string $html, string $name, string $type, array $meta, ?Model $entity = null): string
     {
         $focus = trim((string) ($meta['focus_keyword'] ?? ''));
         if ($focus === '') {
@@ -1997,17 +2154,17 @@ class AiSeoBoardService
             || !$this->htmlHeadingContains($html, $focus);
 
         if ($needsCoreBlock) {
-            return $this->seoSupportHtml($name, $type, $meta) . ($html !== '' ? "\n\n" . $html : '');
+            return $this->seoSupportHtml($name, $type, $meta, $entity) . ($html !== '' ? "\n\n" . $html : '');
         }
 
-        if (!$this->hasAnyLink($html)) {
-            $html .= "\n\n" . $this->seoLinkParagraph($meta);
+        if (!str_contains($html, 'data-seo-context-links')) {
+            $html .= "\n\n" . $this->seoLinkParagraph($meta, $entity, $type);
         }
 
         return $html;
     }
 
-    protected function seoSupportHtml(string $name, string $type, array $meta): string
+    protected function seoSupportHtml(string $name, string $type, array $meta, ?Model $entity = null): string
     {
         $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
         $keywordList = implode(', ', array_slice($meta['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type), 0, 10));
@@ -2036,16 +2193,78 @@ class AiSeoBoardService
             . '<p>' . e("This page is optimized for buyers searching in {$areaText}. It also supports trade account, pickup, quote request, and leave a review intent where those actions are natural for the customer journey.") . '</p>'
             . '<h3>Related Canada Keywords</h3>'
             . '<p>' . e($keywordList) . '</p>'
-            . $this->seoLinkParagraph($meta)
+            . $this->seoLinkParagraph($meta, $entity, $type)
             . '<h3>Buying Guidance</h3>'
             . '<p>' . e('First, confirm the product size, application, material, and compatibility. Next, compare delivery or pickup needs with order quantity and pricing. Finally, contact BHS Supplies when you need help matching an item, opening a trade account, or planning a repeat order for your business.') . '</p>';
     }
 
-    protected function seoLinkParagraph(array $meta): string
+    protected function seoLinkParagraph(array $meta, ?Model $entity = null, ?string $type = null): string
     {
         $focus = trim((string) ($meta['focus_keyword'] ?? 'products'));
+        $links = $this->contextualInternalLinks($entity, $type);
+        $anchors = array_map(
+            fn(array $link) => '<a href="' . e($link['url']) . '">' . e($link['label']) . '</a>',
+            $links
+        );
 
-        return '<p>For related options, browse <a href="' . e(url('/shop')) . '">BHS Supplies products</a> or review <a href="' . e(url('/users/login')) . '">trade account access</a>. Canadian business buyers can also review general small business guidance from <a href="https://www.canada.ca/en/services/business.html" rel="nofollow noopener" target="_blank">Canada.ca</a> while comparing ' . e($focus) . ' purchasing requirements.</p>';
+        return '<p data-seo-context-links="1">For related ' . e($focus) . ' options and next steps, review '
+            . implode(', ', $anchors)
+            . '. Canadian business buyers can also review general small business guidance from <a href="https://www.canada.ca/en/services/business.html" rel="nofollow noopener" target="_blank">Canada.ca</a> while comparing purchasing requirements.</p>';
+    }
+
+    protected function contextualInternalLinks(?Model $entity, ?string $type): array
+    {
+        $links = [];
+
+        try {
+            if ($entity && $type === 'product' && $category = $entity->main_category) {
+                if (!empty($category->slug)) {
+                    $links[] = [
+                        'url' => url('/category/' . ltrim((string) $category->slug, '/')),
+                        'label' => Str::limit((string) ($category->name ?: 'related category'), 70, ''),
+                    ];
+                }
+            } elseif ($entity && $type === 'category' && $parent = $entity->parentCategory) {
+                if (!empty($parent->slug)) {
+                    $links[] = [
+                        'url' => url('/category/' . ltrim((string) $parent->slug, '/')),
+                        'label' => Str::limit((string) ($parent->name ?: 'parent category'), 70, ''),
+                    ];
+                }
+            }
+        } catch (Throwable $e) {
+            // The core internal-link set below is still useful if a relation is unavailable.
+        }
+
+        $links[] = ['url' => url('/shop'), 'label' => 'BHS Supplies products'];
+        $links[] = ['url' => url('/contractor-trade-account'), 'label' => 'contractor trade account'];
+        $links[] = ['url' => url('/review'), 'label' => 'leave a review'];
+        $links[] = $this->localLandingLink($entity, $type);
+
+        return collect($links)->unique('url')->values()->all();
+    }
+
+    protected function localLandingLink(?Model $entity, ?string $type): array
+    {
+        $locations = [
+            ['slug' => 'mississauga', 'label' => 'HVAC supplies Mississauga'],
+            ['slug' => 'brampton', 'label' => 'HVAC supplies Brampton'],
+            ['slug' => 'toronto', 'label' => 'HVAC supplies Toronto'],
+            ['slug' => 'etobicoke', 'label' => 'HVAC supplies Etobicoke'],
+            ['slug' => 'vaughan', 'label' => 'HVAC supplies Vaughan'],
+            ['slug' => 'oakville', 'label' => 'HVAC supplies Oakville'],
+            ['slug' => 'scarborough', 'label' => 'HVAC supplies Scarborough'],
+            ['slug' => 'markham', 'label' => 'HVAC supplies Markham'],
+            ['slug' => 'north-york', 'label' => 'HVAC supplies North York'],
+            ['slug' => 'burlington', 'label' => 'HVAC supplies Burlington'],
+        ];
+        $seed = ($type ?: 'page') . ':' . ($entity?->getKey() ?: ($entity?->slug ?? 'default'));
+        $location = $locations[abs(crc32($seed)) % count($locations)];
+
+        return [
+            'url' => url('/hvac-supplies-' . $location['slug']),
+            'label' => $location['label'],
+        ];
     }
 
     protected function hasAnyLink(string $html): bool
@@ -2299,9 +2518,9 @@ class AiSeoBoardService
         return array_values(array_unique($urls));
     }
 
-    protected function templateContentHtml(string $name, string $type, array $meta): string
+    protected function templateContentHtml(string $name, string $type, array $meta, ?Model $entity = null): string
     {
-        return $this->seoSupportHtml($name, $type, $meta);
+        return $this->seoSupportHtml($name, $type, $meta, $entity);
     }
 
     protected function categoryIntroHtml(string $name, array $meta): string

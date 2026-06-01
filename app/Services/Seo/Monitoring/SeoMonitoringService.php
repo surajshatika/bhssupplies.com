@@ -11,6 +11,11 @@ use App\Models\SeoRun;
 use App\Models\SeoScoreHistory;
 use App\Services\Seo\Board\AiSeoBoardService;
 use App\Services\Seo\Budget\SeoBudgetGuard;
+use App\Services\Seo\Automation\SeoAutomationCoverage;
+use App\Services\Seo\Optimization\Features\PostIndexStatusService;
+use App\Services\Seo\Providers\SeoProviderReliability;
+use App\Services\Seo\Ranking\RankerManager;
+use App\Services\Seo\SearchConsole\GoogleSearchConsoleService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -48,7 +53,87 @@ class SeoMonitoringService
             'broken_links'  => $this->brokenLinkSummary(),
             'score_buckets' => $this->scoreBuckets(),
             'autopilot'     => $this->autopilotHealth(),
+            'integration_readiness' => $this->integrationReadiness(),
+            'latest_index_coverage' => $this->latestIndexCoverage(),
         ];
+    }
+
+    protected function integrationReadiness(): array
+    {
+        try {
+            $aiProviders = collect(app(SeoProviderReliability::class)->dashboard())->where('configured', true)->count();
+        } catch (Throwable $e) {
+            $aiProviders = 0;
+        }
+
+        try {
+            $gscReady = app(GoogleSearchConsoleService::class)->isConfigured();
+        } catch (Throwable $e) {
+            $gscReady = false;
+        }
+
+        try {
+            $rankReady = RankerManager::make()->isConfigured();
+        } catch (Throwable $e) {
+            $rankReady = false;
+        }
+
+        try {
+            $indexCoverageReady = app(PostIndexStatusService::class)->isApiConfigured();
+        } catch (Throwable $e) {
+            $indexCoverageReady = false;
+        }
+
+        $competitors = preg_split('/[\r\n,]+/', (string) get_setting('seo_competitor_urls', '')) ?: [];
+        $items = [
+            ['label' => 'Master hourly automation', 'ready' => (int) get_setting('seo_master_automation_enabled', 1) === 1, 'detail' => 'Runs the interval-gated SEO orchestration chain.'],
+            ['label' => 'AI provider failover', 'ready' => $aiProviders > 0, 'detail' => $aiProviders . ' AI provider(s) configured.'],
+            ['label' => 'Google Search Console', 'ready' => $gscReady, 'detail' => 'Provides real query, landing-page, click, and impression data.'],
+            ['label' => 'Rank tracker provider', 'ready' => $rankReady, 'detail' => 'Checks Google keyword positions on schedule.'],
+            ['label' => 'Index coverage API', 'ready' => $indexCoverageReady, 'detail' => 'Requires Google Custom Search API key and CX.'],
+            ['label' => 'IndexNow resubmission', 'ready' => (int) get_setting('seo_auto_indexnow', 0) === 1 && filled(get_setting('seo_indexnow_key', config('seo.indexnow.key'))), 'detail' => 'Resubmits confirmed index gaps and refreshed crawl artifacts.'],
+            ['label' => 'Competitor gap inputs', 'ready' => count(array_filter(array_map('trim', $competitors))) > 0, 'detail' => 'Adds competitor positioning angles without copying content.'],
+            ['label' => 'Technical crawl artifacts', 'ready' => file_exists(public_path('sitemap-index.xml')) && file_exists(public_path('robots.txt')) && file_exists(public_path('llms.txt')), 'detail' => 'Sitemap index, robots.txt, and LLMs.txt are published.'],
+        ];
+        $readyCount = collect($items)->where('ready', true)->count();
+
+        return [
+            'score' => (int) round(($readyCount / max(1, count($items))) * 100),
+            'ready_count' => $readyCount,
+            'total_count' => count($items),
+            'items' => $items,
+            'automatic_controls' => app(SeoAutomationCoverage::class)->summary()['automatic_count'],
+        ];
+    }
+
+    protected function latestIndexCoverage(): ?array
+    {
+        if (!Schema::hasTable('seo_runs')) {
+            return null;
+        }
+
+        try {
+            $run = SeoRun::query()->where('feature', 'index_coverage')->latest('id')->first();
+            if (!$run) {
+                return null;
+            }
+
+            $result = $run->result_payload ?? [];
+
+            return [
+                'status' => $run->status,
+                'checked' => (int) ($result['total'] ?? 0),
+                'indexed' => (int) ($result['indexed'] ?? 0),
+                'not_indexed' => (int) ($result['not_indexed'] ?? 0),
+                'errors' => (int) ($result['errors'] ?? 0),
+                'skipped' => (bool) ($result['skipped'] ?? false),
+                'message' => $result['message'] ?? $run->error_message,
+                'indexnow_submitted' => (int) data_get($result, 'indexnow.submitted', 0),
+                'completed_at' => optional($run->completed_at ?: $run->updated_at)->format('Y-m-d H:i'),
+            ];
+        } catch (Throwable $e) {
+            return null;
+        }
     }
 
     protected function autopilotHealth(): array

@@ -4,7 +4,9 @@ namespace Tests\Unit;
 
 use App\Console\Commands\Seo\ProcessAiSeoBatchesCommand;
 use App\Jobs\Seo\AiAutoFixSeoJob;
+use App\Models\Page;
 use App\Models\SeoFixBatch;
+use App\Services\Seo\SeoMetaResolver;
 use App\Services\Seo\Board\AiSeoBoardService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -147,5 +149,78 @@ class SeoQueueSafetyTest extends TestCase
         $cost = $method->invoke($job, new SeoFixBatch(['provider' => 'openai']));
 
         $this->assertSame(0.0243, $cost);
+    }
+
+    public function test_on_page_advanced_patch_fills_safe_metadata_without_overwriting_curated_values(): void
+    {
+        $page = new Page();
+        $page->id = 42;
+        $page->slug = 'support-policy';
+        $page->title = 'Support Policy';
+
+        $board = new AiSeoBoardService();
+        $method = new ReflectionMethod($board, 'advancedMetaPatch');
+        $method->setAccessible(true);
+
+        $patch = $method->invoke($board, $page, 'page', [
+            'meta_title' => 'Support Policy Canada Guide 2026',
+            'meta_description' => 'Support policy details for Canadian buyers with clear purchasing, service, and local assistance information from BHS Supplies.',
+            'focus_keyword' => 'support policy Canada',
+            'og_title' => 'Curated social title',
+        ]);
+
+        $this->assertStringEndsWith('/support-policy', $patch['canonical_url']);
+        $this->assertArrayNotHasKey('og_title', $patch);
+        $this->assertSame('website', $patch['og_type']);
+        $this->assertSame('summary_large_image', $patch['twitter_card']);
+        $this->assertSame('Support Policy Canada Guide 2026', $patch['twitter_title']);
+        $this->assertSame('BreadcrumbList', $patch['breadcrumbs_json']['@type']);
+    }
+
+    public function test_contextual_internal_link_block_connects_core_conversion_and_local_pages_once(): void
+    {
+        $page = new Page();
+        $page->id = 42;
+        $page->slug = 'support-policy';
+        $page->title = 'Support Policy';
+
+        $board = new AiSeoBoardService();
+        $method = new ReflectionMethod($board, 'seoLinkParagraph');
+        $method->setAccessible(true);
+
+        $html = $method->invoke($board, ['focus_keyword' => 'support policy Canada'], $page, 'page');
+
+        $this->assertStringContainsString('data-seo-context-links="1"', $html);
+        $this->assertStringContainsString('/shop', $html);
+        $this->assertStringContainsString('/contractor-trade-account', $html);
+        $this->assertStringContainsString('/review', $html);
+        $this->assertStringContainsString('/hvac-supplies-', $html);
+        $this->assertStringContainsString('canada.ca/en/services/business.html', $html);
+    }
+
+    public function test_resolver_can_detect_an_existing_breadcrumb_schema_node(): void
+    {
+        $resolver = new SeoMetaResolver();
+        $method = new ReflectionMethod($resolver, 'schemasContainType');
+        $method->setAccessible(true);
+
+        $schemas = [
+            ['@type' => 'WebPage'],
+            ['@type' => 'BreadcrumbList'],
+        ];
+
+        $this->assertTrue($method->invoke($resolver, $schemas, 'BreadcrumbList'));
+        $this->assertFalse($method->invoke($resolver, $schemas, 'FAQPage'));
+    }
+
+    public function test_unattended_on_page_quality_gate_rolls_back_only_score_regressions(): void
+    {
+        $board = new AiSeoBoardService();
+        $method = new ReflectionMethod($board, 'shouldRollbackSeoMutation');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($board, ['score' => 52], ['score' => 51]));
+        $this->assertFalse($method->invoke($board, ['score' => 52], ['score' => 52]));
+        $this->assertFalse($method->invoke($board, ['score' => 52], ['score' => 73]));
     }
 }

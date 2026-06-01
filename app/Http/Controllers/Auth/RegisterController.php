@@ -57,13 +57,24 @@ class RegisterController extends Controller
      */
     protected function validator(array $data)
     {
-        return Validator::make($data, [
+        $otpEnabled = addon_is_activated('otp_system');
+        $rules = [
             'name' => 'required|string|max:255',
             'password' => 'required|string|min:6|confirmed',
+            'email' => $otpEnabled
+                ? 'nullable|required_without:phone|email|max:255|unique:users,email'
+                : 'required|email|max:255|unique:users,email',
             'g-recaptcha-response' => [
                 Rule::when(get_setting('google_recaptcha') == 1 && get_setting('recaptcha_customer_register') == 1 , ['required', new Recaptcha()], ['sometimes'])
             ]
-        ]);
+        ];
+
+        if ($otpEnabled) {
+            $rules['phone'] = 'nullable|required_without:email';
+            $rules['country_code'] = 'required_with:phone';
+        }
+
+        return Validator::make($data, $rules);
     }
 
     /**
@@ -108,11 +119,11 @@ class RegisterController extends Controller
          
         
         if(session('temp_user_id') != null){
-            if(auth()->user()->user_type == 'customer'){
+            if(($user->user_type ?? 'customer') == 'customer'){
                 Cart::where('temp_user_id', session('temp_user_id'))
                 ->update(
                     [
-                        'user_id' => auth()->user()->id,
+                        'user_id' => $user->id,
                         'temp_user_id' => null
                     ]
                 );
@@ -170,7 +181,7 @@ class RegisterController extends Controller
                     EmailUtility::email_verification($user, 'customer');
                     flash(translate('Registration successful. Please verify your email.'))->success();
                 } catch (\Throwable $e) {
-                    dd($e);
+                    report($e);
                     $user->delete();
                     flash(translate('Registration failed. Please try again later.'))->error();
                 }

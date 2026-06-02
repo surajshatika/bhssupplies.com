@@ -504,8 +504,8 @@
                         </div>
                     </div>
                     <small class="text-muted">
-                        {{ translate('Set 10, 20, 50, or up to 100. The master automation runs hourly, so this is roughly your per-hour throughput (e.g. 100 = up to ~100 URLs/hour).') }}
-                        {{ translate('Your daily AI budget cap is the real safety limit — at ~$0.0002/URL even 100/run stays well under it.') }}
+                        {{ translate('Controls automated SEO queue creation and cron processing. Choose 10, 20, 50, or up to 100 URLs per automated run. Only one configured-size batch is processed at a time.') }}
+                        {{ translate('Manual AI Fix All Filtered runs are always capped at 10 URLs.') }}
                     </small>
                 </div>
                 <div class="form-group row mb-2">

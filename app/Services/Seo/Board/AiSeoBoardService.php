@@ -38,6 +38,8 @@ class AiSeoBoardService
     public const SEO_DONE_SCORE = 80;
     public const AUTOPILOT_TYPES = ['page', 'category', 'product'];
     public const MAX_AUTOPILOT_ATTEMPTS = 3;
+    public const MAX_MANUAL_BATCH_TARGETS = 10;
+    public const MAX_AUTO_BATCH_TARGETS = 100;
 
     /** @var array<string,array{class:string,label:string,url:string,name:string,description:?string,image:?string}> */
     protected array $typeMap;
@@ -128,7 +130,7 @@ class AiSeoBoardService
 
     public function collectPendingTargetsAcrossTypes(int $limit = 10, array $types = self::AUTOPILOT_TYPES): array
     {
-        $limit = max(1, min(100, $limit));
+        $limit = max(1, min(self::MAX_AUTO_BATCH_TARGETS, $limit));
 
         return $this->nextAutopilotTargetPreview($limit, $types)
             ->map(fn(array $row) => ['type' => $row['type'], 'id' => (int) $row['id']])
@@ -186,7 +188,7 @@ class AiSeoBoardService
 
     public function nextAutopilotTargetPreview(int $limit = 10, array $types = self::AUTOPILOT_TYPES): Collection
     {
-        $limit = max(1, min(100, $limit));
+        $limit = max(1, min(self::MAX_AUTO_BATCH_TARGETS, $limit));
         $attempts = $this->recentBatchTargetAttempts();
         $retryRows = $this->pendingRowsFromPreviousBatches($limit, $types, $attempts);
         $retryKeys = $retryRows
@@ -2625,7 +2627,7 @@ class AiSeoBoardService
         $this->assertType($type);
 
         $filters = $payload['filters'] ?? [];
-        $limit   = min((int) ($payload['limit'] ?? 500), 5000);
+        $limit   = max(1, min((int) ($payload['limit'] ?? self::MAX_AUTO_BATCH_TARGETS), self::MAX_AUTO_BATCH_TARGETS));
 
         $query = $this->baseQuery($type);
         $this->applySearch($query, $type, $filters['search'] ?? null);
@@ -2731,6 +2733,7 @@ class AiSeoBoardService
         if (!$batch->isTerminal()) {
             $batch->update([
                 'status'       => SeoFixBatch::STATUS_CANCELLED,
+                'current_label' => null,
                 'completed_at' => now(),
             ]);
         }

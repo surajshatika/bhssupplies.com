@@ -651,7 +651,7 @@
                 <div class="advanced-metric">
                     <span class="text-muted small">{{ translate('Backlog Drain Estimate') }}</span>
                     <div class="metric-value text-info mt-3">{{ number_format($autopilot['queue_drain_minutes'] ?? 0) }}</div>
-                    <small class="text-muted">{{ translate('minutes at 3 batches x 10 URLs every 5 minutes') }}</small>
+                    <small class="text-muted">{{ translate('minutes at 1 batch x backend URLs Per Run setting every 5 minutes') }}</small>
                 </div>
             </div>
             <div class="col-md-3 mb-3 mb-md-0">
@@ -712,6 +712,13 @@
                                 <i class="las la-play mr-1"></i>{{ translate('Process Next URL') }}
                             </button>
                         </form>
+                        <form method="POST" action="{{ route('admin.seo-suite.queue.recover') }}" class="d-inline" onsubmit="return confirm('{{ translate('Remove all unfinished SEO queue URLs and start a fresh automated batch using the backend Auto SEO URLs Per Run setting? Already completed SEO work will remain saved.') }}');">
+                            @csrf
+                            <input type="hidden" name="mode" value="restart">
+                            <button type="submit" class="btn btn-xs btn-soft-danger">
+                                <i class="las la-redo-alt mr-1"></i>{{ translate('Remove Pending & Start New') }}
+                            </button>
+                        </form>
                     </div>
                 </div>
                 <div class="table-responsive border rounded">
@@ -738,6 +745,14 @@
                                         <span class="badge badge-{{ $batch->isStalled() ? 'danger' : 'success' }}">
                                             {{ $batch->isStalled() ? translate('Stalled - cron will resume') : translate('Active') }}
                                         </span>
+                                        <form method="POST" action="{{ route('admin.seo-suite.queue.recover') }}" class="d-inline ml-1" onsubmit="return confirm('{{ translate('Remove the unfinished URLs from this batch? Already completed SEO work will remain saved.') }}');">
+                                            @csrf
+                                            <input type="hidden" name="mode" value="cancel_batch">
+                                            <input type="hidden" name="batch_id" value="{{ $batch->id }}">
+                                            <button type="submit" class="btn btn-xs btn-soft-danger" title="{{ translate('Remove unfinished queue URLs') }}">
+                                                <i class="las la-times"></i>
+                                            </button>
+                                        </form>
                                     </td>
                                 </tr>
                             @endforeach

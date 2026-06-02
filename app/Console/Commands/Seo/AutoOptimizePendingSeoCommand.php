@@ -43,7 +43,7 @@ class AutoOptimizePendingSeoCommand extends Command
 
         $configuredLimit = (int) get_setting('seo_auto_seo_batch_size', 10);
         $limit = (int) ($this->option('limit') ?: $configuredLimit);
-        $limit = max(1, min(100, $limit));
+        $limit = max(1, min(AiSeoBoardService::MAX_AUTO_BATCH_TARGETS, $limit));
 
         $provider = $this->option('provider') ?: get_setting('seo_suite_default_provider', config('seo.default_provider', 'openai'));
         $targetRows = $board->nextAutopilotTargetPreview($limit, ['page', 'category', 'product']);

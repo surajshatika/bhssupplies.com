@@ -144,10 +144,27 @@ class SeoSuiteController extends Controller
         }
 
         $request->validate([
-            'mode' => 'required|in:compact,process_next',
+            'mode' => 'required|in:compact,process_next,restart,cancel_batch',
+            'batch_id' => 'nullable|integer|min:1',
         ]);
 
         $mode = (string) $request->input('mode');
+        if ($mode === 'restart') {
+            return $this->restartSeoQueue();
+        }
+        if ($mode === 'cancel_batch') {
+            $batch = SeoFixBatch::find((int) $request->input('batch_id'));
+            if (!$batch) {
+                flash(translate('SEO batch not found.'))->warning();
+            } else {
+                $remaining = $batch->remainingCount();
+                app(AiSeoBoardService::class)->cancelBatch($batch);
+                flash(translate("Removed {$remaining} unfinished URLs from SEO batch #{$batch->id}. Completed SEO work remains saved."))->success();
+            }
+
+            return redirect()->to(route('admin.seo-suite.index') . '#seo-autopilot');
+        }
+
         $arguments = $mode === 'compact'
             ? ['--compact-only' => true]
             : ['--limit' => 1, '--max-batches' => 1];
@@ -177,6 +194,49 @@ class SeoSuiteController extends Controller
                 'error' => $e->getMessage(),
             ]);
             flash(translate('Queue recovery could not finish. Check SEO Monitoring or the application log.'))->warning();
+        }
+
+        return redirect()->to(route('admin.seo-suite.index') . '#seo-autopilot');
+    }
+
+    protected function restartSeoQueue()
+    {
+        $activeBatches = SeoFixBatch::query()
+            ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
+            ->orderBy('id')
+            ->get();
+        $removedPending = $activeBatches->sum(fn(SeoFixBatch $batch) => $batch->remainingCount());
+        $limit = min(
+            AiSeoBoardService::MAX_AUTO_BATCH_TARGETS,
+            max(1, (int) get_setting('seo_auto_seo_batch_size', 10))
+        );
+
+        try {
+            $exitCode = Artisan::call('seo:restart-ai-queue');
+            $output = trim(Artisan::output());
+
+            logger()->info('SEO queue removed and restarted', [
+                'user_id' => optional(auth()->user())->id,
+                'cancelled_batches' => $activeBatches->pluck('id')->all(),
+                'removed_pending_urls' => $removedPending,
+                'new_batch_limit' => $limit,
+                'exit_code' => $exitCode,
+                'output' => Str::limit($output, 2000),
+            ]);
+
+            if ($exitCode !== 0) {
+                flash(translate('Old SEO queue removed, but the fresh automated queue needs attention. Check SEO Monitoring.'))->warning();
+            } else {
+                flash(translate("Removed {$removedPending} unfinished queue URLs and started a fresh automated batch using the backend limit of {$limit}."))->success();
+            }
+        } catch (\Throwable $e) {
+            logger()->error('SEO queue restart failed after cancellation', [
+                'user_id' => optional(auth()->user())->id,
+                'cancelled_batches' => $activeBatches->pluck('id')->all(),
+                'removed_pending_urls' => $removedPending,
+                'error' => $e->getMessage(),
+            ]);
+            flash(translate('Old SEO queue removed, but a fresh automated batch could not start. Check SEO Monitoring or wait for cron.'))->warning();
         }
 
         return redirect()->to(route('admin.seo-suite.index') . '#seo-autopilot');
@@ -790,7 +850,7 @@ class SeoSuiteController extends Controller
             'seo_auto_index_coverage_interval_hours' => min(168, max(1, (int) $request->input('auto_index_coverage_interval_hours', 24))),
             'seo_auto_optimization_enabled' => $request->boolean('auto_optimization_enabled') ? 1 : 0,
             'seo_auto_seo_enabled'          => $request->boolean('auto_seo_enabled') ? 1 : 0,
-            'seo_auto_seo_batch_size'       => min(100, max(1, (int) $request->input('auto_seo_batch_size', 10))),
+            'seo_auto_seo_batch_size'       => min(AiSeoBoardService::MAX_AUTO_BATCH_TARGETS, max(1, (int) $request->input('auto_seo_batch_size', 10))),
             'seo_auto_offpage_enabled'      => $request->boolean('auto_offpage_enabled') ? 1 : 0,
             'seo_auto_offpage_batch_size'   => min(10, max(1, (int) $request->input('auto_offpage_batch_size', 3))),
             'seo_auto_offpage_interval_hours' => min(24, max(1, (int) $request->input('auto_offpage_interval_hours', 6))),
@@ -1060,7 +1120,7 @@ class SeoSuiteController extends Controller
             'auto_index_coverage_interval_hours' => (int) get_setting('seo_auto_index_coverage_interval_hours', 24),
             'auto_optimization_enabled' => (int) get_setting('seo_auto_optimization_enabled', 1),
             'auto_seo_enabled'       => (int) get_setting('seo_auto_seo_enabled', 1),
-            'auto_seo_batch_size'    => (int) get_setting('seo_auto_seo_batch_size', 10),
+            'auto_seo_batch_size'    => min(AiSeoBoardService::MAX_AUTO_BATCH_TARGETS, max(1, (int) get_setting('seo_auto_seo_batch_size', 10))),
             'auto_offpage_enabled'   => (int) get_setting('seo_auto_offpage_enabled', 1),
             'auto_offpage_batch_size'=> (int) get_setting('seo_auto_offpage_batch_size', 3),
             'auto_offpage_interval_hours' => (int) get_setting('seo_auto_offpage_interval_hours', 6),
@@ -1219,7 +1279,7 @@ class SeoSuiteController extends Controller
         $board = app(AiSeoBoardService::class);
         $budget = app(SeoBudgetGuard::class);
         $breakdown = $board->pendingBreakdownByType(['page', 'category', 'product']);
-        $batchSize = (int) ($settings['auto_seo_batch_size'] ?? 10);
+        $batchSize = min(AiSeoBoardService::MAX_AUTO_BATCH_TARGETS, max(1, (int) ($settings['auto_seo_batch_size'] ?? 10)));
         $pendingTotal = collect($breakdown)->sum('pending');
         $nextPreview = $board->nextAutopilotTargetPreview(max(10, $batchSize), ['page', 'category', 'product']);
         $nextTargets = $nextPreview
@@ -1244,7 +1304,7 @@ class SeoSuiteController extends Controller
         $activeBatch = $activeBatches->first();
         $activeBacklog = $activeBatches->sum(fn(SeoFixBatch $batch) => $batch->remainingCount());
         $stalledBatches = $activeBatches->filter(fn(SeoFixBatch $batch) => $batch->isStalled());
-        $queueDrainMinutes = $activeBacklog > 0 ? (int) ceil($activeBacklog / 30) * 5 : 0;
+        $queueDrainMinutes = $activeBacklog > 0 ? (int) ceil($activeBacklog / $batchSize) * 5 : 0;
         $freshQueueHours = $batchSize > 0 ? (int) ceil(max(0, $pendingTotal - $activeBacklog) / $batchSize) : null;
         $queueDrainHours = (int) ceil($queueDrainMinutes / 60);
 
@@ -1290,7 +1350,7 @@ class SeoSuiteController extends Controller
     {
         return [
             'enabled' => (int) ($settings['auto_seo_enabled'] ?? 1) === 1,
-            'batch_size' => (int) ($settings['auto_seo_batch_size'] ?? 10),
+            'batch_size' => min(AiSeoBoardService::MAX_AUTO_BATCH_TARGETS, max(1, (int) ($settings['auto_seo_batch_size'] ?? 10))),
             'next_run' => 'Hourly via cron',
             'queue_driver' => config('queue.default'),
             'active_batch' => null,

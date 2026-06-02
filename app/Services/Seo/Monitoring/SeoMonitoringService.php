@@ -139,7 +139,7 @@ class SeoMonitoringService
     protected function autopilotHealth(): array
     {
         $enabled = (int) get_setting('seo_auto_seo_enabled', 1) === 1;
-        $batchSize = (int) get_setting('seo_auto_seo_batch_size', 10);
+        $batchSize = min(AiSeoBoardService::MAX_AUTO_BATCH_TARGETS, max(1, (int) get_setting('seo_auto_seo_batch_size', 10)));
         $breakdown = [];
         $pendingTotal = 0;
         $activeBatch = null;
@@ -171,7 +171,7 @@ class SeoMonitoringService
         $spent = round($budget->spendToday(), 4);
         $activeBacklog = $activeBatches->sum(fn(SeoFixBatch $batch) => $batch->remainingCount());
         $stalledBatchCount = $activeBatches->filter(fn(SeoFixBatch $batch) => $batch->isStalled())->count();
-        $queueDrainMinutes = $activeBacklog > 0 ? (int) ceil($activeBacklog / 30) * 5 : 0;
+        $queueDrainMinutes = $activeBacklog > 0 ? (int) ceil($activeBacklog / $batchSize) * 5 : 0;
         $freshQueueHours = $batchSize > 0 ? (int) ceil(max(0, $pendingTotal - $activeBacklog) / $batchSize) : null;
         $queueDrainHours = (int) ceil($queueDrainMinutes / 60);
 

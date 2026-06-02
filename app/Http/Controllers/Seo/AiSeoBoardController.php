@@ -296,9 +296,9 @@ class AiSeoBoardController extends Controller
         $request->validate([
             'mode'      => 'required|in:selected,filtered',
             'type'      => 'nullable|in:product,category,page,blog',
-            'targets'   => 'array',
+            'targets'   => 'array|max:' . AiSeoBoardService::MAX_MANUAL_BATCH_TARGETS,
             'targets.*' => 'array',
-            'limit'     => 'nullable|integer|min:1|max:5000',
+            'limit'     => 'nullable|integer|min:1|max:' . AiSeoBoardService::MAX_MANUAL_BATCH_TARGETS,
         ]);
 
         if ($request->input('mode') === 'selected') {
@@ -314,7 +314,10 @@ class AiSeoBoardController extends Controller
                 'max_score' => $request->filled('max_score') ? (int) $request->input('max_score') : null,
                 'sort'      => $request->input('sort', 'recent'),
             ],
-            'limit'   => (int) $request->input('limit', 500),
+            'limit'   => min(
+                AiSeoBoardService::MAX_MANUAL_BATCH_TARGETS,
+                (int) $request->input('limit', AiSeoBoardService::MAX_MANUAL_BATCH_TARGETS)
+            ),
         ];
     }
 

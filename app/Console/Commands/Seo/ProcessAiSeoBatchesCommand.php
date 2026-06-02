@@ -4,8 +4,10 @@ namespace App\Console\Commands\Seo;
 
 use App\Jobs\Seo\AiAutoFixSeoJob;
 use App\Models\SeoFixBatch;
+use App\Services\Seo\Board\AiSeoBoardService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -13,8 +15,8 @@ class ProcessAiSeoBatchesCommand extends Command
 {
     protected $signature = 'seo:process-ai-batches
                             {--batch= : Process one specific batch ID}
-                            {--limit=10 : Maximum URLs to process in this run}
-                            {--max-batches=3 : Maximum active batches to process per run}
+                            {--limit= : Maximum URLs to process in this run; defaults to backend Auto SEO URLs Per Run}
+                            {--max-batches=1 : Maximum active batches to process per run}
                             {--compact-only : Remove duplicate pending URLs without processing AI fixes}
                             {--dry-run : Show the next batch without changing data}';
 
@@ -22,15 +24,31 @@ class ProcessAiSeoBatchesCommand extends Command
 
     public function handle(): int
     {
+        $lock = Cache::lock('seo:process-ai-batches:lock', 240);
+        if (!$lock->get()) {
+            $this->info('Another AI SEO chunk is already running. Skipped this cycle safely.');
+            return self::SUCCESS;
+        }
+
+        try {
+            return $this->processBatches();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    protected function processBatches(): int
+    {
         if (!Schema::hasTable('seo_fix_batches')) {
             $this->warn('seo_fix_batches table is missing. Run migrations first.');
             return self::FAILURE;
         }
 
-        $limit = max(1, min(50, (int) $this->option('limit')));
-        $maxBatches = $this->option('batch')
-            ? 1
-            : max(1, min(10, (int) $this->option('max-batches')));
+        $limit = max(1, min(
+            AiSeoBoardService::MAX_AUTO_BATCH_TARGETS,
+            (int) ($this->option('limit') ?: get_setting('seo_auto_seo_batch_size', 10))
+        ));
+        $maxBatches = 1;
 
         $query = SeoFixBatch::query()
             ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])

@@ -97,6 +97,9 @@ class SeoQueueSafetyTest extends TestCase
 
         $this->assertStringContainsString("app()->call([\$job, 'handle'])", $source);
         $this->assertStringNotContainsString('$job->handle(', $source);
+        $this->assertStringContainsString("Cache::lock('seo:process-ai-batches:lock'", $source);
+        $this->assertStringContainsString('MAX_AUTO_BATCH_TARGETS', $source);
+        $this->assertStringContainsString("get_setting('seo_auto_seo_batch_size', 10)", $source);
     }
 
     public function test_zero_progress_failed_batch_does_not_consume_url_retry_allowance(): void
@@ -222,5 +225,22 @@ class SeoQueueSafetyTest extends TestCase
         $this->assertTrue($method->invoke($board, ['score' => 52], ['score' => 51]));
         $this->assertFalse($method->invoke($board, ['score' => 52], ['score' => 52]));
         $this->assertFalse($method->invoke($board, ['score' => 52], ['score' => 73]));
+    }
+
+    public function test_manual_bulk_and_automated_queue_limits_are_intentionally_separate(): void
+    {
+        $board = new AiSeoBoardService();
+        $controller = file_get_contents(app_path('Http/Controllers/Seo/AiSeoBoardController.php'));
+        $automation = file_get_contents(app_path('Console/Commands/Seo/AutoOptimizePendingSeoCommand.php'));
+        $restart = file_get_contents(app_path('Console/Commands/Seo/RestartAiSeoQueueCommand.php'));
+        $kernel = file_get_contents(app_path('Console/Kernel.php'));
+
+        $this->assertSame(10, $board::MAX_MANUAL_BATCH_TARGETS);
+        $this->assertSame(100, $board::MAX_AUTO_BATCH_TARGETS);
+        $this->assertStringContainsString('MAX_MANUAL_BATCH_TARGETS', $controller);
+        $this->assertStringContainsString('MAX_AUTO_BATCH_TARGETS', $automation);
+        $this->assertStringContainsString("get_setting('seo_auto_seo_batch_size', 10)", $restart);
+        $this->assertStringContainsString('seo:process-ai-batches --max-batches=1', $kernel);
+        $this->assertStringNotContainsString('seo:process-ai-batches --limit=10', $kernel);
     }
 }

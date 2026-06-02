@@ -68,12 +68,11 @@ class AiAutoFixSeoJob implements ShouldQueue
                 break;
             }
 
-            // Re-read every 5 entities so an admin's "Cancel" click is picked up.
-            if ($i % 5 === 0) {
-                $batch->refresh();
-                if ($batch->status === SeoFixBatch::STATUS_CANCELLED) {
-                    return;
-                }
+            // Re-read before every entity so an admin queue removal stops before
+            // another AI request starts. Cron chunks are intentionally small.
+            $batch->refresh();
+            if ($batch->status === SeoFixBatch::STATUS_CANCELLED) {
+                return;
             }
 
             $target = $targets[$i];

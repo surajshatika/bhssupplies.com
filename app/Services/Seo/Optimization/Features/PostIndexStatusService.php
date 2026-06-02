@@ -13,6 +13,8 @@ class PostIndexStatusService extends AbstractSeoService
         $domain  = $payload['domain'] ?? parse_url(url('/'), PHP_URL_HOST);
         $apiKey  = get_setting('seo_google_search_api_key') ?? env('GOOGLE_SEARCH_API_KEY');
         $cx      = get_setting('seo_google_search_cx') ?? env('GOOGLE_SEARCH_CX');
+        $generateAdvice = (bool) ($payload['generate_advice'] ?? true);
+        $requireApi = (bool) ($payload['require_api'] ?? false);
 
         if (is_string($urls)) {
             $urls = array_filter(array_map('trim', preg_split('/[\r\n,]+/', $urls)));
@@ -20,6 +22,20 @@ class PostIndexStatusService extends AbstractSeoService
 
         if (empty($urls)) {
             $urls = $this->getRecentUrls($domain);
+        }
+
+        if (!$apiKey || !$cx) {
+            return [
+                'total' => 0,
+                'indexed' => 0,
+                'not_indexed' => 0,
+                'errors' => 0,
+                'results' => [],
+                'ai_advice' => null,
+                'api_available' => false,
+                'skipped' => $requireApi,
+                'message' => 'Google Custom Search API key and CX are required for reliable index verification.',
+            ];
         }
 
         $results = [];
@@ -41,7 +57,9 @@ class PostIndexStatusService extends AbstractSeoService
             ), JSON_PRETTY_PRINT) . "\n\n"
             . "Provide recommendations to get these pages indexed faster.";
 
-        $aiAdvice = $this->ai()->generate($prompt, 'You are an expert in Google indexing and Search Console.');
+        $aiAdvice = $generateAdvice && !empty($results)
+            ? $this->ai()->generate($prompt, 'You are an expert in Google indexing and Search Console.')
+            : null;
 
         return [
             'total'      => count($results),
@@ -51,7 +69,16 @@ class PostIndexStatusService extends AbstractSeoService
             'results'    => $results,
             'ai_advice'  => $aiAdvice,
             'api_available' => !empty($apiKey && $cx),
+            'skipped' => false,
         ];
+    }
+
+    public function isApiConfigured(): bool
+    {
+        return (bool) (
+            (get_setting('seo_google_search_api_key') ?? env('GOOGLE_SEARCH_API_KEY'))
+            && (get_setting('seo_google_search_cx') ?? env('GOOGLE_SEARCH_CX'))
+        );
     }
 
     protected function checkIndexStatus(string $url, ?string $apiKey, ?string $cx): array
@@ -86,21 +113,7 @@ class PostIndexStatusService extends AbstractSeoService
             }
         }
 
-        // Fallback: check via Google cache URL
-        $method = 'cache_check';
-
-        try {
-            $cacheUrl = 'https://webcache.googleusercontent.com/search?q=cache:' . urlencode($url);
-            $response = Http::timeout(8)->get($cacheUrl);
-
-            if (!$response->successful()) {
-                return $this->indexStatusError($url, $method, 'Google cache check HTTP ' . $response->status() . '.');
-            }
-
-            return $this->indexStatusResult($url, !str_contains($response->body(), 'Error 404'), $method);
-        } catch (\Throwable $e) {
-            return $this->indexStatusError($url, $method, $e->getMessage());
-        }
+        return $this->indexStatusError($url, 'api_unavailable', 'Google Custom Search API key and CX are required.');
     }
 
     protected function indexStatusResult(string $url, bool $indexed, string $method): array

@@ -65,7 +65,7 @@ class Kernel extends ConsoleKernel
             ->runInBackground()
             ->appendOutputTo(storage_path('logs/seo-automation.log'));
 
-        $schedule->command('seo:process-ai-batches --limit=10 --max-batches=3')
+        $schedule->command('seo:process-ai-batches --max-batches=1')
             ->everyFiveMinutes()
             ->withoutOverlapping(10)
             ->runInBackground()

@@ -47,6 +47,8 @@
     <meta name="keywords" content="@yield('meta_keywords', get_setting('meta_keywords'))">
     <meta name="theme-color" content="{{ $_base_color }}">
 
+    <meta name="p:domain_verify" content="6e7f92e7df32bab4506a3f8e6704422d"/>
+
     <link rel="canonical" href="@yield('canonical', $_canonical)">
 
     @yield('pagination_links')

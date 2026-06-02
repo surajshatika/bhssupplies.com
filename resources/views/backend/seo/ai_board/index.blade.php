@@ -54,10 +54,7 @@
         <div class="col-md-5">
             <div class="seo-board-actions">
                 <select id="bulkLimit" class="form-control form-control-sm" style="width:auto;" title="{{ translate('How many matching URLs to fix in this run') }}">
-                    <option value="100">100 {{ translate('per run') }}</option>
-                    <option value="250">250 {{ translate('per run') }}</option>
-                    <option value="500" selected>500 {{ translate('per run') }}</option>
-                    <option value="1000">1000 {{ translate('per run') }}</option>
+                    <option value="10" selected>10 {{ translate('per run') }}</option>
                 </select>
                 <button type="button" class="btn btn-success btn-sm js-bulk-trigger" data-mode="filtered">
                     <i class="las la-magic"></i> {{ translate('AI Fix All Filtered') }}
@@ -806,10 +803,14 @@
                 alert('{{ translate("Select at least one row first.") }}');
                 return;
             }
+            if (targets.length > 10) {
+                alert('{{ translate("Select a maximum of 10 rows per manual bulk fix.") }}');
+                return;
+            }
             pendingPayload = { mode: 'selected', targets: targets };
         } else {
             const limitEl = document.getElementById('bulkLimit');
-            const limit = limitEl ? parseInt(limitEl.value, 10) : 500;
+            const limit = limitEl ? parseInt(limitEl.value, 10) : 10;
             pendingPayload = Object.assign({ mode: 'filtered', limit: limit }, currentFilters);
         }
 

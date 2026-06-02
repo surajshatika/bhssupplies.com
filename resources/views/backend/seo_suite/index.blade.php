@@ -549,7 +549,7 @@
             </span>
             <span class="badge badge-soft-info">{{ translate('Next Run') }}: {{ $autopilot['next_run'] ?? 'Hourly via cron' }}</span>
             <span class="badge badge-{{ $offpageAutoOn ? 'success' : 'secondary' }}">{{ translate('Off-Page') }}: {{ $offpageAutoOn ? translate('ON') : translate('OFF') }}</span>
-            <span class="badge badge-soft-info">{{ translate('Off-Page Run') }}: {{ translate('Daily 03:10') }}</span>
+            <span class="badge badge-soft-info">{{ translate('Off-Page Run') }}: {{ $settings['auto_offpage_interval_hours'] ?? 6 }}h</span>
             <span class="badge badge-soft-secondary">{{ translate('Queue') }}: {{ $autopilot['queue_driver'] ?? '-' }}</span>
         </div>
     </div>
@@ -651,7 +651,7 @@
                 <div class="advanced-metric">
                     <span class="text-muted small">{{ translate('Backlog Drain Estimate') }}</span>
                     <div class="metric-value text-info mt-3">{{ number_format($autopilot['queue_drain_minutes'] ?? 0) }}</div>
-                    <small class="text-muted">{{ translate('minutes at 3 batches x 10 URLs every 5 minutes') }}</small>
+                    <small class="text-muted">{{ translate('minutes at 1 batch x backend URLs Per Run setting every 5 minutes') }}</small>
                 </div>
             </div>
             <div class="col-md-3 mb-3 mb-md-0">
@@ -712,6 +712,13 @@
                                 <i class="las la-play mr-1"></i>{{ translate('Process Next URL') }}
                             </button>
                         </form>
+                        <form method="POST" action="{{ route('admin.seo-suite.queue.recover') }}" class="d-inline" onsubmit="return confirm('{{ translate('Remove all unfinished SEO queue URLs and start a fresh automated batch using the backend Auto SEO URLs Per Run setting? Already completed SEO work will remain saved.') }}');">
+                            @csrf
+                            <input type="hidden" name="mode" value="restart">
+                            <button type="submit" class="btn btn-xs btn-soft-danger">
+                                <i class="las la-redo-alt mr-1"></i>{{ translate('Remove Pending & Start New') }}
+                            </button>
+                        </form>
                     </div>
                 </div>
                 <div class="table-responsive border rounded">
@@ -738,6 +745,14 @@
                                         <span class="badge badge-{{ $batch->isStalled() ? 'danger' : 'success' }}">
                                             {{ $batch->isStalled() ? translate('Stalled - cron will resume') : translate('Active') }}
                                         </span>
+                                        <form method="POST" action="{{ route('admin.seo-suite.queue.recover') }}" class="d-inline ml-1" onsubmit="return confirm('{{ translate('Remove the unfinished URLs from this batch? Already completed SEO work will remain saved.') }}');">
+                                            @csrf
+                                            <input type="hidden" name="mode" value="cancel_batch">
+                                            <input type="hidden" name="batch_id" value="{{ $batch->id }}">
+                                            <button type="submit" class="btn btn-xs btn-soft-danger" title="{{ translate('Remove unfinished queue URLs') }}">
+                                                <i class="las la-times"></i>
+                                            </button>
+                                        </form>
                                     </td>
                                 </tr>
                             @endforeach
@@ -945,6 +960,53 @@
         <div class="alert alert-success mt-3 mb-0 py-2 small">
             <i class="las la-bolt mr-1"></i>
             {{ translate('Next-level automation: pending URLs are now ranked by missing SEO fields, weak score, page value, and Canada/GTA opportunity before each run. SEO-done URLs remain locked out of autopilot changes.') }}
+        </div>
+    </div>
+</div>
+
+{{-- AUTOMATION COVERAGE --}}
+<div id="seo-automation-coverage" class="card mb-4 seo-section-anchor">
+    <div class="card-header d-flex flex-wrap align-items-center justify-content-between">
+        <div>
+            <h5 class="mb-0 h6">{{ translate('Automated SEO Coverage') }}</h5>
+            <small class="text-muted">{{ translate('Everything cron handles automatically, plus the external actions intentionally held for approval.') }}</small>
+        </div>
+        <div class="d-flex flex-wrap mt-2 mt-md-0" style="gap:.4rem;">
+            <span class="badge badge-success">{{ $automationCoverage['automatic_count'] ?? 0 }} {{ translate('automatic controls') }}</span>
+            <span class="badge badge-warning">{{ $automationCoverage['approval_count'] ?? 0 }} {{ translate('approval-gated actions') }}</span>
+        </div>
+    </div>
+    <div class="card-body pb-2">
+        <div class="row gutters-16">
+            @foreach(($automationCoverage['groups'] ?? []) as $group)
+                <div class="col-xl-3 col-md-6 mb-3">
+                    <div class="h-100 border rounded p-3">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <h6 class="font-weight-600 mb-0">
+                                <i class="las {{ $group['icon'] }} text-{{ $group['tone'] }} mr-1"></i>
+                                {{ translate($group['label']) }}
+                            </h6>
+                            <span class="badge badge-soft-{{ $group['tone'] }}">{{ count($group['items'] ?? []) }}</span>
+                        </div>
+                        <p class="small text-muted mb-2">{{ translate($group['detail']) }}</p>
+                        @foreach(($group['items'] ?? []) as $item)
+                            <div class="py-2 border-top">
+                                <div class="d-flex align-items-center justify-content-between" style="gap:.5rem;">
+                                    <strong class="small">{{ translate($item['label']) }}</strong>
+                                    <span class="badge badge-{{ $item['mode'] === 'automatic' ? 'success' : 'warning' }}">
+                                        {{ $item['mode'] === 'automatic' ? translate('Auto') : translate('Review') }}
+                                    </span>
+                                </div>
+                                <small class="d-block text-muted mt-1">{{ translate($item['detail']) }}</small>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @endforeach
+        </div>
+        <div class="alert alert-info py-2 mb-2 small">
+            <i class="las la-shield-alt mr-1"></i>
+            {{ translate('External backlinks, outreach sending, publishing, and live redirect changes stay approval-gated. Cron automates the SEO work and prepares white-hat off-page plans without posting spam or changing routing silently.') }}
         </div>
     </div>
 </div>

@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands\Seo;
 
+use App\Services\Seo\Automation\SeoAutomationCoverage;
+use App\Services\Seo\Board\AiSeoBoardService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 
@@ -9,13 +11,13 @@ class AutomationRunCommand extends Command
 {
     protected $signature = 'seo:automation-run
                             {--onpage-limit= : Pending URLs to optimize this run}
-                            {--batch-limit=10 : Active AI SEO URLs to process per batch}
-                            {--max-batches=3 : Active AI SEO batches to process}
+                            {--batch-limit= : Active AI SEO URLs to process; defaults to backend Auto SEO URLs Per Run}
+                            {--max-batches=1 : Active AI SEO batches to process}
                             {--provider= : AI provider override}
                             {--force-all : Run interval-gated automation immediately}
                             {--dry-run : Show what would run without changing data}';
 
-    protected $description = 'Master hourly SEO automation runner for pending SEO, off-page campaigns, technical refresh, rankings, GSC, PageSpeed, and broken links.';
+    protected $description = 'Master hourly SEO automation runner for protected on-page SEO, white-hat off-page planning, technical refresh, index coverage, rankings, GSC, PageSpeed, and broken links.';
 
     public function handle(): int
     {
@@ -25,14 +27,16 @@ class AutomationRunCommand extends Command
         }
 
         $provider = $this->option('provider');
-        $onpageLimit = $this->option('onpage-limit') ?: get_setting('seo_auto_seo_batch_size', 10);
-        $batchLimit = max(1, min(50, (int) $this->option('batch-limit')));
-        $maxBatches = max(1, min(10, (int) $this->option('max-batches')));
+        $onpageLimit = max(1, min(AiSeoBoardService::MAX_AUTO_BATCH_TARGETS, (int) ($this->option('onpage-limit') ?: get_setting('seo_auto_seo_batch_size', 10))));
+        $batchLimit = max(1, min(AiSeoBoardService::MAX_AUTO_BATCH_TARGETS, (int) ($this->option('batch-limit') ?: get_setting('seo_auto_seo_batch_size', 10))));
+        $maxBatches = 1;
         $forceAll = (bool) $this->option('force-all');
         $dryRun = (bool) $this->option('dry-run');
         $hasFailures = false;
 
         $this->info('SEO automation run started' . ($dryRun ? ' (dry run)' : '') . '.');
+        $coverage = app(SeoAutomationCoverage::class)->summary();
+        $this->line('Coverage: ' . $coverage['automatic_count'] . ' automatic controls; ' . $coverage['approval_count'] . ' external or routing actions remain approval-gated.');
 
         $hasFailures = $this->callSeoCommand('seo:auto-optimize-pending', array_filter([
             '--limit' => $onpageLimit,
@@ -112,6 +116,18 @@ class AutomationRunCommand extends Command
                 } else {
                     $hasFailures = true;
                 }
+            }
+        }
+
+        if ($this->isDue('index_coverage', (int) get_setting('seo_auto_index_coverage_interval_hours', 24), $forceAll, $dryRun)) {
+            $exitCode = $this->callSeoCommand('seo:auto-index-coverage', [
+                '--limit' => get_setting('seo_auto_index_coverage_limit', 20),
+                '--dry-run' => $dryRun ?: null,
+            ]);
+            if ($exitCode === self::SUCCESS) {
+                $this->markRan('index_coverage', $dryRun);
+            } else {
+                $hasFailures = true;
             }
         }
 

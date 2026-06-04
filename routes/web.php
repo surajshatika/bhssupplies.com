@@ -18,6 +18,7 @@ use App\Http\Controllers\CustomerProductController;
 use App\Http\Controllers\DemoController;
 use App\Http\Controllers\FollowSellerController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\StorePromotionController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\LanguageController;
 use App\Http\Controllers\MessageController;
@@ -130,6 +131,9 @@ Route::controller(ShopController::class)->group(function () {
     Route::post('/shop/registration/verification-code-confirmation', 'regVerifyCodeConfirmation')->name('shop-reg.verify_code_confirmation');
     
 });
+
+// Public store promotions / deals page (slug: /store)
+Route::get('/store', [StorePromotionController::class, 'publicIndex'])->name('promotions')->middleware('portfolio-view');
 
 Route::controller(HomeController::class)->group(function () {
     Route::post('/registration/verification-code-send', 'sendRegVerificationCode')->name('customer-reg.verification_code_send');

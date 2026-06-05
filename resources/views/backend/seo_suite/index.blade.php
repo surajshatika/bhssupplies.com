@@ -6,9 +6,11 @@
     $activeTab    = request('tab', 'dashboard');
     $providers    = ['openai' => 'OpenAI (ChatGPT)', 'claude' => 'Claude (Anthropic)', 'gemini' => 'Gemini (Google)', 'grok' => 'Grok (xAI)'];
     $totalFeatures= collect($features)->flatten()->count();
-    $seoScore     = $dashboard['current_score'] ?? 0;
+    $advancedDashboard = $advancedDashboard ?? [];
+    $siteHealth   = $advancedDashboard['site_health'] ?? [];
+    $seoScore     = $siteHealth['score'] ?? ($dashboard['current_score'] ?? 0);
     $seoGrade     = $dashboard['current_grade'] ?? 'N/A';
-    $avgScore     = $dashboard['average_score'] ?? 0;
+    $avgScore     = $siteHealth['score'] ?? ($dashboard['average_score'] ?? 0);
     $scoreColor   = $seoScore >= 80 ? '#1cc88a' : ($seoScore >= 50 ? '#f6c23e' : '#e74a3b');
 
     // Setup steps
@@ -29,7 +31,6 @@
     $runsFailed     = $runs->where('status', 'failed')->count();
     $runsQueued     = $runs->where('status', 'queued')->count();
     $runsTotal      = $runs->count();
-    $advancedDashboard = $advancedDashboard ?? [];
     $advancedActions   = $advancedDashboard['actions'] ?? [];
     $advancedFiles     = $advancedDashboard['files'] ?? [];
     $providerHealth    = $advancedDashboard['providers'] ?? [];
@@ -38,7 +39,7 @@
     $successRate       = $advancedDashboard['success_rate'] ?? 0;
     $trendDelta        = $advancedDashboard['trend_delta'] ?? 0;
     $riskLevel         = $advancedDashboard['risk_level'] ?? 'high';
-    $siteRiskLevel     = $advancedDashboard['site_risk_level'] ?? 'high';
+    $siteRiskLevel     = $siteHealth['risk'] ?? ($advancedDashboard['site_risk_level'] ?? 'high');
     $competitorCount   = count(array_filter(array_map('trim', preg_split('/[\r\n,]+/', (string) ($settings['competitor_urls'] ?? '')))));
     $offpageAutoOn     = !empty($settings['auto_offpage_enabled']);
     $keywordIntelligence = $keywordIntelligence ?? [];
@@ -201,21 +202,25 @@
                     </div>
                     <div class="col-7">
                         <div class="mb-3">
-                            @php $goodCount = $runs->where('status','completed')->count(); @endphp
                             <div class="d-flex align-items-center mb-2">
                                 <span class="rounded-circle bg-success d-inline-block mr-2" style="width:10px;height:10px;"></span>
-                                <span class="mr-2 text-success font-weight-600">{{ $goodCount }}</span>
-                                <span class="text-muted small">{{ translate('Completed Runs') }}</span>
+                                <span class="mr-2 text-success font-weight-600">{{ number_format($siteHealth['done'] ?? 0) }}</span>
+                                <span class="text-muted small">{{ translate('SEO Done URLs') }}</span>
                             </div>
                             <div class="d-flex align-items-center mb-2">
                                 <span class="rounded-circle bg-warning d-inline-block mr-2" style="width:10px;height:10px;"></span>
-                                <span class="mr-2 text-warning font-weight-600">{{ $runsQueued }}</span>
-                                <span class="text-muted small">{{ translate('Queued / Running') }}</span>
+                                <span class="mr-2 text-warning font-weight-600">{{ number_format($siteHealth['pending'] ?? 0) }}</span>
+                                <span class="text-muted small">{{ translate('Pending URLs') }}</span>
+                            </div>
+                            <div class="d-flex align-items-center mb-2">
+                                <span class="rounded-circle bg-danger d-inline-block mr-2" style="width:10px;height:10px;"></span>
+                                <span class="mr-2 text-danger font-weight-600">{{ number_format($siteHealth['critical'] ?? 0) }}</span>
+                                <span class="text-muted small">{{ translate('Critical URLs') }}</span>
                             </div>
                             <div class="d-flex align-items-center mb-3">
-                                <span class="rounded-circle bg-danger d-inline-block mr-2" style="width:10px;height:10px;"></span>
-                                <span class="mr-2 text-danger font-weight-600">{{ $runsFailed }}</span>
-                                <span class="text-muted small">{{ translate('Failed') }}</span>
+                                <span class="rounded-circle bg-info d-inline-block mr-2" style="width:10px;height:10px;"></span>
+                                <span class="mr-2 text-info font-weight-600">{{ (int) ($siteHealth['completion_rate'] ?? 0) }}%</span>
+                                <span class="text-muted small">{{ translate('Done Coverage') }}</span>
                             </div>
                         </div>
                         <a href="{{ route('admin.seo_optimization.index') }}" class="btn btn-soft-primary btn-sm btn-block">
@@ -243,6 +248,9 @@
                 {{ translate('Site SEO Risk') }}: {{ translate(ucfirst($siteRiskLevel)) }}
             </span>
         </div>
+        @if(!empty($siteHealth['reason']))
+            <small class="text-muted w-100 mt-2 text-md-right">{{ $siteHealth['reason'] }}</small>
+        @endif
     </div>
     <div class="card-body">
         @php

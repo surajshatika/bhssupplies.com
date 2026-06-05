@@ -72,6 +72,8 @@ class AiSeoBoardService
             'critical'    => 0,
             'warning'     => 0,
             'good'        => 0,
+            'done'        => 0,
+            'pending'     => 0,
         ];
 
         if (!Schema::hasTable('seo_meta')) {
@@ -79,6 +81,10 @@ class AiSeoBoardService
         }
 
         foreach (array_keys($this->typeMap) as $type) {
+            if (!$this->entityTableExists($type)) {
+                continue;
+            }
+
             $stats['total'] += $this->baseQuery($type)->count();
         }
 
@@ -92,6 +98,8 @@ class AiSeoBoardService
         $stats['critical']    = (clone $metaQuery)->where('seo_score', '<', 50)->count();
         $stats['warning']     = (clone $metaQuery)->whereBetween('seo_score', [50, 79])->count();
         $stats['good']        = (clone $metaQuery)->where('seo_score', '>=', 80)->count();
+        $stats['done']        = $this->countSeoDoneUrls();
+        $stats['pending']     = $this->countSeoPendingUrls();
 
         return $stats;
     }
@@ -1551,7 +1559,10 @@ class AiSeoBoardService
 
     protected function countSeoPendingUrls(): int
     {
-        $total = collect(array_keys($this->typeMap))->sum(fn($type) => $this->baseQuery($type)->count());
+        $total = collect(array_keys($this->typeMap))
+            ->filter(fn($type) => $this->entityTableExists($type))
+            ->sum(fn($type) => $this->baseQuery($type)->count());
+
         return max(0, $total - $this->countSeoDoneUrls());
     }
 

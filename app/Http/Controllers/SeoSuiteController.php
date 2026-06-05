@@ -56,15 +56,19 @@ class SeoSuiteController extends Controller
         $runs      = $setupRequired ? collect() : SeoRun::query()->latest()->limit(15)->get();
         $histories = $setupRequired ? collect() : SeoScoreHistory::query()->latest('recorded_at')->limit(12)->get();
         $redirects = $setupRequired ? collect() : SeoRedirect::query()->latest()->limit(10)->get();
+        $board = $setupRequired ? null : app(AiSeoBoardService::class);
         $dashboard = $setupRequired
             ? ['current_score' => 0, 'current_grade' => 'N/A', 'trend' => [], 'average_score' => 0, 'provider' => 'aggregate']
             : app(OptimizationService::class)->buildScoreDashboard(['project_id' => $project->id]);
+        $siteSummary = $setupRequired
+            ? ['total' => 0, 'avg_score' => 0, 'critical' => 0, 'warning' => 0, 'good' => 0, 'done' => 0, 'pending' => 0]
+            : $board->siteSummary();
 
         $settings = $this->loadSettings();
-        $advancedDashboard = $this->buildAdvancedDashboard($runs, $histories, $redirects, $settings, $dashboard);
+        $advancedDashboard = $this->buildAdvancedDashboard($runs, $histories, $redirects, $settings, $dashboard, $siteSummary);
         $urlInventory = $setupRequired
             ? ['done' => collect(), 'pending' => collect(), 'done_count' => 0, 'pending_count' => 0, 'total_count' => 0]
-            : app(AiSeoBoardService::class)->dashboardUrlInventory(10, 12);
+            : $board->dashboardUrlInventory(10, 12);
         $autopilot = $setupRequired
             ? $this->emptyAutopilotDashboard($settings)
             : $this->buildAutopilotDashboard($settings);
@@ -1135,7 +1139,7 @@ class SeoSuiteController extends Controller
         ];
     }
 
-    protected function buildAdvancedDashboard($runs, $histories, $redirects, array $settings, array $dashboard): array
+    protected function buildAdvancedDashboard($runs, $histories, $redirects, array $settings, array $dashboard, array $siteSummary = []): array
     {
         $runs = collect($runs);
         $histories = collect($histories);
@@ -1269,7 +1273,27 @@ class SeoSuiteController extends Controller
             $queuedRuns > 0 => 'medium',
             default => 'low',
         };
-        $siteRisk = $latestScore >= 80 ? 'low' : ($latestScore >= 50 ? 'medium' : 'high');
+        $entityScore = (int) ($siteSummary['avg_score'] ?? 0);
+        $siteScore = $entityScore > 0 ? $entityScore : $latestScore;
+        $siteTotal = (int) ($siteSummary['total'] ?? 0);
+        $siteDone = (int) ($siteSummary['done'] ?? 0);
+        $sitePending = (int) ($siteSummary['pending'] ?? max(0, $siteTotal - $siteDone));
+        $siteCritical = (int) ($siteSummary['critical'] ?? 0);
+        $siteWarning = (int) ($siteSummary['warning'] ?? 0);
+        $siteGood = (int) ($siteSummary['good'] ?? 0);
+        $siteCompletion = $siteTotal > 0 ? (int) round(($siteDone / $siteTotal) * 100) : 0;
+        $siteRisk = match (true) {
+            $siteTotal === 0 => 'medium',
+            $siteDone >= $siteTotal && $siteScore >= AiSeoBoardService::SEO_DONE_SCORE => 'low',
+            $siteScore >= AiSeoBoardService::SEO_DONE_SCORE && $siteCritical === 0 => 'low',
+            $siteScore >= 50 || $siteCompletion >= 60 => 'medium',
+            default => 'high',
+        };
+        $siteReason = match ($siteRisk) {
+            'low' => 'Site SEO is healthy: average score ' . $siteScore . '/100 with ' . $siteDone . ' SEO-done URLs.',
+            'medium' => 'Site SEO is improving: average score ' . $siteScore . '/100, ' . $sitePending . ' pending URLs, ' . $siteCritical . ' critical URLs.',
+            default => 'Site SEO risk is high because average score is ' . $siteScore . '/100 with ' . $sitePending . ' pending URLs and ' . $siteCritical . ' critical URLs.',
+        };
 
         return [
             'automation_readiness' => $automationReadiness,
@@ -1285,6 +1309,19 @@ class SeoSuiteController extends Controller
             'risk_level' => $automationRisk,
             'automation_risk_level' => $automationRisk,
             'site_risk_level' => $siteRisk,
+            'site_health' => [
+                'score' => $siteScore,
+                'history_score' => $latestScore,
+                'total' => $siteTotal,
+                'done' => $siteDone,
+                'pending' => $sitePending,
+                'critical' => $siteCritical,
+                'warning' => $siteWarning,
+                'good' => $siteGood,
+                'completion_rate' => $siteCompletion,
+                'risk' => $siteRisk,
+                'reason' => $siteReason,
+            ],
         ];
     }
 

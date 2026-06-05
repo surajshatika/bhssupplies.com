@@ -44,6 +44,10 @@ class AiSeoBoardService
     /** @var array<string,array{class:string,label:string,url:string,name:string,description:?string,image:?string}> */
     protected array $typeMap;
 
+    protected array $tableExistsCache = [];
+
+    protected array $tableColumnCache = [];
+
     public function __construct(protected ?TruSeoAnalysisService $analyzer = null)
     {
         $this->analyzer = $this->analyzer ?: new TruSeoAnalysisService();
@@ -195,14 +199,48 @@ class AiSeoBoardService
             ->mapWithKeys(fn(array $row) => [$this->targetKey($row) => true])
             ->all();
 
-        return $retryRows
-            ->concat($this->pendingAutopilotRows($limit, $types)
+        if ($retryRows->count() >= $limit) {
+            return $retryRows->take($limit)->values();
+        }
+
+        $freshRows = $this->pendingAutopilotRows($limit, $types);
+
+        $selected = $retryRows
+            ->concat($freshRows
                 ->reject(function (array $row) use ($attempts, $retryKeys): bool {
                     $key = $this->targetKey($row);
 
                     return isset($retryKeys[$key])
                         || (int) ($attempts[$key] ?? 0) >= self::MAX_AUTOPILOT_ATTEMPTS;
                 }))
+            ->take($limit)
+            ->values();
+
+        if ($selected->count() >= $limit) {
+            return $selected;
+        }
+
+        $selectedKeys = $selected
+            ->mapWithKeys(fn(array $row) => [$this->targetKey($row) => true])
+            ->all();
+
+        $attemptCapFallback = $freshRows
+            ->reject(fn(array $row) => isset($retryKeys[$this->targetKey($row)]) || isset($selectedKeys[$this->targetKey($row)]))
+            ->filter(fn(array $row) => (int) ($attempts[$this->targetKey($row)] ?? 0) >= self::MAX_AUTOPILOT_ATTEMPTS)
+            ->map(function (array $row) use ($attempts): array {
+                $key = $this->targetKey($row);
+                $row['queue_source'] = 'attempt_cap_retry';
+                $row['attempt'] = (int) ($attempts[$key] ?? 0) + 1;
+                $row['priority_reasons'] = array_values(array_unique(array_merge(
+                    $row['priority_reasons'] ?? [],
+                    ['Retry after attempt cap']
+                )));
+
+                return $row;
+            });
+
+        return $selected
+            ->concat($attemptCapFallback)
             ->take($limit)
             ->values();
     }
@@ -214,7 +252,9 @@ class AiSeoBoardService
         }
 
         $allowedTypes = array_flip($this->orderedAutopilotTypes($types));
+        $candidateTargets = collect();
         $rows = collect();
+        $seen = [];
 
         $batches = SeoFixBatch::query()
             ->whereIn('status', [
@@ -244,33 +284,70 @@ class AiSeoBoardService
                 $id = (int) ($target['id'] ?? 0);
                 $key = $type . ':' . $id;
 
-                if (!$type || !$id || !isset($allowedTypes[$type]) || $rows->has($key)) {
+                if (!$type || !$id || !isset($allowedTypes[$type]) || isset($seen[$key])) {
                     continue;
                 }
                 if (!$active && (int) ($attempts[$key] ?? 0) >= self::MAX_AUTOPILOT_ATTEMPTS) {
                     continue;
                 }
 
-                $class = $this->typeMap[$type]['class'];
-                $entity = $class::find($id);
-                if (!$entity) {
-                    continue;
-                }
+                $seen[$key] = true;
+                $candidateTargets->push([
+                    'type' => $type,
+                    'id' => $id,
+                    'key' => $key,
+                    'active' => $active,
+                    'batch_id' => (int) $batch->id,
+                ]);
 
-                $row = $this->buildRow($entity, $type);
-                if ($this->isSeoDoneRow($row)) {
-                    continue;
+                if ($candidateTargets->count() >= $limit * 8) {
+                    break 2;
                 }
+            }
+        }
 
-                $row = $this->buildAutopilotPreviewRow($row);
-                $row['queue_source'] = $active ? 'active_resume' : 'previous_retry';
-                $row['retry_from_batch'] = (int) $batch->id;
-                $row['attempt'] = (int) ($attempts[$key] ?? 0) + ($active ? 0 : 1);
-                $rows->put($key, $row);
+        $entitiesByType = [];
+        $metaByType = [];
+        foreach ($candidateTargets->groupBy('type') as $type => $targetsForType) {
+            if (!$this->entityTableExists($type)) {
+                continue;
+            }
 
-                if ($rows->count() >= $limit) {
-                    return $rows->values();
-                }
+            $class = $this->typeMap[$type]['class'];
+            $ids = $targetsForType->pluck('id')->unique()->values()->all();
+            $table = $this->baseQuery($type)->getModel()->getTable();
+            $entities = $this->queueCandidateQuery($type)
+                ->whereIn($table . '.id', $ids)
+                ->get()
+                ->keyBy(fn(Model $entity) => (int) $entity->getKey());
+
+            $entitiesByType[$type] = $entities;
+            $metaByType[$type] = $this->metaMapForEntities($entities->values(), $class);
+        }
+
+        foreach ($candidateTargets as $target) {
+            $type = $target['type'];
+            $id = (int) $target['id'];
+            $key = $target['key'];
+            $active = (bool) $target['active'];
+            $entity = ($entitiesByType[$type] ?? collect())->get($id);
+            if (!$entity) {
+                continue;
+            }
+
+            $row = $this->buildFastAutopilotBaseRow($entity, $type, ($metaByType[$type] ?? collect())->get($id));
+            if ($this->isSeoDoneRow($row)) {
+                continue;
+            }
+
+            $row = $this->buildAutopilotPreviewRow($row);
+            $row['queue_source'] = $active ? 'active_resume' : 'previous_retry';
+            $row['retry_from_batch'] = (int) $target['batch_id'];
+            $row['attempt'] = (int) ($attempts[$key] ?? 0) + ($active ? 0 : 1);
+            $rows->put($key, $row);
+
+            if ($rows->count() >= $limit) {
+                return $rows->values();
             }
         }
 
@@ -324,10 +401,13 @@ class AiSeoBoardService
     protected function pendingAutopilotRows(int $limit, array $types): Collection
     {
         $preview = collect();
-        $candidateLimit = max(40, $limit * 8);
+        $candidateLimit = max($limit, min(120, $limit * 3));
 
         foreach ($this->orderedAutopilotTypes($types) as $type) {
             if (!isset($this->typeMap[$type])) {
+                continue;
+            }
+            if (!$this->entityTableExists($type)) {
                 continue;
             }
 
@@ -336,18 +416,27 @@ class AiSeoBoardService
 
             if (Schema::hasTable('seo_meta')) {
                 foreach (['meta', 'focus', 'schema'] as $missing) {
-                    $query = $this->baseQuery($type);
+                    $query = $this->queueCandidateQuery($type);
                     $this->applyMissingFilter($query, $class, $missing);
                     $entities = $entities->merge($query->latest('updated_at')->limit($candidateLimit)->get());
+
+                    if ($entities->unique(fn($entity) => $type . ':' . $entity->getKey())->count() >= $candidateLimit) {
+                        break;
+                    }
                 }
             }
 
-            $entities = $entities->merge(
-                $this->baseQuery($type)->latest('updated_at')->limit($candidateLimit)->get()
-            );
+            if ($entities->unique(fn($entity) => $type . ':' . $entity->getKey())->count() < $candidateLimit) {
+                $entities = $entities->merge(
+                    $this->queueCandidateQuery($type)->latest('updated_at')->limit($candidateLimit)->get()
+                );
+            }
 
-            foreach ($entities->unique(fn($entity) => $type . ':' . $entity->getKey()) as $entity) {
-                $row = $this->buildRow($entity, $type);
+            $entities = $entities->unique(fn($entity) => $type . ':' . $entity->getKey())->values();
+            $metaById = $this->metaMapForEntities($entities, $class);
+
+            foreach ($entities as $entity) {
+                $row = $this->buildFastAutopilotBaseRow($entity, $type, $metaById->get((int) $entity->getKey()));
                 if ($this->isSeoDoneRow($row)) {
                     continue;
                 }
@@ -387,6 +476,125 @@ class AiSeoBoardService
         $row['priority_reasons'] = $this->autopilotPriorityReasons($row);
 
         return $row;
+    }
+
+    protected function metaMapForEntities(Collection $entities, string $class): Collection
+    {
+        if (!Schema::hasTable('seo_meta') || $entities->isEmpty()) {
+            return collect();
+        }
+
+        $ids = $entities
+            ->map(fn(Model $entity) => (int) $entity->getKey())
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return collect();
+        }
+
+        return SeoMeta::query()
+            ->where('model_type', $class)
+            ->where('lang', config('app.locale', 'en'))
+            ->whereIn('model_id', $ids->all())
+            ->get()
+            ->keyBy(fn(SeoMeta $meta) => (int) $meta->model_id);
+    }
+
+    protected function queueCandidateQuery(string $type): Builder
+    {
+        $query = $this->baseQuery($type);
+        $query->setEagerLoads([]);
+
+        $table = $query->getModel()->getTable();
+        $nameColumn = in_array($type, ['page', 'blog'], true) ? 'title' : 'name';
+        $availableColumns = array_flip($this->tableColumns($table));
+
+        $columns = collect([
+            'id',
+            $nameColumn,
+            'slug',
+            'updated_at',
+            'meta_title',
+            'meta_description',
+            'meta_img',
+            'meta_image',
+            'thumbnail_img',
+            'banner',
+        ])
+            ->unique()
+            ->filter(fn(string $column) => isset($availableColumns[$column]))
+            ->map(fn(string $column) => $table . '.' . $column)
+            ->values()
+            ->all();
+
+        return $columns ? $query->select($columns) : $query;
+    }
+
+    protected function tableColumns(string $table): array
+    {
+        if (!array_key_exists($table, $this->tableColumnCache)) {
+            $this->tableColumnCache[$table] = Schema::hasTable($table)
+                ? Schema::getColumnListing($table)
+                : [];
+        }
+
+        return $this->tableColumnCache[$table];
+    }
+
+    protected function buildFastAutopilotBaseRow(Model $entity, string $type, ?SeoMeta $meta = null): array
+    {
+        $class = $this->typeMap[$type]['class'];
+
+        if (!$meta && Schema::hasTable('seo_meta')) {
+            $meta = SeoMeta::query()
+                ->where('model_type', $class)
+                ->where('model_id', $entity->getKey())
+                ->where('lang', config('app.locale', 'en'))
+                ->first();
+        }
+
+        $inline = [
+            'meta_title'       => $entity->meta_title ?? null,
+            'meta_description' => $entity->meta_description ?? null,
+            'focus_keyword'    => null,
+            'og_image'         => $this->resolveImageColumn($entity),
+            'twitter_image'    => $this->resolveImageColumn($entity),
+            'schema_json'      => null,
+            'seo_score'        => null,
+        ];
+
+        $arr = $meta ? $meta->toArray() : [];
+        foreach ($inline as $key => $value) {
+            if (empty($arr[$key]) && !empty($value)) {
+                $arr[$key] = $value;
+            }
+        }
+
+        $score = isset($arr['seo_score']) ? (int) $arr['seo_score'] : 0;
+
+        return [
+            'type'              => $type,
+            'type_label'        => $this->typeMap[$type]['label'],
+            'id'                => $entity->getKey(),
+            'title'             => $this->displayName($entity, $type),
+            'url'               => $this->urlFor($entity, $type),
+            'slug'              => $entity->slug ?? null,
+            'updated_at'        => optional($entity->updated_at)->format('Y-m-d H:i') ?? '-',
+            'meta_title'        => $arr['meta_title'] ?? null,
+            'meta_description'  => $arr['meta_description'] ?? null,
+            'focus_keyword'     => $arr['focus_keyword'] ?? null,
+            'og_image'          => $arr['og_image'] ?? null,
+            'schema_present'    => !empty($arr['schema_json']),
+            'score'             => $score,
+            'grade'             => $this->grade($score),
+            'issues'            => [],
+            'has_meta'          => !empty($arr['meta_title']) && !empty($arr['meta_description']),
+            'has_og'            => !empty($arr['og_image']),
+            'has_schema'        => !empty($arr['schema_json']),
+            'has_focus_kw'      => !empty($arr['focus_keyword']),
+        ];
     }
 
     protected function autopilotPriorityReasons(array $row): array
@@ -1071,6 +1279,22 @@ class AiSeoBoardService
         if (!isset($this->typeMap[$type])) {
             throw new \InvalidArgumentException("Unsupported SEO Board entity type: {$type}");
         }
+    }
+
+    protected function entityTableExists(string $type): bool
+    {
+        if (!isset($this->typeMap[$type])) {
+            return false;
+        }
+
+        $class = $this->typeMap[$type]['class'];
+        $table = (new $class())->getTable();
+
+        if (!array_key_exists($table, $this->tableExistsCache)) {
+            $this->tableExistsCache[$table] = Schema::hasTable($table);
+        }
+
+        return (bool) $this->tableExistsCache[$table];
     }
 
     protected function baseQuery(string $type): Builder

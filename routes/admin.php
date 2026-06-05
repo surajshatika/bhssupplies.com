@@ -703,6 +703,7 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         Route::get('/store/duplicate/{id}', 'duplicate')->name('store_promotions.duplicate');
         Route::get('/store/destroy/{id}', 'destroy')->name('store_promotions.destroy');
         Route::post('/store/update-status', 'updateStatus')->name('store_promotions.update_status');
+        Route::post('/store/update-badge', 'updateBadge')->name('store_promotions.update_badge');
         Route::post('/store/reorder', 'reorder')->name('store_promotions.reorder');
         Route::get('/store-page/settings', 'settings')->name('store_promotions.settings');
         Route::post('/store-page/settings', 'saveSettings')->name('store_promotions.settings.save');

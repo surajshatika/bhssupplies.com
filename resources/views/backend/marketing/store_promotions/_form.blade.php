@@ -28,6 +28,10 @@
     <div class="form-group">
         <label>{{ translate('Badge text') }} <small class="text-muted">({{ translate('optional overlay, e.g.') }} "UP TO 80% OFF")</small></label>
         <input type="text" name="subtitle" class="form-control" value="{{ old('subtitle', $p->subtitle ?? '') }}" placeholder="UP TO 80% OFF">
+        <label class="aiz-switch aiz-switch-success mt-2 mb-0">
+            <input type="checkbox" name="show_badge" value="1" @if(old('show_badge', $p->show_badge ?? true)) checked @endif>
+            <span></span> {{ translate('Display badge on page') }}
+        </label>
     </div>
     <div class="form-group">
         <label>{{ translate('Click-through URL') }} <small class="text-muted">({{ translate('optional') }})</small></label>

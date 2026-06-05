@@ -40,25 +40,14 @@
 
 @php
     $topDefault = '
-        <h2>Welcome to BHS Supplies Store</h2>
-        <p>At <strong>BHS Supplies</strong>, we are proud to be your trusted destination for premium HVAC, plumbing,
+        <h2>Welcome to BHS HVAC Supplies Store</h2>
+        <p>At <strong>BHS HVAC Supplies</strong>, we are proud to be your trusted destination for premium HVAC, plumbing,
         bathroom, electrical, and hardware supplies in Canada. Conveniently located in <strong>Mississauga, Ontario</strong>,
         we provide high-quality products at <strong>wholesale pricing</strong> for homeowners, contractors, builders,
         renovators, and businesses.</p>
         <p>Whether you are upgrading your bathroom, renovating your home, or sourcing professional HVAC and plumbing
-        equipment, BHS Supplies offers reliable products, competitive prices, and exceptional customer service — all
-        under one roof.</p>
-        <h3>Why Choose BHS Supplies?</h3>
-        <ul class="seo-check-list">
-            <li>Wholesale &amp; distributor pricing</li>
-            <li>Premium quality HVAC and plumbing supplies</li>
-            <li>Modern bathroom vanities, LED mirrors &amp; shower doors</li>
-            <li>Trusted by contractors and professionals</li>
-            <li>Large inventory with fast availability</li>
-            <li>Reliable customer support</li>
-            <li>Convenient Mississauga showroom location</li>
-            <li>Delivery options available across Canada</li>
-        </ul>';
+        equipment, BHS HVAC Supplies offers reliable products, competitive prices, and exceptional customer service — all
+        under one roof.</p>';
     $topContent = get_setting('store_page_top_content') ?: $topDefault;
 @endphp
 
@@ -96,7 +85,7 @@
                                 <img src="{{ uploaded_asset($block->image) }}"
                                      alt="{{ $block->title ?: translate('Promotion') }}"
                                      class="img-fluid w-100" loading="lazy">
-                                @if($block->subtitle)
+                                @if($block->subtitle && $block->show_badge)
                                     <span class="promo-badge">{{ $block->subtitle }}</span>
                                 @endif
                             </{{ $hasLink ? 'a' : 'div' }}>
@@ -109,53 +98,10 @@
 </section>
 
 @php
-    $siteName  = get_setting('website_name', 'BHS Supplies');
+    $siteName  = get_setting('website_name', 'BHS HVAC Supplies');
     $bottomDefault = '
-        <h2>Our Featured Product Categories</h2>
-        <div class="seo-cards">
-            <div class="seo-card">
-                <h3>Premium Bathroom Vanities</h3>
-                <p>Upgrade your bathroom with stylish and modern vanity collections available in multiple sizes and
-                finishes. Our vanities are designed for durability, functionality, and elegant aesthetics that fit both
-                residential and commercial spaces.</p>
-                <p class="seo-card-label">Features:</p>
-                <ul class="seo-check-list">
-                    <li>Soft-close drawers</li>
-                    <li>Water-resistant materials</li>
-                    <li>Modern &amp; luxury finishes</li>
-                    <li>Easy installation</li>
-                    <li>Affordable wholesale pricing</li>
-                </ul>
-            </div>
-            <div class="seo-card">
-                <h3>LED Anti-Fog Mirrors</h3>
-                <p>Experience premium bathroom comfort with our LED anti-fog mirrors featuring smart touch controls,
-                bright LED lighting, Bluetooth speakers, and modern designs.</p>
-                <p class="seo-card-label">Perfect for:</p>
-                <ul class="seo-check-list">
-                    <li>Luxury bathrooms</li>
-                    <li>Home renovations</li>
-                    <li>Hotels &amp; commercial projects</li>
-                    <li>Smart home upgrades</li>
-                </ul>
-            </div>
-            <div class="seo-card">
-                <h3>Premium Shower Doors</h3>
-                <p>Our premium shower doors combine modern style with durable construction for long-lasting performance.
-                Available in multiple sizes and configurations to suit any bathroom layout.</p>
-                <p class="seo-card-label">Benefits:</p>
-                <ul class="seo-check-list">
-                    <li>Sleek frameless designs</li>
-                    <li>Easy-to-clean glass</li>
-                    <li>Durable hardware</li>
-                    <li>Professional-quality appearance</li>
-                    <li>Perfect for bathroom renovations</li>
-                </ul>
-            </div>
-        </div>
-
         <h3>More Products Available</h3>
-        <p>At BHS Supplies, we also offer a wide range of:</p>
+        <p>At BHS HVAC Supplies, we also offer a wide range of:</p>
         <div class="seo-tags">
             <span>HVAC supplies</span><span>Air conditioners &amp; furnaces</span><span>Plumbing supplies</span>
             <span>Water heaters</span><span>Electrical products</span><span>Industrial tools</span>
@@ -173,10 +119,10 @@
         complete every project successfully.</p>
 
         <h3>Shop With Confidence</h3>
-        <p>At BHS Supplies, we believe in delivering quality products, dependable service, and unbeatable value.
+        <p>At BHS HVAC Supplies, we believe in delivering quality products, dependable service, and unbeatable value.
         Whether you are shopping for HVAC equipment, plumbing supplies, bathroom upgrades, or contractor tools, we are
         committed to helping you find the right products at the right price.</p>
-        <p>Visit our showroom or shop online today and discover why customers across Canada trust BHS Supplies for their
+        <p>Visit our showroom or shop online today and discover why customers across Canada trust BHS HVAC Supplies for their
         residential and commercial supply needs.</p>';
     $bottomContent = get_setting('store_page_bottom_content') ?: $bottomDefault;
 @endphp
@@ -205,7 +151,7 @@
             <div class="row no-gutters">
                 <div class="col-12 col-lg-5 p-4 p-md-5">
                     <h2 class="fs-20 fw-700 mb-1">{{ translate('Visit Our Showroom') }}</h2>
-                    <p class="text-muted mb-2">{{ get_setting('website_name', 'BHS HVAC Plumbing & Hardware Supplies') }}</p>
+                    <p class="text-muted mb-2">{{ get_setting('website_name', 'BHS HVAC Supplies') }}</p>
                     <div class="d-flex align-items-center mb-4 small">
                         <span class="text-warning mr-1">★★★★★</span>
                         <span class="fw-600 mr-2">5.0</span>
@@ -251,12 +197,7 @@
                     </div>
                 </div>
                 <div class="col-12 col-lg-7">
-                    <iframe
-                        src="https://maps.google.com/maps?q={{ $mapQuery }}&z=15&output=embed"
-                        title="{{ translate('Store location map') }}"
-                        class="store-map" width="100%" height="100%"
-                        style="border:0; min-height:340px;" allowfullscreen=""
-                        loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                   <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2884.7823893674263!2d-79.65724132434059!3d43.69428724977318!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x882b3ff4179df7a3%3A0xc0201d652f0f0887!2sBHS%20HVAC%20Plumbing%20%26%20Hardware%20Supplies!5e0!3m2!1sen!2sin!4v1780674643582!5m2!1sen!2sin" width="100%" height="450" style="border:0;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
                 </div>
             </div>
         </div>

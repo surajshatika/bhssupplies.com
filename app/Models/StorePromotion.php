@@ -18,6 +18,7 @@ class StorePromotion extends Model
     protected $casts = [
         'published'  => 'boolean',
         'featured'   => 'boolean',
+        'show_badge' => 'boolean',
         'sort_order' => 'integer',
         'starts_at'  => 'date',
         'ends_at'    => 'date',

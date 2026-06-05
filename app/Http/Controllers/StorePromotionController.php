@@ -119,6 +119,19 @@ class StorePromotionController extends Controller
         return 1;
     }
 
+    /** Toggle whether the badge text (e.g. "FLAT 80% OFF") shows on the public page. */
+    public function updateBadge(Request $request)
+    {
+        $promotion = StorePromotion::find($request->input('id'));
+        if (!$promotion) {
+            return 0;
+        }
+        $promotion->show_badge = (int) $request->input('status') === 1;
+        $promotion->save();
+
+        return 1;
+    }
+
     protected function payload(Request $request): array
     {
         $type = in_array($request->input('type'), ['banner', 'content'], true) ? $request->input('type') : 'banner';
@@ -127,6 +140,7 @@ class StorePromotionController extends Controller
             'type'       => $type,
             'title'      => $request->input('title'),
             'subtitle'   => $request->input('subtitle'),
+            'show_badge' => $request->boolean('show_badge'),
             'image'      => $type === 'banner' ? $request->input('image') : null,
             'content'    => $type === 'content' ? $request->input('content') : null,
             'link_url'   => $request->input('link_url'),

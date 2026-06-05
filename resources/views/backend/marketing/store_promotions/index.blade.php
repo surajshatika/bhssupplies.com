@@ -66,7 +66,17 @@
                             <div class="text-muted small">{{ ucfirst($promo->type) }}@if($promo->section) · {{ $promo->section }}@endif</div>
                             @if($promo->link_url)<div class="text-muted small text-truncate" style="max-width:220px;">{{ $promo->link_url }}</div>@endif
                         </td>
-                        <td>{{ $promo->subtitle ?: '—' }}</td>
+                        <td>
+                            @if($promo->subtitle)
+                                <div class="mb-1">{{ $promo->subtitle }}</div>
+                                <label class="aiz-switch aiz-switch-success mb-0" title="{{ translate('Show / hide this badge on the page') }}">
+                                    <input onchange="updatePromoBadge(this)" value="{{ $promo->id }}" type="checkbox" @if($promo->show_badge) checked @endif>
+                                    <span class="slider round"></span>
+                                </label>
+                            @else
+                                <span class="text-muted">—</span>
+                            @endif
+                        </td>
                         <td><span class="badge badge-soft-secondary">{{ ucfirst($promo->width) }}</span></td>
                         <td class="small text-muted">
                             {{ optional($promo->starts_at)->format('M d') ?: '—' }}
@@ -122,6 +132,13 @@
     function updatePromoStatus(el){
         $.post('{{ route('store_promotions.update_status') }}', {_token:'{{ csrf_token() }}', id:el.value, status: el.checked ? 1 : 0}, function(data){
             if(data == 1){ AIZ.plugins.notify('success', '{{ translate('Status updated') }}'); }
+            else { AIZ.plugins.notify('danger', '{{ translate('Something went wrong') }}'); el.checked = !el.checked; }
+        });
+    }
+
+    function updatePromoBadge(el){
+        $.post('{{ route('store_promotions.update_badge') }}', {_token:'{{ csrf_token() }}', id:el.value, status: el.checked ? 1 : 0}, function(data){
+            if(data == 1){ AIZ.plugins.notify('success', el.checked ? '{{ translate('Badge shown') }}' : '{{ translate('Badge hidden') }}'); }
             else { AIZ.plugins.notify('danger', '{{ translate('Something went wrong') }}'); el.checked = !el.checked; }
         });
     }

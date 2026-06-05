@@ -695,15 +695,15 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
 
     // Store Promotions (admin-managed promo/deal tiles for the public store page)
     Route::controller(StorePromotionController::class)->group(function () {
-        Route::get('/store-promotions', 'index')->name('store_promotions.index');
-        Route::get('/store-promotions/create', 'create')->name('store_promotions.create');
-        Route::post('/store-promotions', 'store')->name('store_promotions.store');
-        Route::get('/store-promotions/edit/{id}', 'edit')->name('store_promotions.edit');
-        Route::post('/store-promotions/update/{id}', 'update')->name('store_promotions.update');
-        Route::get('/store-promotions/duplicate/{id}', 'duplicate')->name('store_promotions.duplicate');
-        Route::get('/store-promotions/destroy/{id}', 'destroy')->name('store_promotions.destroy');
-        Route::post('/store-promotions/update-status', 'updateStatus')->name('store_promotions.update_status');
-        Route::post('/store-promotions/reorder', 'reorder')->name('store_promotions.reorder');
+        Route::get('/store', 'index')->name('store_promotions.index');
+        Route::get('/store/create', 'create')->name('store_promotions.create');
+        Route::post('/store', 'store')->name('store_promotions.store');
+        Route::get('/store/edit/{id}', 'edit')->name('store_promotions.edit');
+        Route::post('/store/update/{id}', 'update')->name('store_promotions.update');
+        Route::get('/store/duplicate/{id}', 'duplicate')->name('store_promotions.duplicate');
+        Route::get('/store/destroy/{id}', 'destroy')->name('store_promotions.destroy');
+        Route::post('/store/update-status', 'updateStatus')->name('store_promotions.update_status');
+        Route::post('/store/reorder', 'reorder')->name('store_promotions.reorder');
         Route::get('/store-page/settings', 'settings')->name('store_promotions.settings');
         Route::post('/store-page/settings', 'saveSettings')->name('store_promotions.settings.save');
     });

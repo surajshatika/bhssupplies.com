@@ -1259,8 +1259,20 @@ class SeoSuiteController extends Controller
             $successRate >= 80 || $totalRuns === 0 ? 10 : 5,
         ];
 
+        $automationReadiness = array_sum($readinessParts);
+        $automationRisk = match (true) {
+            !in_array(true, $providers, true) => 'high',
+            $totalRuns > 0 && $successRate < 70 => 'high',
+            $failedRuns >= 3 => 'high',
+            $automationReadiness < 80 => 'medium',
+            $totalRuns > 0 && $successRate < 90 => 'medium',
+            $queuedRuns > 0 => 'medium',
+            default => 'low',
+        };
+        $siteRisk = $latestScore >= 80 ? 'low' : ($latestScore >= 50 ? 'medium' : 'high');
+
         return [
-            'automation_readiness' => array_sum($readinessParts),
+            'automation_readiness' => $automationReadiness,
             'success_rate' => $successRate,
             'failed_runs' => $failedRuns,
             'queued_runs' => $queuedRuns,
@@ -1270,7 +1282,9 @@ class SeoSuiteController extends Controller
             'provider_reliability' => $providerReliability,
             'files' => $files,
             'actions' => $actions,
-            'risk_level' => $latestScore >= 80 && $successRate >= 80 ? 'low' : ($latestScore >= 50 ? 'medium' : 'high'),
+            'risk_level' => $automationRisk,
+            'automation_risk_level' => $automationRisk,
+            'site_risk_level' => $siteRisk,
         ];
     }
 

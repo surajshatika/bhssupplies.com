@@ -38,6 +38,7 @@
     $successRate       = $advancedDashboard['success_rate'] ?? 0;
     $trendDelta        = $advancedDashboard['trend_delta'] ?? 0;
     $riskLevel         = $advancedDashboard['risk_level'] ?? 'high';
+    $siteRiskLevel     = $advancedDashboard['site_risk_level'] ?? 'high';
     $competitorCount   = count(array_filter(array_map('trim', preg_split('/[\r\n,]+/', (string) ($settings['competitor_urls'] ?? '')))));
     $offpageAutoOn     = !empty($settings['auto_offpage_enabled']);
     $keywordIntelligence = $keywordIntelligence ?? [];
@@ -234,9 +235,14 @@
             <h5 class="mb-0 h6">{{ translate('Advanced SEO Command Center') }}</h5>
             <small class="text-muted">{{ translate('Automation readiness, run quality, technical file health, and priority actions in one view.') }}</small>
         </div>
-        <span class="badge badge-{{ $riskLevel === 'low' ? 'success' : ($riskLevel === 'medium' ? 'warning' : 'danger') }} text-uppercase">
-            {{ translate('Risk') }}: {{ translate(ucfirst($riskLevel)) }}
-        </span>
+        <div class="d-flex flex-wrap align-items-center" style="gap:.4rem;">
+            <span class="badge badge-{{ $riskLevel === 'low' ? 'success' : ($riskLevel === 'medium' ? 'warning' : 'danger') }} text-uppercase">
+                {{ translate('Automation Risk') }}: {{ translate(ucfirst($riskLevel)) }}
+            </span>
+            <span class="badge badge-soft-{{ $siteRiskLevel === 'low' ? 'success' : ($siteRiskLevel === 'medium' ? 'warning' : 'danger') }} text-uppercase">
+                {{ translate('Site SEO Risk') }}: {{ translate(ucfirst($siteRiskLevel)) }}
+            </span>
+        </div>
     </div>
     <div class="card-body">
         @php
@@ -551,6 +557,15 @@
             <span class="badge badge-{{ $offpageAutoOn ? 'success' : 'secondary' }}">{{ translate('Off-Page') }}: {{ $offpageAutoOn ? translate('ON') : translate('OFF') }}</span>
             <span class="badge badge-soft-info">{{ translate('Off-Page Run') }}: {{ $settings['auto_offpage_interval_hours'] ?? 6 }}h</span>
             <span class="badge badge-soft-secondary">{{ translate('Queue') }}: {{ $autopilot['queue_driver'] ?? '-' }}</span>
+            @if(!empty($autopilot['enabled']) && (int) ($autopilot['active_batch_count'] ?? 0) === 0 && (int) ($autopilot['pending_total'] ?? 0) > 0)
+                <form method="POST" action="{{ route('admin.seo-suite.queue.recover') }}" class="d-inline" onsubmit="return confirm('{{ translate('Start a fresh automated SEO batch now using the backend Auto SEO URLs Per Run setting?') }}');">
+                    @csrf
+                    <input type="hidden" name="mode" value="restart">
+                    <button type="submit" class="btn btn-xs btn-soft-primary">
+                        <i class="las la-play mr-1"></i>{{ translate('Start Next Batch Now') }}
+                    </button>
+                </form>
+            @endif
         </div>
     </div>
     <div class="card-body">

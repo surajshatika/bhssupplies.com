@@ -37,7 +37,7 @@ class AiSeoBoardService
     public const SUPPORTED_TYPES = ['product', 'category', 'page', 'blog'];
     public const SEO_DONE_SCORE = 80;
     public const AUTOPILOT_TYPES = ['page', 'category', 'product'];
-    public const MAX_AUTOPILOT_ATTEMPTS = 3;
+    public const MAX_AUTOPILOT_ATTEMPTS = 5;
     public const MAX_MANUAL_BATCH_TARGETS = 10;
     public const MAX_AUTO_BATCH_TARGETS = 100;
 

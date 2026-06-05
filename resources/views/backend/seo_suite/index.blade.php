@@ -681,6 +681,13 @@
             </div>
             <div class="col-md-3 mb-3 mb-md-0">
                 <div class="advanced-metric">
+                    <span class="text-muted small">{{ translate('Retry Policy') }}</span>
+                    <div class="metric-value text-info mt-3">{{ $autopilot['retry_attempt_limit'] ?? 5 }}</div>
+                    <small class="text-muted">{{ translate('max automated attempts per pending URL before fallback retry') }}</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <div class="advanced-metric">
                     <span class="text-muted small">{{ translate('Competitors Tracked') }}</span>
                     <div class="metric-value {{ $competitorCount > 0 ? 'text-info' : 'text-muted' }} mt-3">{{ $competitorCount }}</div>
                     <small class="text-muted">{{ translate('used for gap angles') }}</small>
@@ -1068,6 +1075,11 @@
                                 @if(!empty($row['retry_from_batch']))
                                     <span class="d-block badge badge-soft-warning mt-1">{{ translate('Retry batch') }} #{{ $row['retry_from_batch'] }}</span>
                                 @endif
+                                @if(!empty($row['attempt']))
+                                    <span class="d-block small text-muted mt-1">
+                                        {{ translate('Attempt') }} {{ (int) $row['attempt'] }}/{{ $autopilot['retry_attempt_limit'] ?? 5 }}
+                                    </span>
+                                @endif
                             </td>
                             <td><span class="badge badge-{{ $row['score'] >= 80 ? 'success' : ($row['score'] >= 50 ? 'warning' : 'danger') }}">{{ $row['score'] }}/100</span></td>
                             <td class="small text-muted">
@@ -1075,6 +1087,8 @@
                                     <strong class="text-warning">{{ translate('Resume pending URL first.') }}</strong>
                                 @elseif(($row['queue_source'] ?? null) === 'previous_retry')
                                     <strong class="text-warning">{{ translate('Retry previous pending URL first.') }}</strong>
+                                @elseif(($row['queue_source'] ?? null) === 'attempt_cap_retry')
+                                    <strong class="text-info">{{ translate('Retrying after max-attempt review.') }}</strong>
                                 @endif
                                 {{ implode(', ', $row['priority_reasons'] ?? []) }}
                             </td>

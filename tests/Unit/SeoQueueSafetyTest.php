@@ -237,6 +237,7 @@ class SeoQueueSafetyTest extends TestCase
 
         $this->assertSame(10, $board::MAX_MANUAL_BATCH_TARGETS);
         $this->assertSame(100, $board::MAX_AUTO_BATCH_TARGETS);
+        $this->assertSame(5, $board::MAX_AUTOPILOT_ATTEMPTS);
         $this->assertStringContainsString('MAX_MANUAL_BATCH_TARGETS', $controller);
         $this->assertStringContainsString('MAX_AUTO_BATCH_TARGETS', $automation);
         $this->assertStringContainsString("get_setting('seo_auto_seo_batch_size', 10)", $restart);

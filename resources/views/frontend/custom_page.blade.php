@@ -27,6 +27,9 @@
     <meta property="og:image" content="{{ uploaded_asset($page->meta_image) }}" />
     <meta property="og:description" content="{{ $page->meta_description }}" />
     <meta property="og:site_name" content="{{ env('APP_NAME') }}" />
+
+    {{-- AI-generated structured data (schema_json / breadcrumbs) from the SEO Suite --}}
+    @include('seo.partials.json-ld', ['entity' => $page, 'type' => 'page'])
 @endsection
 
 @section('content')

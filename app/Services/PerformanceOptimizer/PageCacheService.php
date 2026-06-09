@@ -460,6 +460,60 @@ class PageCacheService
         if (file_exists($path)) @unlink($path);
     }
 
+    /**
+     * Remove every cached variant (installed-locale × device) of a single URL.
+     * Lets SEO/content edits invalidate just the affected page instantly, instead
+     * of waiting for the page-cache TTL to expire. O(locales × 2) unlink ops.
+     */
+    public function forgetUrl(string $url): int
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return 0;
+        }
+
+        try { $currency = $this->defaultCurrencyCode(); }
+        catch (\Throwable $e) { $currency = 'USD'; }
+
+        $removed = 0;
+        foreach ($this->purgeLocales() as $locale) {
+            foreach (['d', 'm'] as $device) {
+                $hash = md5($url . '|' . "{$locale}_{$currency}_{$device}");
+                $key  = 'perf_page_cache_' . $hash;
+
+                if ($this->canUseMemoryDriver()) {
+                    try {
+                        Cache::store($this->driver)->forget($key);
+                        $this->removeMemoryIndex($key);
+                    } catch (\Throwable $e) {}
+                }
+
+                $path = $this->cacheDir . DIRECTORY_SEPARATOR . $hash . '.html';
+                if (is_file($path)) {
+                    @unlink($path);
+                    $removed++;
+                }
+            }
+        }
+
+        return $removed;
+    }
+
+    /** Locale codes the storefront may have cached pages under. */
+    protected function purgeLocales(): array
+    {
+        try {
+            if (Schema::hasTable('languages') && class_exists(\App\Models\Language::class)) {
+                $codes = \App\Models\Language::query()->pluck('code')->filter()->unique()->values()->all();
+                if (!empty($codes)) {
+                    return $codes;
+                }
+            }
+        } catch (\Throwable $e) {}
+
+        return [(string) config('app.locale', 'en')];
+    }
+
     public function clearAll(): int
     {
         $count = 0;

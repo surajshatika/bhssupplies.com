@@ -41,12 +41,30 @@ class SeoServiceProvider extends ServiceProvider
             \App\Models\SeoRedirect::observe(\App\Observers\SeoRedirectObserver::class);
         }
 
+        // Bust the full-page cache the instant SEO meta changes, so SEO Suite /
+        // autopilot edits show on the live page immediately (not after the TTL).
+        if (class_exists(\App\Models\SeoMeta::class)
+            && class_exists(\App\Observers\SeoMetaObserver::class)) {
+            \App\Models\SeoMeta::observe(\App\Observers\SeoMetaObserver::class);
+        }
+
+        $entityModels = [\App\Models\Product::class, \App\Models\Category::class, \App\Models\Page::class, \App\Models\Blog::class];
+
+        // Bust the full-page cache when an entity's own SEO-relevant content changes.
+        if (class_exists(\App\Observers\EntityCachePurgeObserver::class)) {
+            foreach ($entityModels as $modelClass) {
+                if (class_exists($modelClass)) {
+                    $modelClass::observe(\App\Observers\EntityCachePurgeObserver::class);
+                }
+            }
+        }
+
         if (!class_exists(\App\Observers\SeoEntitySlugObserver::class)) {
             return;
         }
         $slugObserver = \App\Observers\SeoEntitySlugObserver::class;
 
-        foreach ([\App\Models\Product::class, \App\Models\Category::class, \App\Models\Page::class, \App\Models\Blog::class] as $modelClass) {
+        foreach ($entityModels as $modelClass) {
             if (class_exists($modelClass)) {
                 $modelClass::observe($slugObserver);
             }

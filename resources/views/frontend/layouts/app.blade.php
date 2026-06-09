@@ -32,6 +32,18 @@
             : $_full_title;
         $_base_color  = get_setting('base_color', '#d43533');
         $_canonical   = url()->current();
+
+        // Per-page robots & canonical sourced from the SEO Suite (seo_meta) for the
+        // current entity. Falls back to the site default for non-entity pages.
+        $_seo_robots    = 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1';
+        $_seo_canonical = $_canonical;
+        try {
+            $_seo_bundle    = app('seo.resolver')->resolveForRequest();
+            $_seo_robots    = $_seo_bundle['robots']    ?? $_seo_robots;
+            $_seo_canonical = $_seo_bundle['canonical'] ?? $_seo_canonical;
+        } catch (\Throwable $e) {
+            // SEO resolver unavailable — keep the safe defaults above.
+        }
     @endphp
     @php
         $_rendered_title = $__env->yieldContent('meta_title', $_page_title);
@@ -42,14 +54,14 @@
     @endphp
     <title>{{ $_rendered_title }}</title>
 
-    <meta name="robots" content="@yield('meta_robots', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1')">
+    <meta name="robots" content="@yield('meta_robots', $_seo_robots)">
     <meta name="description" content="@yield('meta_description', get_setting('meta_description'))">
     <meta name="keywords" content="@yield('meta_keywords', get_setting('meta_keywords'))">
     <meta name="theme-color" content="{{ $_base_color }}">
 
     <meta name="p:domain_verify" content="6e7f92e7df32bab4506a3f8e6704422d"/>
 
-    <link rel="canonical" href="@yield('canonical', $_canonical)">
+    <link rel="canonical" href="@yield('canonical', $_seo_canonical)">
 
     @yield('pagination_links')
 

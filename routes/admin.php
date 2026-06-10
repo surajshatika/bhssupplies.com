@@ -350,6 +350,7 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         Route::post('/seo-suite/run',        'run')->name('admin.seo-suite.run');
         Route::post('/seo-suite/bulk-pending','bulkOptimizePendingUrls')->name('admin.seo-suite.bulk_pending');
         Route::post('/seo-suite/queue/recover','recoverSeoQueue')->middleware('seo.rate')->name('admin.seo-suite.queue.recover');
+        Route::post('/seo-suite/gsc/sync',   'syncSearchConsoleNow')->middleware('seo.rate')->name('admin.seo-suite.gsc.sync');
 
         // Settings
         Route::get('/seo-suite/settings',    'settings')->name('admin.seo-suite.settings.view');

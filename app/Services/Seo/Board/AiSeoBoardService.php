@@ -202,54 +202,55 @@ class AiSeoBoardService
     {
         $limit = max(1, min(self::MAX_AUTO_BATCH_TARGETS, $limit));
         $attempts = $this->recentBatchTargetAttempts();
-        $retryRows = $this->pendingRowsFromPreviousBatches($limit, $types, $attempts);
-        $retryKeys = $retryRows
-            ->mapWithKeys(fn(array $row) => [$this->targetKey($row) => true])
-            ->all();
 
-        if ($retryRows->count() >= $limit) {
-            return $retryRows->take($limit)->values();
-        }
+        $retryRows = $this->pendingRowsFromPreviousBatches($limit * 3, $types, $attempts);
+        $freshRows = $this->pendingAutopilotRows($limit * 3, $types);
 
-        $freshRows = $this->pendingAutopilotRows($limit, $types);
+        // In-progress batches resume in their original order first so a running
+        // chunk always finishes before new work is started.
+        [$activeRows, $retryRest] = $retryRows->partition(
+            fn(array $row) => ($row['queue_source'] ?? '') === 'active_resume'
+        );
 
-        $selected = $retryRows
-            ->concat($freshRows
-                ->reject(function (array $row) use ($attempts, $retryKeys): bool {
-                    $key = $this->targetKey($row);
+        $worstFirst = fn(array $a, array $b): int =>
+            ((int) ($a['score'] ?? 0) <=> (int) ($b['score'] ?? 0))
+            ?: ((int) ($b['priority_score'] ?? 0) <=> (int) ($a['priority_score'] ?? 0));
 
-                    return isset($retryKeys[$key])
-                        || (int) ($attempts[$key] ?? 0) >= self::MAX_AUTOPILOT_ATTEMPTS;
-                }))
+        // Everything else (previous retries + fresh candidates): worst SEO score
+        // first (0 / unscored lead), then by gap-priority. Attempt-capped URLs are
+        // held back so the autopilot stops looping on the same stuck pages.
+        $pool = $retryRest
+            ->concat($freshRows)
+            ->reject(fn(array $row) => (int) ($attempts[$this->targetKey($row)] ?? 0) >= self::MAX_AUTOPILOT_ATTEMPTS)
+            ->unique(fn(array $row) => $this->targetKey($row))
+            ->sort($worstFirst)
+            ->values();
+
+        $selected = $activeRows
+            ->concat($pool)
+            ->unique(fn(array $row) => $this->targetKey($row))
             ->take($limit)
             ->values();
 
-        if ($selected->count() >= $limit) {
+        if ($selected->isNotEmpty()) {
             return $selected;
         }
 
-        $selectedKeys = $selected
-            ->mapWithKeys(fn(array $row) => [$this->targetKey($row) => true])
-            ->all();
-
-        $attemptCapFallback = $freshRows
-            ->reject(fn(array $row) => isset($retryKeys[$this->targetKey($row)]) || isset($selectedKeys[$this->targetKey($row)]))
-            ->filter(fn(array $row) => (int) ($attempts[$this->targetKey($row)] ?? 0) >= self::MAX_AUTOPILOT_ATTEMPTS)
-            ->map(function (array $row) use ($attempts): array {
-                $key = $this->targetKey($row);
+        // Everything is attempt-capped — retry the worst-scoring capped URLs.
+        return $retryRows
+            ->concat($freshRows)
+            ->unique(fn(array $row) => $this->targetKey($row))
+            ->sort($worstFirst)
+            ->take($limit)
+            ->map(function (array $row): array {
                 $row['queue_source'] = 'attempt_cap_retry';
-                $row['attempt'] = (int) ($attempts[$key] ?? 0) + 1;
                 $row['priority_reasons'] = array_values(array_unique(array_merge(
                     $row['priority_reasons'] ?? [],
                     ['Retry after attempt cap']
                 )));
 
                 return $row;
-            });
-
-        return $selected
-            ->concat($attemptCapFallback)
-            ->take($limit)
+            })
             ->values();
     }
 
@@ -434,6 +435,16 @@ class AiSeoBoardService
                 }
             }
 
+            // Surface the genuinely worst-scoring entities (lowest seo_score, with
+            // unscored NULL rows first) so 0/low-score URLs are prioritised. The
+            // recency-based fallback below never reaches them on its own.
+            $worstIds = $this->lowestScoredEntityIds($class, $candidateLimit);
+            if (!empty($worstIds)) {
+                $entities = $entities->merge(
+                    $this->queueCandidateQuery($type)->whereIn('id', $worstIds)->get()
+                );
+            }
+
             if ($entities->unique(fn($entity) => $type . ':' . $entity->getKey())->count() < $candidateLimit) {
                 $entities = $entities->merge(
                     $this->queueCandidateQuery($type)->latest('updated_at')->limit($candidateLimit)->get()
@@ -455,14 +466,44 @@ class AiSeoBoardService
 
         return $preview
             ->sort(function (array $left, array $right): int {
+                // Worst SEO first: lowest seo_score (0 / unscored) leads, then by
+                // priority gaps (missing meta/focus/schema), then type importance.
+                $byScore = (int) ($left['score'] ?? 0) <=> (int) ($right['score'] ?? 0);
+                if ($byScore !== 0) {
+                    return $byScore;
+                }
+                $byPriority = (int) ($right['priority_score'] ?? 0) <=> (int) ($left['priority_score'] ?? 0);
+                if ($byPriority !== 0) {
+                    return $byPriority;
+                }
                 $typePriority = array_flip(self::AUTOPILOT_TYPES);
-                $leftType = $typePriority[$left['type'] ?? ''] ?? PHP_INT_MAX;
-                $rightType = $typePriority[$right['type'] ?? ''] ?? PHP_INT_MAX;
-
-                return $leftType <=> $rightType
-                    ?: ((int) ($right['priority_score'] ?? 0) <=> (int) ($left['priority_score'] ?? 0));
+                return ($typePriority[$left['type'] ?? ''] ?? PHP_INT_MAX) <=> ($typePriority[$right['type'] ?? ''] ?? PHP_INT_MAX);
             })
             ->values();
+    }
+
+    /**
+     * IDs of the worst-scoring entities of a type (lowest seo_score, with unscored
+     * NULL rows treated as the very worst). Drives "fix the 0/low-score URLs first".
+     */
+    protected function lowestScoredEntityIds(string $class, int $limit): array
+    {
+        if (!Schema::hasTable('seo_meta')) {
+            return [];
+        }
+
+        return SeoMeta::query()
+            ->where('model_type', $class)
+            ->where('lang', config('app.locale', 'en'))
+            ->where(function ($q) {
+                $q->whereNull('seo_score')->orWhere('seo_score', '<', self::SEO_DONE_SCORE);
+            })
+            ->orderByRaw('CASE WHEN seo_score IS NULL THEN 0 ELSE 1 END')
+            ->orderBy('seo_score')
+            ->limit($limit)
+            ->pluck('model_id')
+            ->map(fn($id) => (int) $id)
+            ->all();
     }
 
     protected function orderedAutopilotTypes(array $types): array
@@ -939,12 +980,23 @@ class AiSeoBoardService
         $source  = 'template';
         $actualProvider = null;
 
-        $bundle = $this->askBestAiForSeoBundle(
-            $providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')),
-            $name,
-            $desc,
-            $type
-        );
+        // Only pay for an AI call when its output would actually be used. The
+        // advanced meta (og/twitter/canonical/robots/breadcrumbs) + schema are
+        // template/derived and applied for free below — so a URL whose AI-sourced
+        // fields (title/description/focus/keywords/content) are already complete
+        // must NOT trigger a billable AI request. This stops the autopilot from
+        // re-spending on "rescored, no change" URLs every batch.
+        if ($this->aiFixWouldHelp($entity, $type, $meta)) {
+            $bundle = $this->askBestAiForSeoBundle(
+                $providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')),
+                $name,
+                $desc,
+                $type
+            );
+        } else {
+            $bundle = ['data' => [], 'tried' => [], 'attempt_details' => [], 'provider' => null];
+            $source = 'complete';
+        }
         $aiData = $bundle['data'];
         $aiAttempts = $bundle['tried'] ?? [];
         $aiAttemptDetails = $bundle['attempt_details'] ?? [];
@@ -2286,11 +2338,13 @@ class AiSeoBoardService
             if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 300)) {
                 $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta, $entity, $type);
             }
-            if (Schema::hasColumn($table, 'short_description') && $this->needsSeoContentRefresh($entity->short_description ?? null, $meta, 45, false)) {
+            // Short summary fields are filled once when empty, never refreshed on a
+            // word/keyword rule — a verbose focus keyword can never match a blurb.
+            if (Schema::hasColumn($table, 'short_description') && $this->isBlank($entity->short_description ?? null)) {
                 $patch['short_description'] = $this->shortSeoText($name, $type, $meta);
             }
         } elseif ($type === 'category') {
-            if (Schema::hasColumn($table, 'top_description') && $this->needsSeoContentRefresh($entity->top_description ?? null, $meta, 60, false)) {
+            if (Schema::hasColumn($table, 'top_description') && $this->isBlank($entity->top_description ?? null)) {
                 $patch['top_description'] = $this->categoryIntroHtml($name, $meta);
             }
             if (Schema::hasColumn($table, 'bottom_description') && $this->needsSeoContentRefresh($entity->bottom_description ?? null, $meta, 300)) {
@@ -2317,6 +2371,15 @@ class AiSeoBoardService
         if (str_word_count($plain) < $minWords) {
             return true;
         }
+
+        // Already SEO-processed once (has injected context links) and meets the
+        // word target → treat as done. Without this, a verbose focus keyword that
+        // can never match verbatim makes this return true forever, so the autopilot
+        // re-injects content and bloats the field on every batch.
+        if (str_contains($html, 'data-seo-context-links')) {
+            return false;
+        }
+
         if ($focus !== '' && mb_stripos($plain, $focus) === false) {
             return true;
         }
@@ -2335,6 +2398,13 @@ class AiSeoBoardService
         $current = trim((string) $current);
         if ($current === '') {
             return $generated;
+        }
+
+        // Idempotency guard: once SEO content has been injected (marker present),
+        // never prepend the generated block again — otherwise the description
+        // doubles in size on every autopilot batch.
+        if (str_contains($current, 'data-seo-context-links')) {
+            return $current;
         }
 
         $focus = trim((string) ($meta['focus_keyword'] ?? ''));
@@ -2622,6 +2692,65 @@ class AiSeoBoardService
         return Str::lower($keyword);
     }
 
+    /**
+     * True only when a billable AI request could actually change something the
+     * AI is the source for (title / description / focus / secondary keywords /
+     * on-page content / missing schema). When false, the autopilot still applies
+     * the free template-derived meta below, but skips the paid AI call — so it no
+     * longer burns budget on URLs that re-score with no change every batch.
+     */
+    protected function aiFixWouldHelp(Model $entity, string $type, array $meta): bool
+    {
+        $focus = trim((string) ($meta['focus_keyword'] ?? ''));
+
+        if ($this->needsFocusKeywordRefresh($meta['focus_keyword'] ?? null)) {
+            return true;
+        }
+        if ($this->needsMetaTitleRefresh($meta['meta_title'] ?? null, $focus)) {
+            return true;
+        }
+        if ($this->needsMetaDescriptionRefresh($meta['meta_description'] ?? null, $focus)) {
+            return true;
+        }
+        if ($this->needsSecondaryKeywordsRefresh($meta['secondary_keywords'] ?? null)) {
+            return true;
+        }
+        if (empty($meta['schema_json'])) {
+            return true;
+        }
+
+        return $this->autopilotContentNeedsWork($entity, $type, $meta);
+    }
+
+    /**
+     * Does the entity's PRIMARY long-form content still need AI work? Only the
+     * main body field gates the paid AI call — short/summary fields are filled
+     * for free when empty (see contentPatch) and must never force a billable
+     * request, or a verbose focus keyword re-bills "complete" URLs every batch.
+     */
+    protected function autopilotContentNeedsWork(Model $entity, string $type, array $meta): bool
+    {
+        $table = $entity->getTable();
+
+        [$field, $minWords] = match ($type) {
+            'product'  => ['description', 300],
+            'category' => ['bottom_description', 300],
+            'page'     => ['content', 300],
+            'blog'     => ['description', 300],
+            default    => [null, 0],
+        };
+
+        return $field !== null
+            && Schema::hasColumn($table, $field)
+            && $this->needsSeoContentRefresh($entity->{$field} ?? null, $meta, $minWords);
+    }
+
+    /** True when a content field is effectively empty (no visible text). */
+    protected function isBlank($value): bool
+    {
+        return trim(preg_replace('/\s+/', ' ', strip_tags((string) $value))) === '';
+    }
+
     protected function needsFocusKeywordRefresh($value): bool
     {
         $value = trim((string) $value);
@@ -2694,7 +2823,9 @@ class AiSeoBoardService
     {
         $base = Str::lower($name);
         $intent = $type === 'category' ? 'supplier' : ($type === 'product' ? 'buy' : 'services');
-        return array_values(array_unique([
+
+        // Geo modifiers — primary GTA service areas.
+        $geo = [
             "{$base} Mississauga",
             "{$base} Brampton",
             "{$base} Toronto",
@@ -2706,11 +2837,38 @@ class AiSeoBoardService
             "{$base} Markham",
             "{$base} North York",
             "{$base} Burlington",
+            "{$base} Ontario",
+            "{$base} Canada",
+            "{$base} near me",
+        ];
+
+        // Commercial / buyer-intent modifiers — what trade & retail buyers search.
+        $intentKeywords = [
+            "buy {$base} online",
+            "{$base} for sale",
+            "{$base} best price",
+            "{$base} price Canada",
+            "cheap {$base}",
+            "{$base} deals",
+            "order {$base} online",
+            "{$base} same day pickup",
+        ];
+
+        // Industry / supply-chain modifiers — BHS positioning as a wholesale distributor.
+        $industry = [
+            "{$base} wholesale",
+            "{$base} distributor",
+            "{$base} supplier",
+            "{$base} supplies",
+            "wholesale {$base} Canada",
+            "{$base} wholesale distributor",
             "{$base} trade account",
-            "{$base} leave a review",
+            "{$base} for contractors",
             "{$base} Canadian supplier",
             "{$intent} {$base} Mississauga",
-        ]));
+        ];
+
+        return array_values(array_unique(array_merge($geo, $intentKeywords, $industry)));
     }
 
     protected function competitorContext(): string

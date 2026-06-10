@@ -36,7 +36,7 @@ class AiSeoBoardService
 {
     public const SUPPORTED_TYPES = ['product', 'category', 'page', 'blog'];
     public const SEO_DONE_SCORE = 80;
-    public const AUTOPILOT_TYPES = ['page', 'category', 'product'];
+    public const AUTOPILOT_TYPES = ['page', 'category', 'product', 'blog'];
     public const MAX_AUTOPILOT_ATTEMPTS = 5;
     public const MAX_MANUAL_BATCH_TARGETS = 10;
     public const MAX_AUTO_BATCH_TARGETS = 100;
@@ -2276,12 +2276,15 @@ class AiSeoBoardService
             . ($description ? "Details: \"" . Str::limit($description, 400) . "\"\n" : '')
             . "Algorithm: {$strategy}\n"
             . "Local priority: primary targets are Mississauga, Brampton, Toronto. Secondary targets are Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington. Include Trade Account and Leave a Review intent only where natural.\n"
-            . "Keyword distribution is critical: the focus keyword MUST appear in the title (first 3 words), in the meta description, and in at least one H2 of the content HTML.\n"
+            . "Focus keyword rules: the focus_keyword MUST be a short 2-4 word head term buyers actually type (brand + product type, e.g. \"knipex diagonal cutters\"). NEVER include sizes, dimensions, voltages, inch marks, or model numbers in it.\n"
+            . "Keyword distribution is critical: the title MUST START with the exact focus keyword (inside the first 4 words), and the keyword must appear in the meta description, in at least one H2, and 5-8 times naturally across the content (≈1% density — never stuffed).\n"
+            . "Title rules: include one power word (Best, Top, Premium, Trusted, Wholesale, Certified) and a number (e.g. 2026). Keep 50-60 chars.\n"
+            . "Writing style: short sentences under 20 words. Active voice only — avoid passive constructions. Positive, benefit-driven tone.\n"
             . $competitorContext
             . $this->keywordTargetingContext()
             . "Also return 3-5 genuine FAQs (question + answer) that match real buyer questions; these power FAQ rich results.\n"
             . "Return ONLY this JSON shape with no other text:\n"
-            . '{"title":"SEO title 50-60 chars with focus keyword first","description":"meta description 150-160 chars, never under 150, focus keyword + benefit + CTA","focus_keyword":"primary keyword phrase","secondary_keywords":["keyword 1","keyword 2","keyword 3","keyword 4","keyword 5"],"'.$contentField.'":"clean HTML; focus keyword in at least one <h2>; H2/H3 sections; Canada intent; benefits; FAQ","faqs":[{"question":"...","answer":"..."}]}';
+            . '{"title":"SEO title 50-60 chars, STARTS with focus keyword, power word + number","description":"meta description 150-160 chars, never under 150, focus keyword + benefit + CTA","focus_keyword":"2-4 word head keyword, no sizes/model numbers","secondary_keywords":["keyword 1","keyword 2","keyword 3","keyword 4","keyword 5"],"'.$contentField.'":"clean HTML; focus keyword in at least one <h2> and 5-8 times in body; short active sentences; H2/H3 sections; Canada intent; benefits; FAQ","faqs":[{"question":"...","answer":"..."}]}';
 
         try {
             $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 1800]);
@@ -2373,11 +2376,14 @@ class AiSeoBoardService
             return true;
         }
 
-        // Already SEO-processed once (has injected context links) and meets the
-        // word target → treat as done. Without this, a verbose focus keyword that
-        // can never match verbatim makes this return true forever, so the autopilot
-        // re-injects content and bloats the field on every batch.
-        if (str_contains($html, 'data-seo-context-links')) {
+        // Already SEO-processed once (has injected context links), meets the word
+        // target AND still carries the current focus keyword → treat as done.
+        // The focus condition matters: when the keyword is regenerated (e.g. a
+        // verbose spec name shortened to a head term), the old injected block no
+        // longer matches and must be refreshed — mergeSeoHtml swaps it in place.
+        if (str_contains($html, 'data-seo-context-links')
+            && ($focus === '' || mb_stripos($plain, $focus) !== false)
+        ) {
             return false;
         }
 
@@ -2401,15 +2407,29 @@ class AiSeoBoardService
             return $generated;
         }
 
-        // Idempotency guard: once SEO content has been injected (marker present),
-        // never prepend the generated block again — otherwise the description
-        // doubles in size on every autopilot batch.
-        if (str_contains($current, 'data-seo-context-links')) {
-            return $current;
-        }
-
         $focus = trim((string) ($meta['focus_keyword'] ?? ''));
         $plain = trim(preg_replace('/\s+/', ' ', strip_tags($current)));
+
+        // Idempotency guard: once SEO content has been injected (marker present),
+        // never prepend the generated block again — otherwise the description
+        // doubles in size on every autopilot batch. When the focus keyword has
+        // CHANGED since injection (old block no longer matches), excise the old
+        // injected block and swap in the regenerated one instead of stacking.
+        if (str_contains($current, 'data-seo-context-links')) {
+            if ($focus === '' || mb_stripos($plain, $focus) !== false) {
+                return $current;
+            }
+
+            $stripped = preg_replace(
+                '/<h2>[^<]*for Canada and GTA Buyers<\/h2>.*?<h3>Buying Guidance<\/h3>\s*<p>.*?<\/p>/su',
+                '',
+                $current,
+                1
+            );
+            $stripped = preg_replace('/<p[^>]*data-seo-context-links[^>]*>.*?<\/p>/su', '', (string) $stripped, 1);
+
+            return trim($generated . "\n\n" . trim((string) $stripped));
+        }
         if ($focus !== '' && mb_stripos($plain, $focus) !== false && str_word_count($plain) >= 300 && $this->htmlHeadingContains($current, $focus)) {
             if (!str_contains($current, 'data-seo-context-links')) {
                 return $current . "\n\n" . $this->seoLinkParagraph($meta, $entity, $type);
@@ -2583,16 +2603,27 @@ class AiSeoBoardService
     protected function titleWithFocus(string $focus, string $name, string $type): string
     {
         $focusTitle = Str::title(trim($focus));
-        $tail = match ($type) {
-            'product' => 'Trusted Canada Supplier 2026',
-            'category' => 'Wholesale Canada 2026',
-            'page' => 'Canada Guide 2026',
-            default => 'Canada SEO Guide 2026',
+
+        // Every tail carries a power word + positive-sentiment word ("Trusted",
+        // "Top", "Best") and a number ("2026") — three separate analyzer checks.
+        // The focus keyword leads so it lands inside the first four title words.
+        $tails = match ($type) {
+            'product'  => ['Trusted Canada Supplier 2026', 'Trusted Supplier 2026', 'Top Canada 2026', 'Best 2026'],
+            'category' => ['Best Wholesale Canada 2026', 'Top Wholesale 2026', 'Top Canada 2026', 'Best 2026'],
+            'page'     => ['Trusted Canada Guide 2026', 'Top Canada Guide 2026', 'Top Guide 2026', 'Best 2026'],
+            default    => ['Trusted Canada Guide 2026', 'Top Guide 2026', 'Best 2026'],
         };
 
-        $title = trim($focusTitle . ' | ' . $tail);
-        if (mb_strlen($title) > 60) {
-            $title = trim($focusTitle . ' Canada');
+        $title = '';
+        foreach ($tails as $tail) {
+            $candidate = trim($focusTitle . ' | ' . $tail);
+            if (mb_strlen($candidate) <= 60) {
+                $title = $candidate;
+                break;
+            }
+        }
+        if ($title === '') {
+            $title = trim(Str::limit($focusTitle, 48, '') . ' | Best 2026');
         }
         if (mb_strlen($title) < 30) {
             $title .= ' | BHS Supplies';
@@ -2670,27 +2701,56 @@ class AiSeoBoardService
         }
 
         $keyword = preg_replace('/\s+\|\s+.*$/', '', $keyword);
-        $keyword = trim($keyword, " \t\n\r\0\x0B-_,.;:");
+        $keyword = $this->headTermKeyword($keyword);
 
-        if (mb_strlen($keyword) > 58 || str_word_count($keyword) > 8) {
-            $words = preg_split('/\s+/', $keyword);
-            $keyword = implode(' ', array_slice($words, 0, 6));
+        if ($keyword === '') {
+            $keyword = $this->headTermKeyword($this->primaryCanadaKeyword($name, $type));
+        }
+        if ($keyword === '') {
+            $keyword = Str::lower(trim($name)) ?: 'bhs supplies';
         }
 
-        if (mb_strlen($keyword) > 58) {
-            $keyword = mb_substr($keyword, 0, 58);
+        return Str::lower($keyword);
+    }
+
+    /**
+     * Reduce a verbose product/category name to a 2-4 word head term buyers
+     * actually search ("knipex diagonal cutters", not the full 58-char spec name).
+     * The analyzer requires the focus keyword inside the FIRST FOUR words of the
+     * title and at 0.5%+ content density — both impossible for long spec names,
+     * which is exactly why optimized URLs were stalling at 74-77.
+     */
+    protected function headTermKeyword(string $keyword): string
+    {
+        $keyword = Str::lower(trim($keyword));
+
+        // Keep only the head segment before connector words / separators.
+        $keyword = preg_split('/\s+(?:with|for|featuring|including)\s+|[,|]/', $keyword)[0] ?? $keyword;
+
+        // Strip SKU parentheses, inch marks, dimension/spec tokens and stray symbols.
+        $keyword = preg_replace('/\([^)]*\)/', ' ', $keyword);
+        $keyword = str_replace(['"', '″', '“', '”', '®', '™'], ' ', $keyword);
+        $keyword = str_replace('-', ' ', $keyword);
+        $keyword = preg_replace('/\b\d+(?:[\/.x×*]\d+)*(?:\s?(?:v|volt|volts|va|w|kw|hz|mm|cm|m|in|inch|inches|ft|kn|amp|amps|a|btu|gal|gpm|l|lb|lbs|kg|oz|pc|pcs|pack|gauge|awg))?\b/u', ' ', $keyword);
+        $keyword = preg_replace('/[^\p{L}\p{N} ]+/u', ' ', $keyword);
+        $keyword = trim(preg_replace('/\s+/', ' ', $keyword));
+
+        $words = array_values(array_filter(explode(' ', $keyword), fn($w) => mb_strlen($w) > 1));
+        if (count($words) > 4) {
+            // Brand usually leads; the head noun usually ends ("... water pump pliers").
+            $words = array_merge([$words[0]], array_slice($words, -3));
+        }
+        $keyword = implode(' ', $words);
+
+        if (mb_strlen($keyword) > 42) {
+            $keyword = mb_substr($keyword, 0, 42);
             $lastSpace = mb_strrpos($keyword, ' ');
-            if ($lastSpace !== false && $lastSpace > 20) {
+            if ($lastSpace !== false && $lastSpace > 12) {
                 $keyword = mb_substr($keyword, 0, $lastSpace);
             }
         }
 
-        $keyword = trim($keyword, " \t\n\r\0\x0B-_,.;:");
-        if ($keyword === '') {
-            $keyword = $this->primaryCanadaKeyword($name, $type);
-        }
-
-        return Str::lower($keyword);
+        return trim($keyword, " \t\n\r\0\x0B-_,.;:");
     }
 
     /**
@@ -2754,8 +2814,11 @@ class AiSeoBoardService
 
     protected function needsFocusKeywordRefresh($value): bool
     {
+        // Verbose spec-name keywords (> 4 words / > 42 chars) can never satisfy the
+        // density + title-start analyzer checks, capping pages at ~77 forever —
+        // flag them so they get regenerated as short head terms.
         $value = trim((string) $value);
-        return $value === '' || mb_strlen($value) > 65 || str_word_count($value) > 9;
+        return $value === '' || mb_strlen($value) > 42 || str_word_count($value) > 4;
     }
 
     protected function needsMetaTitleRefresh($value, string $focus): bool
@@ -2793,7 +2856,19 @@ class AiSeoBoardService
     {
         $aiTitle = trim((string) $aiTitle);
         $len = mb_strlen($aiTitle);
-        if ($aiTitle !== '' && $len >= 30 && $len <= 60 && mb_stripos($aiTitle, $focus) !== false) {
+
+        // Accept the AI title only when it passes the same bar the analyzer scores:
+        // 30-60 chars, focus keyword within the FIRST FOUR words, and a power word.
+        $titleStart = mb_strtolower(implode(' ', array_slice(explode(' ', $aiTitle), 0, 4)));
+        $hasPowerWord = (bool) preg_match(
+            '/\b(best|top|ultimate|proven|essential|complete|expert|professional|premium|quality|trusted|reliable|affordable|official|genuine|wholesale|bulk|free|fast|guaranteed|certified|authorized|leading)\b/i',
+            $aiTitle
+        );
+
+        if ($aiTitle !== '' && $len >= 30 && $len <= 60
+            && $focus !== '' && mb_stripos($titleStart, $focus) !== false
+            && $hasPowerWord
+        ) {
             return $aiTitle;
         }
 

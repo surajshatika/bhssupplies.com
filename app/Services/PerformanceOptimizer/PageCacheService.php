@@ -314,7 +314,10 @@ class PageCacheService
             $locale = 'en';
         }
         try {
-            $currency = $this->defaultCurrencyCode();
+            // Rendered prices follow the VISITOR's selected currency (convert_price()
+            // reads session('currency_code')) — the cache key must too, or one
+            // visitor's currency-specific HTML gets served to everyone.
+            $currency = session('currency_code') ?: $this->defaultCurrencyCode();
         } catch (Exception $e) {
             $currency = 'USD';
         }
@@ -472,31 +475,46 @@ class PageCacheService
             return 0;
         }
 
-        try { $currency = $this->defaultCurrencyCode(); }
-        catch (\Throwable $e) { $currency = 'USD'; }
-
         $removed = 0;
         foreach ($this->purgeLocales() as $locale) {
-            foreach (['d', 'm'] as $device) {
-                $hash = md5($url . '|' . "{$locale}_{$currency}_{$device}");
-                $key  = 'perf_page_cache_' . $hash;
+            foreach ($this->purgeCurrencies() as $currency) {
+                foreach (['d', 'm'] as $device) {
+                    $hash = md5($url . '|' . "{$locale}_{$currency}_{$device}");
+                    $key  = 'perf_page_cache_' . $hash;
 
-                if ($this->canUseMemoryDriver()) {
-                    try {
-                        Cache::store($this->driver)->forget($key);
-                        $this->removeMemoryIndex($key);
-                    } catch (\Throwable $e) {}
-                }
+                    if ($this->canUseMemoryDriver()) {
+                        try {
+                            Cache::store($this->driver)->forget($key);
+                            $this->removeMemoryIndex($key);
+                        } catch (\Throwable $e) {}
+                    }
 
-                $path = $this->cacheDir . DIRECTORY_SEPARATOR . $hash . '.html';
-                if (is_file($path)) {
-                    @unlink($path);
-                    $removed++;
+                    $path = $this->cacheDir . DIRECTORY_SEPARATOR . $hash . '.html';
+                    if (is_file($path)) {
+                        @unlink($path);
+                        $removed++;
+                    }
                 }
             }
         }
 
         return $removed;
+    }
+
+    /** Currency codes pages may have been cached under (visitor-selected). */
+    protected function purgeCurrencies(): array
+    {
+        try {
+            if (Schema::hasTable('currencies')) {
+                $codes = Currency::query()->where('status', 1)->pluck('code')->filter()->unique()->values()->all();
+                if (!empty($codes)) {
+                    return $codes;
+                }
+            }
+        } catch (\Throwable $e) {}
+
+        try { return [$this->defaultCurrencyCode()]; }
+        catch (\Throwable $e) { return ['USD']; }
     }
 
     /** Locale codes the storefront may have cached pages under. */

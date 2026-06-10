@@ -36,17 +36,28 @@ class SerpApiRanker implements SerpRankerInterface
         }
 
         try {
-            $resp = Http::timeout(30)
-                ->withOptions(['verify' => config('seo.ssl_verify', true)])
-                ->get('https://serpapi.com/search.json', [
-                    'engine'  => 'google',
-                    'q'       => $keyword,
-                    'gl'      => $country,
-                    'hl'      => 'en',
-                    'device'  => $device,
-                    'num'     => 100,
-                    'api_key' => $this->apiKey(),
-                ]);
+            // SerpAPI is rate-limited; a burst of keyword checks often trips HTTP 429.
+            // Retry a couple of times with backoff so a transient limit doesn't get
+            // mis-recorded as "not found".
+            $resp = null;
+            for ($attempt = 1; $attempt <= 3; $attempt++) {
+                $resp = Http::timeout(30)
+                    ->withOptions(['verify' => config('seo.ssl_verify', true)])
+                    ->get('https://serpapi.com/search.json', [
+                        'engine'  => 'google',
+                        'q'       => $keyword,
+                        'gl'      => $country,
+                        'hl'      => 'en',
+                        'device'  => $device,
+                        'num'     => 100,
+                        'api_key' => $this->apiKey(),
+                    ]);
+
+                if ($resp->status() !== 429 || $attempt === 3) {
+                    break;
+                }
+                usleep(1_200_000 * $attempt); // 1.2s, 2.4s backoff
+            }
 
             if (!$resp->successful()) {
                 return ['rank' => null, 'found_url' => null, 'raw' => null, 'error' => 'HTTP ' . $resp->status()];

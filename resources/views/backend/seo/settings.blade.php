@@ -558,6 +558,18 @@
                     <small class="text-muted">{{ translate('One URL per line or comma-separated. Autopilot uses these only for keyword gaps, content angles, and positioning. It will not copy competitor content or mention competitor brand names.') }}</small>
                 </div>
                 <div class="form-group">
+                    <label>{{ translate('Related Keywords to Target') }}</label>
+                    <textarea class="form-control" name="related_keywords" rows="4"
+                        placeholder="hvac supplies canada&#10;wholesale plumbing parts&#10;electrical distributor mississauga">{{ $settings['related_keywords'] ?? '' }}</textarea>
+                    <small class="text-muted">{{ translate('One keyword/phrase per line or comma-separated. The autopilot weaves these site-wide related keywords into generated titles, descriptions, content and secondary keywords.') }}</small>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Competitor Keywords to Outrank') }}</label>
+                    <textarea class="form-control" name="competitor_keywords" rows="4"
+                        placeholder="hvac parts near me&#10;plumbing supply store toronto&#10;ac wholesale gta">{{ $settings['competitor_keywords'] ?? '' }}</textarea>
+                    <small class="text-muted">{{ translate('Keywords your competitors rank for that you want to compete on. The autopilot targets these naturally in generated SEO — never keyword-stuffed.') }}</small>
+                </div>
+                <div class="form-group">
                     <label>{{ translate('Daily AI Budget Cap (USD)') }}</label>
                     <input type="number" min="0" step="0.01" class="form-control" name="daily_budget_usd"
                         value="{{ $settings['daily_budget_usd'] ?? '5' }}">

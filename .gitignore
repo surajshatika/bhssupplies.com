@@ -11,16 +11,15 @@ yarn-error.log
 npm-debug.log
 package-lock.json
 composer.lock
-/public/storagesitemap-blog_categories.xml
-/public/sitemap-brands.xml
-/public/sitemap-categories.xml
-/public/sitemap-index.xml   
-/public/sitemap-pages.xml
-/public/sitemap-products.xml
-/public/sitemap-static.xml
-/public/video-sitemap.xml
-sitemap.xml
 *.lock
+
+## ───────────── Sitemaps (environment-generated — live regenerates its own; never commit) ─────────────
+/sitemap.xml
+/sitemap-*.xml
+/public/sitemap.xml
+/public/sitemap-*.xml
+/public/news-sitemap.xml
+/public/video-sitemap.xml
 
 ## ───────────── Environment & secrets ─────────────
 .env

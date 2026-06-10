@@ -527,7 +527,15 @@
                 </div>
             </div>
             <div class="col-lg-6 mt-3 mt-lg-0">
-                <h6>{{ translate('Google Query to Website Page') }}</h6>
+                <div class="d-flex align-items-center justify-content-between mb-1">
+                    <h6 class="mb-0">{{ translate('Google Query to Website Page') }}</h6>
+                    <form method="POST" action="{{ route('admin.seo-suite.gsc.sync') }}" onsubmit="this.querySelector('button').disabled=true;">
+                        @csrf
+                        <button type="submit" class="btn btn-sm btn-soft-primary py-0">
+                            <i class="las la-sync"></i> {{ translate('Sync GSC now') }}
+                        </button>
+                    </form>
+                </div>
                 <div class="table-responsive border rounded">
                     <table class="table table-sm mb-0">
                         <thead class="thead-light"><tr><th>{{ translate('Query') }}</th><th>{{ translate('Position') }}</th><th>{{ translate('Google Page') }}</th><th>{{ translate('Landing URL') }}</th></tr></thead>

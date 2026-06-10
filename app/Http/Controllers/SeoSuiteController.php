@@ -620,6 +620,25 @@ class SeoSuiteController extends Controller
         return view('backend.seo_suite.search_statistics', compact('settings', 'result'));
     }
 
+    /**
+     * One-click Google Search Console sync from the dashboard — pulls real
+     * query/page/position data into seo_analytics so the "Google Query to
+     * Website Page" panel and GSC rank fallbacks populate without SSH access.
+     */
+    public function syncSearchConsoleNow()
+    {
+        try {
+            \Illuminate\Support\Facades\Artisan::call('seo:sync-search-console', ['--days' => 28]);
+            $output = trim(\Illuminate\Support\Facades\Artisan::output());
+            $lastLine = trim((string) collect(preg_split('/\r?\n/', $output))->filter()->last());
+            flash(translate('Search Console sync finished.') . ($lastLine !== '' ? ' ' . Str::limit($lastLine, 120) : ''))->success();
+        } catch (\Throwable $e) {
+            flash(translate('Search Console sync failed: ') . Str::limit($e->getMessage(), 160))->error();
+        }
+
+        return back();
+    }
+
     // ── Post Index Status ───────────────────────────────────────────────────────
 
     public function postIndexStatus()
@@ -982,8 +1001,23 @@ class SeoSuiteController extends Controller
 
             $trackedQuery = SeoKeyword::query()->where('is_active', true);
             $trackedCount = (clone $trackedQuery)->count();
-            $rankedCount = (clone $trackedQuery)->where('rank_current', '>', 0)->count();
-            $pageOneCount = (clone $trackedQuery)->whereBetween('rank_current', [1, 10])->count();
+
+            // Count a keyword as "ranked" from EITHER source: a stored SerpAPI rank,
+            // or a real GSC position (28-day avg). Counting only SerpAPI made the
+            // dashboard claim "1 ranked" while GSC showed page-1/page-2 positions.
+            $resolveRank = function ($keyword, $rankCurrent) use ($gscPositions): int {
+                $rank = (int) ($rankCurrent ?? 0);
+                if ($rank > 0) {
+                    return $rank;
+                }
+                return (int) round((float) ($gscPositions[mb_strtolower((string) $keyword)] ?? 0));
+            };
+            $allActive = (clone $trackedQuery)->get(['keyword', 'rank_current']);
+            $rankedCount = $allActive->filter(fn($k) => $resolveRank($k->keyword, $k->rank_current) > 0)->count();
+            $pageOneCount = $allActive->filter(function ($k) use ($resolveRank) {
+                $rank = $resolveRank($k->keyword, $k->rank_current);
+                return $rank >= 1 && $rank <= 10;
+            })->count();
             $trackedKeywords = $trackedQuery
                 ->orderByRaw('rank_current IS NULL, rank_current = 0, rank_current ASC')
                 ->limit($trackedLimit)

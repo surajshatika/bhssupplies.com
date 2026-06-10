@@ -2278,6 +2278,7 @@ class AiSeoBoardService
             . "Local priority: primary targets are Mississauga, Brampton, Toronto. Secondary targets are Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington. Include Trade Account and Leave a Review intent only where natural.\n"
             . "Keyword distribution is critical: the focus keyword MUST appear in the title (first 3 words), in the meta description, and in at least one H2 of the content HTML.\n"
             . $competitorContext
+            . $this->keywordTargetingContext()
             . "Also return 3-5 genuine FAQs (question + answer) that match real buyer questions; these power FAQ rich results.\n"
             . "Return ONLY this JSON shape with no other text:\n"
             . '{"title":"SEO title 50-60 chars with focus keyword first","description":"meta description 150-160 chars, never under 150, focus keyword + benefit + CTA","focus_keyword":"primary keyword phrase","secondary_keywords":["keyword 1","keyword 2","keyword 3","keyword 4","keyword 5"],"'.$contentField.'":"clean HTML; focus keyword in at least one <h2>; H2/H3 sections; Canada intent; benefits; FAQ","faqs":[{"question":"...","answer":"..."}]}';
@@ -2868,7 +2869,15 @@ class AiSeoBoardService
             "{$intent} {$base} Mississauga",
         ];
 
-        return array_values(array_unique(array_merge($geo, $intentKeywords, $industry)));
+        // Admin-defined related + competitor target keywords (site-wide) so they
+        // appear even when the AI is skipped and template keywords are used.
+        return array_values(array_unique(array_merge(
+            $geo,
+            $intentKeywords,
+            $industry,
+            $this->globalTargetKeywords(),
+            $this->competitorKeywords()
+        )));
     }
 
     protected function competitorContext(): string
@@ -2883,6 +2892,52 @@ class AiSeoBoardService
         return "Competitor websites to outrank/reference for keyword gaps and content angles: "
             . implode(', ', array_slice($urls, 0, 8))
             . ". Do not copy their wording. Do not mention competitor brand names.\n";
+    }
+
+    /** Admin-defined site-wide related keywords to target across all entities. */
+    protected function globalTargetKeywords(): array
+    {
+        return $this->parseKeywordList((string) get_setting('seo_target_keywords', ''));
+    }
+
+    /** Competitor keywords the autopilot should compete for and try to outrank. */
+    protected function competitorKeywords(): array
+    {
+        return $this->parseKeywordList((string) get_setting('seo_competitor_keywords', ''));
+    }
+
+    /** Split a newline / comma separated keyword blob into a clean, unique list. */
+    protected function parseKeywordList(string $raw): array
+    {
+        if (trim($raw) === '') {
+            return [];
+        }
+
+        $out = [];
+        foreach (preg_split('/[\r\n,]+/', $raw) as $part) {
+            $kw = trim($part);
+            if ($kw !== '') {
+                $out[] = $kw;
+            }
+        }
+
+        return array_values(array_unique($out));
+    }
+
+    /** Prompt block instructing the AI to target admin related + competitor keywords. */
+    protected function keywordTargetingContext(): string
+    {
+        $out = '';
+        if ($target = $this->globalTargetKeywords()) {
+            $out .= "Priority related keywords to weave in naturally where relevant: "
+                . implode(', ', array_slice($target, 0, 20)) . ".\n";
+        }
+        if ($competitor = $this->competitorKeywords()) {
+            $out .= "Competitor keywords to compete for and outrank — use naturally, never keyword-stuff: "
+                . implode(', ', array_slice($competitor, 0, 20)) . ".\n";
+        }
+
+        return $out;
     }
 
     protected function parseCompetitorUrls(string $raw): array

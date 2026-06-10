@@ -864,6 +864,8 @@ class SeoSuiteController extends Controller
             'seo_auto_sitemap_interval_hours' => min(24, max(1, (int) $request->input('auto_sitemap_interval_hours', 3))),
 
             'seo_competitor_urls'           => $request->competitor_urls,
+            'seo_target_keywords'           => $request->related_keywords,
+            'seo_competitor_keywords'       => $request->competitor_keywords,
             'seo_daily_budget_usd'          => $request->daily_budget_usd,
             'seo_ai_rate_per_min'           => $request->ai_rate_per_min,
         ];
@@ -964,6 +966,20 @@ class SeoSuiteController extends Controller
         $pageOneCount = 0;
 
         if (Schema::hasTable('seo_keywords')) {
+            // Real Google positions from Search Console (avg over last 28 days),
+            // keyed by lowercased query — used as the source of truth when the
+            // SerpAPI check is missing/rate-limited.
+            $gscPositions = collect();
+            if (Schema::hasTable('seo_analytics')) {
+                $gscPositions = SeoAnalytic::query()
+                    ->where('source', 'gsc')
+                    ->where('dimension', 'query')
+                    ->where('date', '>=', now()->subDays(28)->toDateString())
+                    ->selectRaw('LOWER(value) as q, AVG(position) as pos')
+                    ->groupBy('q')
+                    ->pluck('pos', 'q');
+            }
+
             $trackedQuery = SeoKeyword::query()->where('is_active', true);
             $trackedCount = (clone $trackedQuery)->count();
             $rankedCount = (clone $trackedQuery)->where('rank_current', '>', 0)->count();
@@ -972,9 +988,25 @@ class SeoSuiteController extends Controller
                 ->orderByRaw('rank_current IS NULL, rank_current = 0, rank_current ASC')
                 ->limit($trackedLimit)
                 ->get()
-                ->map(function (SeoKeyword $keyword): array {
+                ->map(function (SeoKeyword $keyword) use ($gscPositions): array {
                     $rank = (int) ($keyword->rank_current ?? 0);
                     $previous = (int) ($keyword->rank_previous ?? 0);
+                    $lastStatus = (string) ($keyword->last_status ?? '');
+                    $source = $keyword->engine;
+
+                    // Prefer the real GSC position when SerpAPI has no usable rank.
+                    $gscPos = (int) round((float) ($gscPositions[mb_strtolower($keyword->keyword)] ?? 0));
+                    if ($rank <= 0 && $gscPos > 0) {
+                        $rank = $gscPos;
+                        $source = 'gsc';
+                    }
+
+                    $checkErrored = $rank <= 0 && str_starts_with($lastStatus, 'error');
+                    $pageLabel = $rank > 0
+                        ? 'Page ' . (int) ceil($rank / 10) . ($source === 'gsc' ? ' (GSC)' : '')
+                        : ($checkErrored
+                            ? (stripos($lastStatus, '429') !== false ? 'Rate limited — not checked' : 'Check failed — not recorded')
+                            : 'Not found in top 100');
 
                     return [
                         'keyword' => $keyword->keyword,
@@ -982,10 +1014,10 @@ class SeoSuiteController extends Controller
                         'previous_rank' => $previous ?: null,
                         'movement' => $rank > 0 && $previous > 0 ? $previous - $rank : null,
                         'google_page' => $rank > 0 ? (int) ceil($rank / 10) : null,
-                        'google_page_label' => $rank > 0 ? 'Page ' . (int) ceil($rank / 10) : 'Not found in top 100',
+                        'google_page_label' => $pageLabel,
                         'url' => $keyword->target_url,
                         'country' => strtoupper((string) $keyword->country),
-                        'engine' => $keyword->engine,
+                        'engine' => $source,
                         'checked_at' => $keyword->last_checked_at,
                     ];
                 })
@@ -1131,6 +1163,8 @@ class SeoSuiteController extends Controller
             'auto_sitemap_realtime'  => (int) get_setting('seo_auto_sitemap_realtime', 0),
             'auto_sitemap_interval_hours' => (int) get_setting('seo_auto_sitemap_interval_hours', 3),
             'competitor_urls'        => get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', '')),
+            'related_keywords'       => get_setting('seo_target_keywords', ''),
+            'competitor_keywords'    => get_setting('seo_competitor_keywords', ''),
             'daily_budget_usd'       => get_setting('seo_daily_budget_usd', 5),
             'ai_rate_per_min'        => get_setting('seo_ai_rate_per_min', 30),
 

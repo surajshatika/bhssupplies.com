@@ -40,7 +40,7 @@ class KeywordRankTrackerService extends AbstractSeoService
                 'previous_rank' => $previous ?: null,
                 'movement' => $rank > 0 && $previous > 0 ? $previous - $rank : null,
                 'google_page' => $rank > 0 ? (int) ceil($rank / 10) : null,
-                'google_page_label' => $rank > 0 ? 'Google Page ' . (int) ceil($rank / 10) : 'Not found in top 100',
+                'google_page_label' => $this->pageLabel($rank, $result['error'] ?? null),
                 'url' => $result['found_url'] ?? ($stored->target_url ?? null),
                 'status' => $this->rankStatus($rank, $result['error'] ?? null),
                 'source' => $result['source'],
@@ -92,22 +92,45 @@ class KeywordRankTrackerService extends AbstractSeoService
         SerpRankerInterface $ranker
     ): array {
         if ($ranker->isConfigured()) {
-            return array_merge(
+            $result = array_merge(
                 $ranker->rank($keyword, $domain, $country, $device),
                 ['source' => $ranker->name()]
             );
+
+            // Primary ranker failed/rate-limited (e.g. SerpAPI 429) — fall back to
+            // Google Custom Search (top 10) so we still get real data instead of
+            // recording the keyword as "not found".
+            if (!empty($result['error'])) {
+                $fallback = $this->googleCseRank($keyword, $domain, $engine);
+                if ($fallback !== null && empty($fallback['error'])) {
+                    return $fallback;
+                }
+            }
+
+            return $result;
         }
 
+        $fallback = $this->googleCseRank($keyword, $domain, $engine);
+
+        return $fallback ?? [
+            'rank' => null,
+            'found_url' => null,
+            'error' => 'Configure a SerpAPI key in SEO settings for accurate Google top-100 rankings.',
+            'source' => 'not_configured',
+        ];
+    }
+
+    /**
+     * Google Programmable Search (CSE) lookup of the top 10 results. Returns null
+     * when CSE is not configured (so the caller can keep the primary error).
+     */
+    protected function googleCseRank(string $keyword, string $domain, string $engine): ?array
+    {
         $apiKey = get_setting('seo_google_search_api_key') ?? env('GOOGLE_SEARCH_API_KEY');
         $cx = get_setting('seo_google_search_cx') ?? env('GOOGLE_SEARCH_CX');
 
         if ($engine !== 'google' || !$apiKey || !$cx) {
-            return [
-                'rank' => null,
-                'found_url' => null,
-                'error' => 'Configure a SerpAPI key in SEO settings for accurate Google top-100 rankings.',
-                'source' => 'not_configured',
-            ];
+            return null;
         }
 
         try {
@@ -173,12 +196,37 @@ class KeywordRankTrackerService extends AbstractSeoService
 
         if (empty($result['error']) && $result['rank'] !== null) {
             $stored->recordRank((int) $result['rank']);
+            if (Schema::hasColumn('seo_keywords', 'last_status')) {
+                $stored->last_status = 'ok';
+                $stored->save();
+            }
         } else {
+            // Check failed (e.g. SerpAPI HTTP 429). Do NOT overwrite a known rank —
+            // just record that this check could not be completed so the UI can show
+            // an honest "rate limited / not checked" instead of "not found".
             $stored->last_checked_at = now();
+            if (Schema::hasColumn('seo_keywords', 'last_status')) {
+                $stored->last_status = 'error:' . ($result['error'] ?? 'unknown');
+            }
             $stored->save();
         }
 
         return $stored->fresh();
+    }
+
+    /** Honest page label that never reports "not found" when the check actually errored. */
+    protected function pageLabel(int $rank, ?string $error): string
+    {
+        if ($rank > 0) {
+            return 'Google Page ' . (int) ceil($rank / 10);
+        }
+        if (!empty($error)) {
+            return stripos($error, '429') !== false
+                ? 'Rate limited — not checked'
+                : 'Check failed — not recorded';
+        }
+
+        return 'Not found in top 100';
     }
 
     protected function rankStatus(?int $rank, ?string $error): string

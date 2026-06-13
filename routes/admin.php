@@ -395,6 +395,12 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         Route::get('/seo-suite/keyword-tracker',      'keywordTracker')->name('admin.seo-suite.keyword_tracker');
         Route::post('/seo-suite/keyword-tracker/check','checkKeywordRanks')->name('admin.seo-suite.keyword_tracker.check');
 
+        // Keyword Manager (add / edit / delete target & competitor keywords)
+        Route::get('/seo-suite/keyword-manager',         'keywordManager')->name('admin.seo-suite.keyword_manager');
+        Route::post('/seo-suite/keyword-manager/add',    'keywordAdd')->name('admin.seo-suite.keyword_manager.add');
+        Route::post('/seo-suite/keyword-manager/update', 'keywordUpdate')->name('admin.seo-suite.keyword_manager.update');
+        Route::post('/seo-suite/keyword-manager/delete', 'keywordDelete')->name('admin.seo-suite.keyword_manager.delete');
+
         // Search Statistics
         Route::get('/seo-suite/search-stats',         'searchStatistics')->name('admin.seo-suite.search_stats');
 

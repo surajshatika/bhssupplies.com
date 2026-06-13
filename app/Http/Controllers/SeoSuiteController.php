@@ -1586,6 +1586,87 @@ class SeoSuiteController extends Controller
         ];
     }
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // Keyword Manager — add / edit / delete individual target/competitor keywords
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function keywordManager()
+    {
+        $related    = $this->parseKwSetting('seo_target_keywords');
+        $competitor = $this->parseKwSetting('seo_competitor_keywords');
+        return view('backend.seo_suite.keyword_manager', compact('related', 'competitor'));
+    }
+
+    public function keywordAdd(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $group   = $request->input('group', 'related');
+        $keyword = trim((string) $request->input('keyword', ''));
+        if ($keyword === '') {
+            return response()->json(['error' => 'Keyword cannot be empty.'], 422);
+        }
+        $setting = $group === 'competitor' ? 'seo_competitor_keywords' : 'seo_target_keywords';
+        $list    = $this->parseKwSetting($setting);
+        if (in_array(mb_strtolower($keyword), array_map('mb_strtolower', $list))) {
+            return response()->json(['error' => 'Keyword already exists.'], 422);
+        }
+        $list[] = $keyword;
+        $this->saveKwSetting($setting, $list);
+        return response()->json(['success' => true, 'count' => count($list), 'keyword' => $keyword]);
+    }
+
+    public function keywordUpdate(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $group   = $request->input('group', 'related');
+        $old     = trim((string) $request->input('old', ''));
+        $new     = trim((string) $request->input('new', ''));
+        if ($old === '' || $new === '') {
+            return response()->json(['error' => 'Invalid input.'], 422);
+        }
+        $setting = $group === 'competitor' ? 'seo_competitor_keywords' : 'seo_target_keywords';
+        $list    = $this->parseKwSetting($setting);
+        $list    = array_map(fn($k) => mb_strtolower($k) === mb_strtolower($old) ? $new : $k, $list);
+        $list    = array_values(array_unique($list));
+        $this->saveKwSetting($setting, $list);
+        return response()->json(['success' => true, 'count' => count($list)]);
+    }
+
+    public function keywordDelete(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $group   = $request->input('group', 'related');
+        $keyword = trim((string) $request->input('keyword', ''));
+        if ($keyword === '') {
+            return response()->json(['error' => 'Invalid.'], 422);
+        }
+        $setting = $group === 'competitor' ? 'seo_competitor_keywords' : 'seo_target_keywords';
+        $list    = $this->parseKwSetting($setting);
+        $list    = array_values(array_filter($list, fn($k) => mb_strtolower($k) !== mb_strtolower($keyword)));
+        $this->saveKwSetting($setting, $list);
+        return response()->json(['success' => true, 'count' => count($list)]);
+    }
+
+    private function parseKwSetting(string $type): array
+    {
+        $raw = (string) get_setting($type, '');
+        if (trim($raw) === '') {
+            return [];
+        }
+        $out = [];
+        foreach (preg_split('/[\r\n,]+/', $raw) as $part) {
+            $kw = trim($part);
+            if ($kw !== '') {
+                $out[] = $kw;
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
+    private function saveKwSetting(string $type, array $list): void
+    {
+        $this->saveSetting($type, implode("\n", $list));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+
     protected function saveSetting(string $type, $value): void
     {
         $setting = BusinessSetting::where('type', $type)->first();

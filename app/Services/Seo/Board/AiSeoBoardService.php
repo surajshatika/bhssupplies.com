@@ -679,8 +679,6 @@ class AiSeoBoardService
         $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
         if (Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
             $reasons[] = 'Primary city intent';
-        } elseif (Str::contains($haystack, ['etobicoke', 'vaughan', 'oakville', 'scarborough', 'markham', 'north york', 'burlington'])) {
-            $reasons[] = 'GTA city intent';
         } else {
             $reasons[] = 'Needs Canada/GTA terms';
         }
@@ -787,9 +785,6 @@ class AiSeoBoardService
         if (Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
             $score += 10;
         }
-        if (Str::contains($haystack, ['etobicoke', 'vaughan', 'oakville', 'scarborough', 'markham', 'north york', 'burlington'])) {
-            $score += 6;
-        }
         if (Str::contains($haystack, ['trade account', 'leave a review', 'review'])) {
             $score += 8;
         }
@@ -827,8 +822,6 @@ class AiSeoBoardService
         $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
         if (Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
             $reasons[] = 'Primary city intent';
-        } elseif (Str::contains($haystack, ['etobicoke', 'vaughan', 'oakville', 'scarborough', 'markham', 'north york', 'burlington'])) {
-            $reasons[] = 'GTA city intent';
         }
 
         if (trim((string) get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', ''))) !== '') {
@@ -2275,7 +2268,7 @@ class AiSeoBoardService
             . "Name: \"{$name}\"\n"
             . ($description ? "Details: \"" . Str::limit($description, 400) . "\"\n" : '')
             . "Algorithm: {$strategy}\n"
-            . "Local priority: primary targets are Mississauga, Brampton, Toronto. Secondary targets are Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington. Include Trade Account and Leave a Review intent only where natural.\n"
+            . "Local priority: primary targets are Mississauga, Brampton, Toronto, GTA, Ontario, Canada. Include Trade Account and Leave a Review intent only where natural.\n"
             . "Focus keyword rules: the focus_keyword MUST be a short 2-4 word head term buyers actually type (brand + product type, e.g. \"knipex diagonal cutters\"). NEVER include sizes, dimensions, voltages, inch marks, or model numbers in it.\n"
             . "Keyword distribution is critical: the title MUST START with the exact focus keyword (inside the first 4 words), and the keyword must appear in the meta description, in at least one H2, and 5-8 times naturally across the content (≈1% density — never stuffed).\n"
             . "Title rules: include one power word (Best, Top, Premium, Trusted, Wholesale, Certified) and a number (e.g. 2026). Keep 50-60 chars.\n"
@@ -2496,7 +2489,7 @@ class AiSeoBoardService
     {
         $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
         $keywordList = implode(', ', array_slice($meta['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type), 0, 10));
-        $areaText = 'Mississauga, Brampton, Toronto, Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington and the wider GTA';
+        $areaText = 'Mississauga, Brampton, Toronto and the wider GTA';
 
         $intro = match ($type) {
             'product' => "{$focus} is prepared for Canadian buyers who need reliable supply, practical product details, and clear purchasing support. BHS Supplies helps contractors, maintenance teams, facility buyers, and trade customers compare fit, availability, and value across {$areaText}.",
@@ -2578,13 +2571,6 @@ class AiSeoBoardService
             ['slug' => 'mississauga', 'label' => 'HVAC supplies Mississauga'],
             ['slug' => 'brampton', 'label' => 'HVAC supplies Brampton'],
             ['slug' => 'toronto', 'label' => 'HVAC supplies Toronto'],
-            ['slug' => 'etobicoke', 'label' => 'HVAC supplies Etobicoke'],
-            ['slug' => 'vaughan', 'label' => 'HVAC supplies Vaughan'],
-            ['slug' => 'oakville', 'label' => 'HVAC supplies Oakville'],
-            ['slug' => 'scarborough', 'label' => 'HVAC supplies Scarborough'],
-            ['slug' => 'markham', 'label' => 'HVAC supplies Markham'],
-            ['slug' => 'north-york', 'label' => 'HVAC supplies North York'],
-            ['slug' => 'burlington', 'label' => 'HVAC supplies Burlington'],
         ];
         $seed = ($type ?: 'page') . ':' . ($entity?->getKey() ?: ($entity?->slug ?? 'default'));
         $location = $locations[abs(crc32($seed)) % count($locations)];
@@ -2906,13 +2892,6 @@ class AiSeoBoardService
             "{$base} Brampton",
             "{$base} Toronto",
             "{$base} GTA",
-            "{$base} Etobicoke",
-            "{$base} Vaughan",
-            "{$base} Oakville",
-            "{$base} Scarborough",
-            "{$base} Markham",
-            "{$base} North York",
-            "{$base} Burlington",
             "{$base} Ontario",
             "{$base} Canada",
             "{$base} near me",

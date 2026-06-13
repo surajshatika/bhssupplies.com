@@ -158,6 +158,33 @@ class AiSeoBoardService
             && (int) ($row['score'] ?? 0) >= self::SEO_DONE_SCORE;
     }
 
+    /**
+     * Returns true when the keyword list was updated AFTER this entity was last
+     * analyzed, meaning its content/schema may not include the new keywords yet.
+     */
+    protected function needsKeywordRefresh(Model $entity): bool
+    {
+        $kwUpdatedAt = get_setting('seo_keywords_updated_at');
+        if (!$kwUpdatedAt) {
+            return false;
+        }
+        try {
+            $kwTs = \Carbon\Carbon::parse($kwUpdatedAt);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        $lastAnalyzed = SeoMeta::where('model_type', get_class($entity))
+            ->where('model_id', $entity->getKey())
+            ->value('last_analyzed_at');
+
+        if (!$lastAnalyzed) {
+            return true;
+        }
+
+        return \Carbon\Carbon::parse($lastAnalyzed)->lt($kwTs);
+    }
+
     public function pendingBreakdownByType(array $types = self::AUTOPILOT_TYPES): array
     {
         $rows = [];
@@ -492,11 +519,26 @@ class AiSeoBoardService
             return [];
         }
 
+        $kwUpdatedAt = get_setting('seo_keywords_updated_at');
+
         return SeoMeta::query()
             ->where('model_type', $class)
             ->where('lang', config('app.locale', 'en'))
-            ->where(function ($q) {
-                $q->whereNull('seo_score')->orWhere('seo_score', '<', self::SEO_DONE_SCORE);
+            ->where(function ($q) use ($kwUpdatedAt) {
+                // Standard: unscored or below the done threshold.
+                $q->whereNull('seo_score')
+                  ->orWhere('seo_score', '<', self::SEO_DONE_SCORE);
+                // Also include done entities whose last analysis predates the
+                // most-recent keyword update — they need new keywords woven in.
+                if ($kwUpdatedAt) {
+                    $q->orWhere(function ($sub) use ($kwUpdatedAt) {
+                        $sub->where('seo_score', '>=', self::SEO_DONE_SCORE)
+                            ->where(function ($inner) use ($kwUpdatedAt) {
+                                $inner->whereNull('last_analyzed_at')
+                                      ->orWhere('last_analyzed_at', '<', $kwUpdatedAt);
+                            });
+                    });
+                }
             })
             ->orderByRaw('CASE WHEN seo_score IS NULL THEN 0 ELSE 1 END')
             ->orderBy('seo_score')
@@ -954,13 +996,18 @@ class AiSeoBoardService
 
         $currentRow = $this->buildRow($entity, $type);
         if ($this->isSeoDoneRow($currentRow)) {
-            return [
-                'applied'      => [],
-                'score_before' => (int) ($currentRow['score'] ?? 0),
-                'score_after'  => (int) ($currentRow['score'] ?? 0),
-                'source'       => 'protected',
-                'row'          => $currentRow,
-            ];
+            // Allow re-processing when keywords were updated after this entity
+            // was last analyzed — so new keywords get woven into its content.
+            if (!$this->needsKeywordRefresh($entity)) {
+                return [
+                    'applied'      => [],
+                    'score_before' => (int) ($currentRow['score'] ?? 0),
+                    'score_after'  => (int) ($currentRow['score'] ?? 0),
+                    'source'       => 'protected',
+                    'row'          => $currentRow,
+                ];
+            }
+            // Fall through: keyword-stale entity gets a fresh AI pass.
         }
 
         $before = $this->scoreEntity($entity, $type);

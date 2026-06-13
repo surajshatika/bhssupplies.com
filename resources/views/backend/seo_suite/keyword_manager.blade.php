@@ -51,6 +51,27 @@ $allKeywords = ['related' => $related, 'competitor' => $competitor];
         <button type="button" class="close py-2" data-dismiss="alert"><span>&times;</span></button>
     </div>
 
+    {{-- Keyword refresh status --}}
+    @if($staleCount > 0)
+    <div class="alert alert-warning py-2 small mb-4 d-flex align-items-center justify-content-between" role="alert">
+        <div>
+            <i class="las la-sync-alt mr-1 text-warning"></i>
+            <strong>{{ $staleCount }} {{ translate('pages need keyword refresh') }}</strong>
+            &mdash; {{ translate('These pages scored ≥80 before keywords were last updated. Autopilot will re-process them automatically on the next run to weave in the new keywords.') }}
+            @if($kwUpdatedAt)
+                <span class="text-muted ml-1">({{ translate('keywords updated') }}: {{ \Carbon\Carbon::parse($kwUpdatedAt)->diffForHumans() }})</span>
+            @endif
+        </div>
+        <span class="badge badge-warning ml-3 flex-shrink-0">{{ translate('Queued for refresh') }}</span>
+    </div>
+    @elseif($kwUpdatedAt)
+    <div class="alert alert-success py-2 small mb-4" role="alert">
+        <i class="las la-check-circle mr-1"></i>
+        {{ translate('All done pages are up to date with the current keyword set.') }}
+        <span class="text-muted ml-1">({{ translate('last updated') }}: {{ \Carbon\Carbon::parse($kwUpdatedAt)->diffForHumans() }})</span>
+    </div>
+    @endif
+
     <div class="row">
         @foreach($groups as $groupKey => $group)
         <div class="col-lg-6 mb-4">

@@ -895,6 +895,12 @@ class SeoSuiteController extends Controller
             }
         }
 
+        // Stamp keyword update time when keywords change via settings form so
+        // autopilot re-processes already-done entities with the new keyword set.
+        if ($request->has('related_keywords') || $request->has('competitor_keywords')) {
+            $this->saveSetting('seo_keywords_updated_at', now()->toIso8601String());
+        }
+
         $secretPairs = [
             'seo_openai_api_key'        => $request->openai_api_key,
             'seo_anthropic_api_key'     => $request->anthropic_api_key,
@@ -1594,7 +1600,19 @@ class SeoSuiteController extends Controller
     {
         $related    = $this->parseKwSetting('seo_target_keywords');
         $competitor = $this->parseKwSetting('seo_competitor_keywords');
-        return view('backend.seo_suite.keyword_manager', compact('related', 'competitor'));
+
+        $kwUpdatedAt = get_setting('seo_keywords_updated_at');
+        $staleCount  = 0;
+        if ($kwUpdatedAt && Schema::hasTable('seo_meta')) {
+            $staleCount = SeoMeta::where('seo_score', '>=', 80)
+                ->where(function ($q) use ($kwUpdatedAt) {
+                    $q->whereNull('last_analyzed_at')
+                      ->orWhere('last_analyzed_at', '<', $kwUpdatedAt);
+                })
+                ->count();
+        }
+
+        return view('backend.seo_suite.keyword_manager', compact('related', 'competitor', 'kwUpdatedAt', 'staleCount'));
     }
 
     public function keywordAdd(Request $request): \Illuminate\Http\JsonResponse
@@ -1663,6 +1681,8 @@ class SeoSuiteController extends Controller
     private function saveKwSetting(string $type, array $list): void
     {
         $this->saveSetting($type, implode("\n", $list));
+        // Stamp so autopilot knows to re-process keyword-stale done entities.
+        $this->saveSetting('seo_keywords_updated_at', now()->toIso8601String());
     }
 
     // ──────────────────────────────────────────────────────────────────────────

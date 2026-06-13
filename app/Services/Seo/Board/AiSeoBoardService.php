@@ -158,6 +158,33 @@ class AiSeoBoardService
             && (int) ($row['score'] ?? 0) >= self::SEO_DONE_SCORE;
     }
 
+    /**
+     * Returns true when the keyword list was updated AFTER this entity was last
+     * analyzed, meaning its content/schema may not include the new keywords yet.
+     */
+    protected function needsKeywordRefresh(Model $entity): bool
+    {
+        $kwUpdatedAt = get_setting('seo_keywords_updated_at');
+        if (!$kwUpdatedAt) {
+            return false;
+        }
+        try {
+            $kwTs = \Carbon\Carbon::parse($kwUpdatedAt);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        $lastAnalyzed = SeoMeta::where('model_type', get_class($entity))
+            ->where('model_id', $entity->getKey())
+            ->value('last_analyzed_at');
+
+        if (!$lastAnalyzed) {
+            return true;
+        }
+
+        return \Carbon\Carbon::parse($lastAnalyzed)->lt($kwTs);
+    }
+
     public function pendingBreakdownByType(array $types = self::AUTOPILOT_TYPES): array
     {
         $rows = [];
@@ -492,11 +519,26 @@ class AiSeoBoardService
             return [];
         }
 
+        $kwUpdatedAt = get_setting('seo_keywords_updated_at');
+
         return SeoMeta::query()
             ->where('model_type', $class)
             ->where('lang', config('app.locale', 'en'))
-            ->where(function ($q) {
-                $q->whereNull('seo_score')->orWhere('seo_score', '<', self::SEO_DONE_SCORE);
+            ->where(function ($q) use ($kwUpdatedAt) {
+                // Standard: unscored or below the done threshold.
+                $q->whereNull('seo_score')
+                  ->orWhere('seo_score', '<', self::SEO_DONE_SCORE);
+                // Also include done entities whose last analysis predates the
+                // most-recent keyword update — they need new keywords woven in.
+                if ($kwUpdatedAt) {
+                    $q->orWhere(function ($sub) use ($kwUpdatedAt) {
+                        $sub->where('seo_score', '>=', self::SEO_DONE_SCORE)
+                            ->where(function ($inner) use ($kwUpdatedAt) {
+                                $inner->whereNull('last_analyzed_at')
+                                      ->orWhere('last_analyzed_at', '<', $kwUpdatedAt);
+                            });
+                    });
+                }
             })
             ->orderByRaw('CASE WHEN seo_score IS NULL THEN 0 ELSE 1 END')
             ->orderBy('seo_score')
@@ -954,13 +996,18 @@ class AiSeoBoardService
 
         $currentRow = $this->buildRow($entity, $type);
         if ($this->isSeoDoneRow($currentRow)) {
-            return [
-                'applied'      => [],
-                'score_before' => (int) ($currentRow['score'] ?? 0),
-                'score_after'  => (int) ($currentRow['score'] ?? 0),
-                'source'       => 'protected',
-                'row'          => $currentRow,
-            ];
+            // Allow re-processing when keywords were updated after this entity
+            // was last analyzed — so new keywords get woven into its content.
+            if (!$this->needsKeywordRefresh($entity)) {
+                return [
+                    'applied'      => [],
+                    'score_before' => (int) ($currentRow['score'] ?? 0),
+                    'score_after'  => (int) ($currentRow['score'] ?? 0),
+                    'source'       => 'protected',
+                    'row'          => $currentRow,
+                ];
+            }
+            // Fall through: keyword-stale entity gets a fresh AI pass.
         }
 
         $before = $this->scoreEntity($entity, $type);
@@ -1057,7 +1104,16 @@ class AiSeoBoardService
             $applied['faqs'] = count($this->normalizeFaqs($aiData['faqs'] ?? null) ?? []) . ' FAQ(s) added';
         }
 
-        if (empty($meta['schema_json'])) {
+        // Regenerate schema when: (a) none exists, or (b) existing schema doesn't
+        // contain the current focus keyword — meaning it was built for a prior keyword.
+        $existingSchemaStr = is_array($meta['schema_json'] ?? null)
+            ? json_encode($meta['schema_json'])
+            : (string) ($meta['schema_json'] ?? '');
+        $newFocus      = trim((string) ($patch['focus_keyword'] ?? $meta['focus_keyword'] ?? ''));
+        $schemaIsStale = $newFocus !== ''
+            && !Str::contains(mb_strtolower($existingSchemaStr), mb_strtolower($newFocus));
+
+        if (empty($meta['schema_json']) || $schemaIsStale) {
             $schemaMeta = $patch + $meta;
             $schemaMeta['faqs']        = $faqVisible ? ($aiData['faqs'] ?? null) : null;
             $schemaMeta['howto_steps'] = $aiData['howto_steps'] ?? null;
@@ -1068,7 +1124,6 @@ class AiSeoBoardService
                     $patch['schema_json'] = $schema;
                     $applied['schema_json'] = json_encode($schema, JSON_UNESCAPED_SLASHES);
                 } else {
-                    // Never persist markup Google would reject — log and skip.
                     logger()->warning('AI SEO Board generated invalid schema; skipped', [
                         'type'   => $type,
                         'id'     => $entity->getKey(),
@@ -2270,17 +2325,21 @@ class AiSeoBoardService
             . "Algorithm: {$strategy}\n"
             . "Local priority: primary targets are Mississauga, Brampton, Toronto, GTA, Ontario, Canada. Include Trade Account and Leave a Review intent only where natural.\n"
             . "Focus keyword rules: the focus_keyword MUST be a short 2-4 word head term buyers actually type (brand + product type, e.g. \"knipex diagonal cutters\"). NEVER include sizes, dimensions, voltages, inch marks, or model numbers in it.\n"
-            . "Keyword distribution is critical: the title MUST START with the exact focus keyword (inside the first 4 words), and the keyword must appear in the meta description, in at least one H2, and 5-8 times naturally across the content (≈1% density — never stuffed).\n"
-            . "Title rules: include one power word (Best, Top, Premium, Trusted, Wholesale, Certified) and a number (e.g. 2026). Keep 50-60 chars.\n"
-            . "Writing style: short sentences under 20 words. Active voice only — avoid passive constructions. Positive, benefit-driven tone.\n"
+            . "Keyword distribution rules (STRICT):\n"
+            . "  - Title MUST start with the exact focus keyword (first 4 words). Include one power word (Best/Top/Trusted/Wholesale/Certified) and the year 2026. Keep 50-60 chars.\n"
+            . "  - Meta description: 150-160 chars EXACTLY, NEVER under 150. Must contain focus keyword AND at least one secondary keyword AND a clear CTA.\n"
+            . "  - Content: focus keyword must appear in at least one <h2> AND 5-8 times in the body (≈1% density — never stuffed).\n"
+            . "  - Content MUST have at least 3 <h2> subheadings and 500+ words total.\n"
+            . "  - At least 2 secondary keywords must appear naturally in the content body.\n"
+            . "Writing style: short sentences under 20 words. Active voice only. Positive, benefit-driven tone. No fluff or filler paragraphs.\n"
             . $competitorContext
-            . $this->keywordTargetingContext()
-            . "Also return 3-5 genuine FAQs (question + answer) that match real buyer questions; these power FAQ rich results.\n"
+            . $this->keywordTargetingContext($type . ':' . $name)
+            . "Also return 4-6 genuine FAQs (question + answer) that match real Canadian buyer questions — specific, useful answers only.\n"
             . "Return ONLY this JSON shape with no other text:\n"
-            . '{"title":"SEO title 50-60 chars, STARTS with focus keyword, power word + number","description":"meta description 150-160 chars, never under 150, focus keyword + benefit + CTA","focus_keyword":"2-4 word head keyword, no sizes/model numbers","secondary_keywords":["keyword 1","keyword 2","keyword 3","keyword 4","keyword 5"],"'.$contentField.'":"clean HTML; focus keyword in at least one <h2> and 5-8 times in body; short active sentences; H2/H3 sections; Canada intent; benefits; FAQ","faqs":[{"question":"...","answer":"..."}]}';
+            . '{"title":"SEO title 50-60 chars, STARTS with focus keyword, power word + 2026","description":"meta description 150-160 chars EXACTLY, focus keyword + 1 secondary keyword + CTA","focus_keyword":"2-4 word head keyword, no sizes/model numbers","secondary_keywords":["keyword 1","keyword 2","keyword 3","keyword 4","keyword 5","keyword 6","keyword 7"],"'.$contentField.'":"clean HTML; 500+ words; 3+ <h2> sections; focus keyword in first <h2> and 5-8x in body; 2+ secondary keywords woven in; short active sentences; Canada GTA buyer intent","faqs":[{"question":"...","answer":"..."}]}';
 
         try {
-            $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 1800]);
+            $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 2400]);
             if (!$raw) {
                 return null;
             }
@@ -2488,35 +2547,41 @@ class AiSeoBoardService
     protected function seoSupportHtml(string $name, string $type, array $meta, ?Model $entity = null): string
     {
         $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
-        $keywordList = implode(', ', array_slice($meta['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type), 0, 10));
+        $keywordList = implode(', ', array_slice($meta['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type), 0, 15));
         $areaText = 'Mississauga, Brampton, Toronto and the wider GTA';
 
         $intro = match ($type) {
-            'product' => "{$focus} is prepared for Canadian buyers who need reliable supply, practical product details, and clear purchasing support. BHS Supplies helps contractors, maintenance teams, facility buyers, and trade customers compare fit, availability, and value across {$areaText}.",
-            'category' => "{$focus} options help Canadian buyers compare product families, applications, availability, and trade purchasing needs in one place. This category supports sourcing for contractors, maintenance teams, businesses, and local buyers across {$areaText}.",
-            'page' => "{$focus} information is organized for Canadian customers who need clear next steps, local trust signals, and practical support from BHS Supplies across {$areaText}.",
-            default => "{$focus} is covered with Canadian search intent, buyer questions, and practical guidance for customers across {$areaText}.",
+            'product'  => "{$focus} is available for Canadian buyers who need reliable supply, clear product details, and fast purchasing support. BHS Supplies helps contractors, maintenance teams, and trade customers compare fit, availability, and value across {$areaText}.",
+            'category' => "{$focus} options help Canadian buyers compare product families, availability, and trade purchasing needs in one place. This category supports sourcing for contractors, maintenance teams, and local buyers across {$areaText}.",
+            'page'     => "{$focus} information is organized for Canadian customers who need clear next steps, local trust signals, and practical support from BHS Supplies across {$areaText}.",
+            default    => "{$focus} is covered with Canadian search intent, buyer questions, and practical guidance for customers across {$areaText}.",
+        };
+
+        $whyList = match ($type) {
+            'product'  => '<li>HVAC, plumbing, water systems, and tool supply for Canadian buyers.</li>',
+            'category' => '<li>Wide selection across HVAC, plumbing, water treatment, and tools.</li>',
+            default    => '<li>Canada-focused supply for HVAC, plumbing, water systems, and tools.</li>',
         };
 
         return '<h2>' . e(Str::title($focus)) . ' for Canada and GTA Buyers</h2>'
             . '<p>' . e($intro) . '</p>'
             . '<h3>Why Buyers Choose BHS Supplies</h3>'
-            . '<p>' . e('Customers often need fast access to product information, dependable stock, and a supplier that understands commercial, residential, and trade requirements. Because buying decisions depend on compatibility, quality, price, and delivery, this page keeps the most important selection points easy to review before ordering.') . '</p>'
+            . '<p>' . e('Customers need fast access to product information, dependable stock, and a supplier that understands commercial, residential, and trade requirements. Buying decisions depend on compatibility, quality, price, and delivery — this page keeps the most important selection points easy to review before ordering.') . '</p>'
             . '<ul>'
-            . '<li>Canada-focused sourcing for local and regional buyers.</li>'
-            . '<li>Helpful support for bulk orders, trade account needs, and repeat purchasing.</li>'
-            . '<li>Useful coverage for HVAC, plumbing, electrical, hardware, and related supply searches.</li>'
-            . '<li>Clear product or category context so buyers can compare specifications and use cases.</li>'
+            . '<li>Canada-focused sourcing for local and regional buyers across the GTA.</li>'
+            . $whyList
+            . '<li>Trade account support for bulk orders and repeat business purchasing.</li>'
+            . '<li>Clear product context so buyers can compare specifications and use cases.</li>'
             . '</ul>'
             . '<h3>Applications and Selection Notes</h3>'
-            . '<p>' . e('The right choice depends on the job site, required size, installation conditions, durability expectations, and how quickly the item is needed. Buyers should compare product details with the intended application, then confirm whether accessories, replacement parts, or compatible items are required. Additionally, repeat buyers can use trade account support to simplify future orders and keep purchasing more consistent.') . '</p>'
+            . '<p>' . e("The right {$focus} choice depends on the job site, required specifications, installation conditions, and delivery timeline. Compare product details with the intended application, then confirm whether accessories or compatible items are required. Repeat buyers can open a trade account to simplify future orders.") . '</p>'
             . '<h3>Local Search Coverage</h3>'
-            . '<p>' . e("This page is optimized for buyers searching in {$areaText}. It also supports trade account, pickup, quote request, and leave a review intent where those actions are natural for the customer journey.") . '</p>'
+            . '<p>' . e("This page is optimized for buyers searching in {$areaText}. It supports trade account, pickup, quote request, and leave a review intent where natural for the customer journey.") . '</p>'
             . '<h3>Related Canada Keywords</h3>'
             . '<p>' . e($keywordList) . '</p>'
             . $this->seoLinkParagraph($meta, $entity, $type)
             . '<h3>Buying Guidance</h3>'
-            . '<p>' . e('First, confirm the product size, application, material, and compatibility. Next, compare delivery or pickup needs with order quantity and pricing. Finally, contact BHS Supplies when you need help matching an item, opening a trade account, or planning a repeat order for your business.') . '</p>';
+            . '<p>' . e("First, confirm the {$focus} size, application, material, and compatibility. Next, compare delivery or pickup options with order quantity and pricing. Contact BHS Supplies when you need help matching an item, opening a trade account, or planning a repeat order.") . '</p>';
     }
 
     protected function seoLinkParagraph(array $meta, ?Model $entity = null, ?string $type = null): string
@@ -2766,6 +2831,16 @@ class AiSeoBoardService
             return true;
         }
 
+        // Schema exists but was generated for a different focus keyword — needs refresh.
+        if ($focus !== '' && !empty($meta['schema_json'])) {
+            $schemaStr = is_array($meta['schema_json'])
+                ? json_encode($meta['schema_json'])
+                : (string) $meta['schema_json'];
+            if (!Str::contains(mb_strtolower($schemaStr), mb_strtolower($focus))) {
+                return true;
+            }
+        }
+
         return $this->autopilotContentNeedsWork($entity, $type, $meta);
     }
 
@@ -2979,16 +3054,30 @@ class AiSeoBoardService
     }
 
     /** Prompt block instructing the AI to target admin related + competitor keywords. */
-    protected function keywordTargetingContext(): string
+    /**
+     * Rotate which 25 keywords appear in the AI prompt so that across many entities
+     * all 81 keywords eventually get targeted, not just the same first 20 every time.
+     * The rotation offset is derived from the entity seed so results are deterministic
+     * per entity (re-running the same entity always picks the same slice).
+     */
+    protected function keywordTargetingContext(string $seed = ''): string
     {
         $out = '';
+
         if ($target = $this->globalTargetKeywords()) {
+            $total  = count($target);
+            $offset = $seed !== '' ? (abs(crc32($seed)) % $total) : 0;
+            $rotated = array_merge(array_slice($target, $offset), array_slice($target, 0, $offset));
             $out .= "Priority related keywords to weave in naturally where relevant: "
-                . implode(', ', array_slice($target, 0, 20)) . ".\n";
+                . implode(', ', array_slice($rotated, 0, 25)) . ".\n";
         }
+
         if ($competitor = $this->competitorKeywords()) {
+            $total2  = count($competitor);
+            $offset2 = $seed !== '' ? (abs(crc32($seed . '_c')) % $total2) : 0;
+            $rotated2 = array_merge(array_slice($competitor, $offset2), array_slice($competitor, 0, $offset2));
             $out .= "Competitor keywords to compete for and outrank — use naturally, never keyword-stuff: "
-                . implode(', ', array_slice($competitor, 0, 20)) . ".\n";
+                . implode(', ', array_slice($rotated2, 0, 25)) . ".\n";
         }
 
         return $out;

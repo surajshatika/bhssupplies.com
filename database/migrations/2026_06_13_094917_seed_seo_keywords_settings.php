@@ -9,12 +9,20 @@ return new class extends Migration
 HVAC supplies
 plumbing supplies
 AC supplies
-heating and air conditioning supplies
 Heating & Air Conditioning
 Hand & Power Tools
 Unilite Tools
 Knipex Hand Tools
 Excalibur Water Systems
+HVAC supplies Mississauga
+HVAC supplies Brampton
+HVAC supplies Toronto
+plumbing supplies Mississauga
+plumbing supplies Brampton
+plumbing supplies Toronto
+AC supplies Mississauga
+AC supplies Brampton
+AC supplies Toronto
 water treatment systems
 water filtration systems
 water softeners
@@ -31,49 +39,16 @@ whole home humidifiers
 HVAC air filters
 furnace filters
 pipe insulation
+armaflex pipe insulation
 AC capacitors
 ventilation fans
 air distribution equipment
-HVAC tools and accessories
-contractor tools Canada
-plumbing and HVAC wholesale
-buy HVAC supplies online
-HVAC supply store Canada
-industrial valves supplier
-water systems Canada
-heating supplies Canada
-cooling supplies Canada
-thermostat wire
-refrigeration supplies
-mechanical supplies
-wholesale building supplies Canada
-commercial plumbing supply
-pipe fittings Canada
-plumbing fittings
-water purification Canada
-water conditioner
-scale control systems
-inspection lights
-work lights
-site lights Canada
-safety supplies Canada
-safety gloves and glasses
-cutting tools Canada
-HVAC parts Canada
-air conditioning parts
-furnace parts Canada
-heating system parts
-cooling system parts
-trade account supplier Canada
-contractor discount supply
-wholesale supplier Ontario
-mechanical contractor supply
-plumbing contractor supply
-HVAC technician supply
 electrical disconnect box
 liquidtite conduit
-armaflex pipe insulation
-water treatment products Canada
+thermostat wire
+inspection lights
+work lights
+cutting tools Canada
 iron filter Canada
 UV sterilizer water
 mineral tank Canada
@@ -81,8 +56,37 @@ control valves Canada
 tannin filter
 turbidity filter
 specialty water filters
-trade supply store Ontario
+water conditioner
+scale control systems
+HVAC parts Canada
+furnace parts Canada
+air conditioning parts
+heating supplies Canada
+cooling supplies Canada
+refrigeration supplies
+pipe fittings Canada
+plumbing fittings
+water purification Canada
+heating system parts
+cooling system parts
+HVAC tools and accessories
+mechanical contractor supply
+plumbing contractor supply
+HVAC technician supply
+plumbing and HVAC wholesale
+buy HVAC supplies online
+HVAC supply store Canada
+wholesale supplier Ontario
+trade account supplier Canada
+contractor discount supply
 supply house Canada
+trade supply store Ontario
+water systems Canada
+water treatment products Canada
+BHS Supplies Trade Account
+HVAC Trade Account
+plumbing Trade Account
+Leave a Review BHS Supplies
 KEYWORDS;
 
     private string $competitor = <<<'KEYWORDS'
@@ -113,13 +117,11 @@ AC unit supplier Canada
 plumbing parts supplier
 pipe supplier Canada
 tool supplier near me
-safety equipment supplier Canada
 water filter supplier near me
 water softener supplier Ontario
 industrial supply store Ontario
 mechanical supply house
 refrigeration parts supplier
-building supply store near me
 contractor supply near me
 wholesale tools Canada
 trade supply house GTA

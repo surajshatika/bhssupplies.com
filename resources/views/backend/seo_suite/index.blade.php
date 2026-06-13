@@ -463,9 +463,14 @@
             <h5 class="mb-0 h6">{{ translate('Target Keyword Intelligence') }}</h5>
             <small class="text-muted">{{ translate('Canada/GTA keyword plan, saved Google ranks, result pages, and the URLs receiving real Search Console visibility.') }}</small>
         </div>
-        <a href="{{ route('admin.seo-suite.keyword_tracker') }}" class="btn btn-sm btn-soft-primary mt-2 mt-md-0">
-            <i class="las la-chart-line mr-1"></i>{{ translate('Open Keyword Tracker') }}
-        </a>
+        <div class="d-flex gap-2 mt-2 mt-md-0" style="gap:.4rem;">
+            <a href="{{ route('admin.seo-suite.keyword_manager') }}" class="btn btn-sm btn-soft-success">
+                <i class="las la-tags mr-1"></i>{{ translate('Manage Keywords') }}
+            </a>
+            <a href="{{ route('admin.seo-suite.keyword_tracker') }}" class="btn btn-sm btn-soft-primary">
+                <i class="las la-chart-line mr-1"></i>{{ translate('Open Keyword Tracker') }}
+            </a>
+        </div>
     </div>
     <div class="card-body">
         <div class="row gutters-10 mb-3">
@@ -1294,7 +1299,7 @@
         </div>
         <div class="alert alert-info mt-3 mb-0 py-2 small">
             <i class="las la-info-circle mr-1"></i>
-            {{ translate('Bulk generation uses product, category, and page-specific algorithms. It now prioritizes Mississauga, Brampton, and Toronto first, then Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington, Trade Account, and Leave a Review intent where natural.') }}
+            {{ translate('Bulk generation uses product, category, and page-specific algorithms. It prioritizes Mississauga, Brampton, Toronto, and the wider GTA with Trade Account and Leave a Review intent where natural.') }}
         </div>
     </div>
 </div>

@@ -895,6 +895,12 @@ class SeoSuiteController extends Controller
             }
         }
 
+        // Stamp keyword update time when keywords change via settings form so
+        // autopilot re-processes already-done entities with the new keyword set.
+        if ($request->has('related_keywords') || $request->has('competitor_keywords')) {
+            $this->saveSetting('seo_keywords_updated_at', now()->toIso8601String());
+        }
+
         $secretPairs = [
             'seo_openai_api_key'        => $request->openai_api_key,
             'seo_anthropic_api_key'     => $request->anthropic_api_key,
@@ -961,23 +967,29 @@ class SeoSuiteController extends Controller
     {
         $groups = [
             'Primary locations' => ['Mississauga', 'Brampton', 'Toronto'],
-            'Supporting locations' => ['Etobicoke', 'Vaughan', 'Oakville', 'Scarborough', 'Markham', 'North York', 'Burlington'],
             'Conversion intents' => ['Trade Account', 'Leave a Review'],
         ];
-        $topics = ['HVAC supplies', 'Plumbing supplies', 'Electrical supplies', 'Hardware supplies', 'Contractor supplies', 'Wholesale supplies'];
-        $locations = array_merge($groups['Primary locations'], $groups['Supporting locations']);
-        $targetKeywords = collect($locations)
-            ->flatMap(fn(string $location) => collect($topics)->map(fn(string $topic) => "{$topic} {$location}"))
-            ->merge([
-                'BHS Supplies Trade Account',
-                'HVAC Trade Account',
-                'Plumbing Trade Account',
-                'Electrical Trade Account',
-                'Hardware Trade Account',
-                'Leave a Review BHS Supplies',
-            ])
-            ->unique()
-            ->values();
+
+        // Pull real target + competitor keywords from admin settings (SEO Suite → Settings).
+        $rawRelated    = (string) get_setting('seo_target_keywords', '');
+        $rawCompetitor = (string) get_setting('seo_competitor_keywords', '');
+        $parseKwList   = function (string $raw): array {
+            if (trim($raw) === '') {
+                return [];
+            }
+            $out = [];
+            foreach (preg_split('/[\r\n,]+/', $raw) as $part) {
+                $kw = trim($part);
+                if ($kw !== '') {
+                    $out[] = $kw;
+                }
+            }
+            return array_values(array_unique($out));
+        };
+        $targetKeywords = collect(array_merge(
+            $parseKwList($rawRelated),
+            $parseKwList($rawCompetitor)
+        ))->unique()->values();
 
         $trackedKeywords = collect();
         $trackedCount = 0;
@@ -1579,6 +1591,101 @@ class SeoSuiteController extends Controller
             'age_days' => $updatedAt ? now()->diffInDays(\Carbon\Carbon::createFromTimestamp($updatedAt)) : null,
         ];
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Keyword Manager — add / edit / delete individual target/competitor keywords
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function keywordManager()
+    {
+        $related    = $this->parseKwSetting('seo_target_keywords');
+        $competitor = $this->parseKwSetting('seo_competitor_keywords');
+
+        $kwUpdatedAt = get_setting('seo_keywords_updated_at');
+        $staleCount  = 0;
+        if ($kwUpdatedAt && Schema::hasTable('seo_meta')) {
+            $staleCount = SeoMeta::where('seo_score', '>=', 80)
+                ->where(function ($q) use ($kwUpdatedAt) {
+                    $q->whereNull('last_analyzed_at')
+                      ->orWhere('last_analyzed_at', '<', $kwUpdatedAt);
+                })
+                ->count();
+        }
+
+        return view('backend.seo_suite.keyword_manager', compact('related', 'competitor', 'kwUpdatedAt', 'staleCount'));
+    }
+
+    public function keywordAdd(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $group   = $request->input('group', 'related');
+        $keyword = trim((string) $request->input('keyword', ''));
+        if ($keyword === '') {
+            return response()->json(['error' => 'Keyword cannot be empty.'], 422);
+        }
+        $setting = $group === 'competitor' ? 'seo_competitor_keywords' : 'seo_target_keywords';
+        $list    = $this->parseKwSetting($setting);
+        if (in_array(mb_strtolower($keyword), array_map('mb_strtolower', $list))) {
+            return response()->json(['error' => 'Keyword already exists.'], 422);
+        }
+        $list[] = $keyword;
+        $this->saveKwSetting($setting, $list);
+        return response()->json(['success' => true, 'count' => count($list), 'keyword' => $keyword]);
+    }
+
+    public function keywordUpdate(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $group   = $request->input('group', 'related');
+        $old     = trim((string) $request->input('old', ''));
+        $new     = trim((string) $request->input('new', ''));
+        if ($old === '' || $new === '') {
+            return response()->json(['error' => 'Invalid input.'], 422);
+        }
+        $setting = $group === 'competitor' ? 'seo_competitor_keywords' : 'seo_target_keywords';
+        $list    = $this->parseKwSetting($setting);
+        $list    = array_map(fn($k) => mb_strtolower($k) === mb_strtolower($old) ? $new : $k, $list);
+        $list    = array_values(array_unique($list));
+        $this->saveKwSetting($setting, $list);
+        return response()->json(['success' => true, 'count' => count($list)]);
+    }
+
+    public function keywordDelete(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $group   = $request->input('group', 'related');
+        $keyword = trim((string) $request->input('keyword', ''));
+        if ($keyword === '') {
+            return response()->json(['error' => 'Invalid.'], 422);
+        }
+        $setting = $group === 'competitor' ? 'seo_competitor_keywords' : 'seo_target_keywords';
+        $list    = $this->parseKwSetting($setting);
+        $list    = array_values(array_filter($list, fn($k) => mb_strtolower($k) !== mb_strtolower($keyword)));
+        $this->saveKwSetting($setting, $list);
+        return response()->json(['success' => true, 'count' => count($list)]);
+    }
+
+    private function parseKwSetting(string $type): array
+    {
+        $raw = (string) get_setting($type, '');
+        if (trim($raw) === '') {
+            return [];
+        }
+        $out = [];
+        foreach (preg_split('/[\r\n,]+/', $raw) as $part) {
+            $kw = trim($part);
+            if ($kw !== '') {
+                $out[] = $kw;
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
+    private function saveKwSetting(string $type, array $list): void
+    {
+        $this->saveSetting($type, implode("\n", $list));
+        // Stamp so autopilot knows to re-process keyword-stale done entities.
+        $this->saveSetting('seo_keywords_updated_at', now()->toIso8601String());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
 
     protected function saveSetting(string $type, $value): void
     {

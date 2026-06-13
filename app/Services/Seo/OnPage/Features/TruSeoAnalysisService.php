@@ -127,9 +127,14 @@ class TruSeoAnalysisService extends AbstractSeoService
             'Aim for at least 300 words of unique content.'
         );
 
-        $checks['content_length_600'] = $this->check(
-            'In-depth content over 600 words', $wordCount >= 600, 8, self::GROUP_BASIC,
-            'Long-form pages (600+ words) tend to rank higher — expand coverage.'
+        $checks['content_length_500'] = $this->check(
+            'Quality content over 500 words', $wordCount >= 500, 8, self::GROUP_BASIC,
+            'Pages with 500+ words demonstrate depth — expand with benefits, specs, and FAQs.'
+        );
+
+        $checks['content_length_800'] = $this->check(
+            'In-depth content over 800 words', $wordCount >= 800, 5, self::GROUP_BASIC,
+            'Long-form content (800+ words) earns more topical authority — add FAQs, guides, or comparisons.'
         );
 
         $density = ($kw !== '' && $wordCount > 0)
@@ -172,8 +177,8 @@ class TruSeoAnalysisService extends AbstractSeoService
         );
 
         $checks['external_links'] = $this->check(
-            'Has an external authority link', $this->countLinks($rawHtml, $url, 'external') > 0, 5, self::GROUP_BASIC,
-            'Cite at least one authoritative external source.'
+            'Has an external authority link', $this->countLinks($rawHtml, $url, 'external') > 0, 3, self::GROUP_BASIC,
+            'Cite at least one authoritative external source (e.g. manufacturer, standards body).'
         );
 
         $checks['image_alt_keyword'] = $this->check(
@@ -186,6 +191,13 @@ class TruSeoAnalysisService extends AbstractSeoService
             !empty($secondary) && $this->anyKeywordPresent($plain, $secondary),
             6, self::GROUP_BASIC,
             'Reference your secondary/LSI keywords in the body copy.'
+        );
+
+        $checks['secondary_keyword_in_desc'] = $this->check(
+            'Secondary keyword in meta description',
+            !empty($secondary) && $this->anyKeywordPresent((string) $description, $secondary),
+            6, self::GROUP_BASIC,
+            'Include at least one secondary keyword in the meta description alongside the focus keyword.'
         );
 
         $checks['has_schema'] = $this->check(
@@ -234,8 +246,8 @@ class TruSeoAnalysisService extends AbstractSeoService
         // ── Readability ────────────────────────────────────────────────────
         $descLen = mb_strlen((string) $description);
         $checks['desc_length'] = $this->check(
-            'Meta description length 120–160 characters', $descLen >= 120 && $descLen <= 160, 7, self::GROUP_READABILITY,
-            sprintf('Description is %d chars. Target 120–160.', $descLen)
+            'Meta description length 140–160 characters', $descLen >= 140 && $descLen <= 160, 7, self::GROUP_READABILITY,
+            sprintf('Description is %d chars. Target 140–160 for maximum SERP snippet visibility.', $descLen)
         );
 
         $avgSentence = $this->averageSentenceLength($plain);
@@ -245,8 +257,18 @@ class TruSeoAnalysisService extends AbstractSeoService
         );
 
         $checks['has_subheadings'] = $this->check(
-            'Content broken up with subheadings', $this->hasHeading($rawHtml, 2) || $this->hasHeading($rawHtml, 3), 5, self::GROUP_READABILITY,
+            'Content broken up with H2/H3 subheadings', $this->hasHeading($rawHtml, 2) || $this->hasHeading($rawHtml, 3), 5, self::GROUP_READABILITY,
             'Add H2/H3 subheadings roughly every 300 words.'
+        );
+
+        $checks['has_multiple_h2'] = $this->check(
+            'At least 3 H2 subheadings', $this->countHeadings($rawHtml, 2) >= 3, 4, self::GROUP_READABILITY,
+            'Use 3 or more H2 headings to signal a well-structured, in-depth page.'
+        );
+
+        $checks['has_faq'] = $this->check(
+            'FAQ section present', $this->hasFaqContent($rawHtml, $plain), 6, self::GROUP_READABILITY,
+            'Add a FAQ section — FAQ schema powers rich results and captures question-based searches.'
         );
 
         $passiveRatio = $this->passiveVoiceRatio($plain);
@@ -360,6 +382,27 @@ class TruSeoAnalysisService extends AbstractSeoService
     protected function hasHeading(string $html, int $level): bool
     {
         return $html !== '' && (bool) preg_match('/<h' . $level . '[\s>]/i', $html);
+    }
+
+    protected function countHeadings(string $html, int $level): int
+    {
+        if ($html === '') {
+            return 0;
+        }
+        return preg_match_all('/<h' . $level . '[\s>]/i', $html);
+    }
+
+    protected function hasFaqContent(string $html, string $plain): bool
+    {
+        // Detect FAQ sections from HTML markers or text keywords.
+        if ($html !== '' && preg_match('/<h[2-4][^>]*>\s*(frequently asked|faq|common question)/i', $html)) {
+            return true;
+        }
+        if (preg_match('/frequently asked questions|FAQ/i', $plain)) {
+            return true;
+        }
+        // At least 2 question-like sentences (ending with "?") suggests a Q&A section.
+        return (preg_match_all('/[^\.\?]{10,}\?/', $plain) >= 2);
     }
 
     protected function keywordInHeadings(string $html, string $kw): bool

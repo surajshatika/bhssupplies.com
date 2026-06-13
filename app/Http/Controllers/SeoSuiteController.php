@@ -961,23 +961,29 @@ class SeoSuiteController extends Controller
     {
         $groups = [
             'Primary locations' => ['Mississauga', 'Brampton', 'Toronto'],
-            'Supporting locations' => ['Etobicoke', 'Vaughan', 'Oakville', 'Scarborough', 'Markham', 'North York', 'Burlington'],
             'Conversion intents' => ['Trade Account', 'Leave a Review'],
         ];
-        $topics = ['HVAC supplies', 'Plumbing supplies', 'Electrical supplies', 'Hardware supplies', 'Contractor supplies', 'Wholesale supplies'];
-        $locations = array_merge($groups['Primary locations'], $groups['Supporting locations']);
-        $targetKeywords = collect($locations)
-            ->flatMap(fn(string $location) => collect($topics)->map(fn(string $topic) => "{$topic} {$location}"))
-            ->merge([
-                'BHS Supplies Trade Account',
-                'HVAC Trade Account',
-                'Plumbing Trade Account',
-                'Electrical Trade Account',
-                'Hardware Trade Account',
-                'Leave a Review BHS Supplies',
-            ])
-            ->unique()
-            ->values();
+
+        // Pull real target + competitor keywords from admin settings (SEO Suite → Settings).
+        $rawRelated    = (string) get_setting('seo_target_keywords', '');
+        $rawCompetitor = (string) get_setting('seo_competitor_keywords', '');
+        $parseKwList   = function (string $raw): array {
+            if (trim($raw) === '') {
+                return [];
+            }
+            $out = [];
+            foreach (preg_split('/[\r\n,]+/', $raw) as $part) {
+                $kw = trim($part);
+                if ($kw !== '') {
+                    $out[] = $kw;
+                }
+            }
+            return array_values(array_unique($out));
+        };
+        $targetKeywords = collect(array_merge(
+            $parseKwList($rawRelated),
+            $parseKwList($rawCompetitor)
+        ))->unique()->values();
 
         $trackedKeywords = collect();
         $trackedCount = 0;

@@ -1294,7 +1294,7 @@
         </div>
         <div class="alert alert-info mt-3 mb-0 py-2 small">
             <i class="las la-info-circle mr-1"></i>
-            {{ translate('Bulk generation uses product, category, and page-specific algorithms. It now prioritizes Mississauga, Brampton, and Toronto first, then Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington, Trade Account, and Leave a Review intent where natural.') }}
+            {{ translate('Bulk generation uses product, category, and page-specific algorithms. It prioritizes Mississauga, Brampton, Toronto, and the wider GTA with Trade Account and Leave a Review intent where natural.') }}
         </div>
     </div>
 </div>

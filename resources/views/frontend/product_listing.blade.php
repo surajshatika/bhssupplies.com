@@ -44,6 +44,22 @@
     <meta property="og:url" content="{{ url()->current() }}">
     <meta property="og:description" content="{{ $meta_description }}">
     <meta property="og:site_name" content="{{ get_setting('website_name') ?: env('APP_NAME') }}">
+    @php
+        $_listing_og_image = null;
+        if (isset($category_id) && $listingCategory && $listingCategory->banner) {
+            $_listing_og_image = my_asset($listingCategory->banner);
+        } elseif (isset($brand_id) && $listingBrand && $listingBrand->logo) {
+            $_listing_og_image = uploaded_asset($listingBrand->logo);
+        } else {
+            $_listing_og_image = uploaded_asset(get_setting('meta_image'));
+        }
+    @endphp
+    @if($_listing_og_image)
+    <meta property="og:image" content="{{ $_listing_og_image }}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:image" content="{{ $_listing_og_image }}">
+    @endif
 
     {{-- BreadcrumbList Schema --}}
     @php

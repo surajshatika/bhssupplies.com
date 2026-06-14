@@ -81,8 +81,59 @@
     @yield('lcp_preload')
     @yield('preload_assets')
 
-    <!-- DNS Prefetch for third-party origins -->
+    {{-- ── Critical inline CSS ────────────────────────────────────────────────
+         Renders synchronously before ANY external CSS is downloaded.
+         Covers the above-fold layout so there is no blank-white flash while
+         vendors.css (468 KB) and aiz-core.css (219 KB) are fetching.
+         Rules here are a strict subset of what those files provide — no conflicts.
+    ── --}}
+    <style>
+        *,::after,::before{box-sizing:border-box}
+        html{-webkit-text-size-adjust:100%;line-height:1.15}
+        body{margin:0;font-family:'Public Sans',sans-serif;font-weight:400;background:#fff;color:#292933;-webkit-font-smoothing:antialiased}
+        img{border-style:none;max-width:100%;vertical-align:middle}
+        a{background-color:transparent}
+        /* Bootstrap 4 container */
+        .container{width:100%;padding-right:15px;padding-left:15px;margin-right:auto;margin-left:auto}
+        @media(min-width:576px){.container{max-width:540px}}
+        @media(min-width:768px){.container{max-width:720px}}
+        @media(min-width:992px){.container{max-width:960px}}
+        @media(min-width:1200px){.container{max-width:1170px}}
+        /* Bootstrap 4 row */
+        .row{display:flex;flex-wrap:wrap;margin-right:-15px;margin-left:-15px}
+        /* Shared column base */
+        [class*=col-]{position:relative;width:100%;padding-right:15px;padding-left:15px}
+        /* Columns used above the fold */
+        .col-6{flex:0 0 50%;max-width:50%}
+        .col-12{flex:0 0 100%;max-width:100%}
+        @media(min-width:768px){.col-md-5{flex:0 0 41.666667%;max-width:41.666667%}.col-md-7{flex:0 0 58.333333%;max-width:58.333333%}}
+        @media(min-width:992px){.col-lg-5{flex:0 0 41.666667%;max-width:41.666667%}.col-lg-7{flex:0 0 58.333333%;max-width:58.333333%}}
+        @media(min-width:1200px){.col-xl-4{flex:0 0 33.333333%;max-width:33.333333%}.col-xl-8{flex:0 0 66.666667%;max-width:66.666667%}}
+        /* Bootstrap 4 display utilities */
+        .d-none{display:none!important}.d-block{display:block!important}.d-flex{display:flex!important}.d-inline-block{display:inline-block!important}
+        @media(min-width:1200px){.d-xl-block{display:block!important}.d-xl-none{display:none!important}}
+        /* Bootstrap 4 flex utilities */
+        .flex-wrap{flex-wrap:wrap!important}.flex-column{flex-direction:column!important}
+        .align-items-center{align-items:center!important}.align-items-baseline{align-items:baseline!important}
+        .justify-content-between{justify-content:space-between!important}.justify-content-center{justify-content:center!important}
+        /* Bootstrap 4 position utilities */
+        .position-relative{position:relative!important}.position-absolute{position:absolute!important}.position-static{position:static!important}
+        /* Bootstrap 4 sizing */
+        .w-100{width:100%!important}.h-100{height:100%!important}.mw-100{max-width:100%!important}
+        .overflow-hidden{overflow:hidden!important}
+        /* Nav/wrapper skeleton */
+        .aiz-main-wrapper{display:flex;flex-direction:column;min-height:100vh;background:#fff}
+        .bg-white{background-color:#fff!important}
+        .z-1035{z-index:1035!important}
+    </style>
+
+    <!-- Preconnect for highest-priority third-party origins (DNS + TCP + TLS upfront) -->
+    <link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+    <link rel="preconnect" href="https://www.google-analytics.com" crossorigin>
+
+    <!-- DNS Prefetch for other third-party origins -->
     <link rel="dns-prefetch" href="//www.googletagmanager.com">
+    <link rel="dns-prefetch" href="//www.google-analytics.com">
     <link rel="dns-prefetch" href="//connect.facebook.net">
     <link rel="dns-prefetch" href="//fonts.googleapis.com">
     <link rel="dns-prefetch" href="//fonts.gstatic.com">
@@ -215,21 +266,46 @@
             content: "{{ translate('View All') }}";
         }
 
-        .bhs-product-img-link.has-hover-image:hover .bhs-product-img:first-child,
-        .pc-card:hover .pc-img-link.has-hover-image .pc-img:not(.pc-img-hover),
-        .image-hover-effect:not(.has-hover-image):hover .product-main-image {
-            opacity: 1 !important;
-        }
+        /* ── Product hover-image — inline so it works even when custom-style.css
+           is async-loaded and blocked by LiteSpeed PageSpeed / LSPS  ── */
 
-        .image-hover-effect:not(.has-hover-image):hover .product-hover-image {
-            opacity: 0 !important;
-        }
-
-        .bhs-product-img-hover,
-        .pc-img-hover,
-        .product-hover-image {
+        /* Default state: hover image hidden, positioned over main image */
+        .bhs-product-img-hover {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            opacity: 0;
+            transition: opacity 0.35s ease;
             pointer-events: none;
         }
+        /* On hover: show hover image */
+        .bhs-product-img-link.has-hover-image:hover .bhs-product-img-hover { opacity: 1 !important; }
+        /* On hover: keep main image fully visible underneath */
+        .bhs-product-img-link.has-hover-image:hover .bhs-product-img:first-child { opacity: 1 !important; }
+
+        /* pc-card variant */
+        .pc-img-hover {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            opacity: 0;
+            transition: opacity 0.35s ease;
+            pointer-events: none;
+        }
+        .pc-card:hover .pc-img-link.has-hover-image .pc-img-hover { opacity: 1 !important; }
+        .pc-card:hover .pc-img-link.has-hover-image .pc-img:not(.pc-img-hover) { opacity: 1 !important; }
+
+        /* image-hover-effect variant (flash deal, older cards) */
+        .product-hover-image {
+            position: absolute;
+            top: 0; left: 0;
+            opacity: 0;
+            transition: opacity 0.35s ease;
+            pointer-events: none;
+        }
+        .image-hover-effect.has-hover-image:hover .product-hover-image { opacity: 1 !important; }
+        .image-hover-effect:not(.has-hover-image):hover .product-hover-image { opacity: 0 !important; }
+        .image-hover-effect:not(.has-hover-image):hover .product-main-image { opacity: 1 !important; }
 
         @supports (content-visibility: auto) {
             #section_featured,

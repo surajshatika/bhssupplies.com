@@ -401,6 +401,22 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         Route::post('/seo-suite/keyword-manager/update', 'keywordUpdate')->name('admin.seo-suite.keyword_manager.update');
         Route::post('/seo-suite/keyword-manager/delete', 'keywordDelete')->name('admin.seo-suite.keyword_manager.delete');
 
+        // Semantic Entity Gap Analysis
+        Route::get('/seo-suite/semantic-gap',            'semanticGapAnalysis')->name('admin.seo-suite.semantic_gap');
+        Route::post('/seo-suite/semantic-gap/analyze',   'runSemanticGapAnalysis')->name('admin.seo-suite.semantic_gap.analyze');
+
+        // Content Decay & Cannibalization
+        Route::get('/seo-suite/content-decay',           'contentDecayAnalysis')->name('admin.seo-suite.content_decay');
+
+        // Internal Link Graph
+        Route::get('/seo-suite/link-graph',              'internalLinkGraph')->name('admin.seo-suite.link_graph');
+
+        // Core Web Vitals
+        Route::get('/seo-suite/core-web-vitals',         'coreWebVitals')->name('admin.seo-suite.core_web_vitals');
+
+        // Predictive Traffic
+        Route::get('/seo-suite/predictive-traffic',      'predictiveTraffic')->name('admin.seo-suite.predictive_traffic');
+
         // Search Statistics
         Route::get('/seo-suite/search-stats',         'searchStatistics')->name('admin.seo-suite.search_stats');
 

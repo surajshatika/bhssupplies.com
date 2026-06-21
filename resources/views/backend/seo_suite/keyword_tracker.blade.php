@@ -159,35 +159,79 @@
                     <tr>
                         <th>{{ translate('Keyword') }}</th>
                         <th>{{ translate('Rank') }}</th>
-                        <th>{{ translate('Google Page') }}</th>
+                        <th>{{ translate('Share of Voice') }}</th>
+                        <th>{{ translate('Competitors') }}</th>
                         <th>{{ translate('Movement') }}</th>
-                        <th>{{ translate('Ranking URL') }}</th>
+                        <th>{{ translate('SERP Features') }}</th>
                         <th>{{ translate('Checked') }}</th>
                     </tr>
                 </thead>
                 <tbody>
                     @forelse($trackedKeywords as $row)
                         <tr>
-                            <td><strong>{{ $row['keyword'] }}</strong></td>
-                            <td>{{ $row['rank'] > 0 ? '#' . $row['rank'] : '-' }}</td>
-                            <td>{{ $row['google_page_label'] }}</td>
+                            <td>
+                                <strong>{{ $row['keyword'] }}</strong>
+                                @if(!empty($row['search_volume']))
+                                    <div class="small text-muted">Vol: {{ number_format($row['search_volume']) }}</div>
+                                @endif
+                            </td>
+                            <td>
+                                @if($row['rank'] > 0)
+                                    <span class="badge badge-{{ $row['rank'] <= 3 ? 'success' : ($row['rank'] <= 10 ? 'primary' : 'secondary') }}">#{{ $row['rank'] }}</span>
+                                @else
+                                    <span class="text-muted">-</span>
+                                @endif
+                            </td>
+                            <td>
+                                <div class="progress" style="height: 6px; width: 80px; margin-top: 8px;">
+                                    <div class="progress-bar bg-success" role="progressbar" style="width: {{ $row['sov'] }}%;" aria-valuenow="{{ $row['sov'] }}" aria-valuemin="0" aria-valuemax="100"></div>
+                                </div>
+                                <div class="small text-muted">{{ $row['sov'] }}% SoV</div>
+                            </td>
+                            <td>
+                                @if(!empty($row['competitors']))
+                                    @foreach($row['competitors'] as $comp)
+                                        <div class="small text-truncate" style="max-width:150px;">
+                                            <span class="text-muted">{{ $comp['domain'] }}:</span> 
+                                            <strong>{{ $comp['rank'] > 0 ? '#' . $comp['rank'] : '-' }}</strong>
+                                        </div>
+                                    @endforeach
+                                @else
+                                    <span class="text-muted small">-</span>
+                                @endif
+                            </td>
                             <td>
                                 @if(($row['movement'] ?? null) > 0)
-                                    <span class="text-success">+{{ $row['movement'] }}</span>
+                                    <span class="text-success"><i class="las la-arrow-up"></i> {{ $row['movement'] }}</span>
                                 @elseif(($row['movement'] ?? null) < 0)
-                                    <span class="text-danger">{{ $row['movement'] }}</span>
+                                    <span class="text-danger"><i class="las la-arrow-down"></i> {{ abs($row['movement']) }}</span>
                                 @else
                                     <span class="text-muted">-</span>
                                 @endif
                             </td>
-                            <td class="text-truncate" style="max-width:340px;">
-                                @if(!empty($row['url']))
-                                    <a href="{{ $row['url'] }}" target="_blank" rel="noopener">{{ $row['url'] }}</a>
+                            <td>
+                                @if(!empty($row['serp_features']))
+                                    <div class="d-flex flex-wrap" style="gap: 2px;">
+                                        @foreach($row['serp_features'] as $feature)
+                                            @php
+                                                $icon = match($feature) {
+                                                    'Featured Snippet' => 'la-crown text-warning',
+                                                    'Local Pack' => 'la-map-marker text-danger',
+                                                    'People Also Ask' => 'la-question-circle text-info',
+                                                    'Knowledge Panel' => 'la-book text-primary',
+                                                    'Videos' => 'la-play-circle text-danger',
+                                                    'Images' => 'la-image text-success',
+                                                    default => 'la-cube text-secondary'
+                                                };
+                                            @endphp
+                                            <span class="badge badge-soft-secondary" title="{{ $feature }}"><i class="las {{ $icon }}"></i></span>
+                                        @endforeach
+                                    </div>
                                 @else
-                                    <span class="text-muted">-</span>
+                                    <span class="text-muted small">-</span>
                                 @endif
                             </td>
-                            <td class="text-nowrap small text-muted">{{ $row['checked_at'] ? $row['checked_at']->format('M d, Y H:i') : '-' }}</td>
+                            <td class="text-nowrap small text-muted">{{ $row['checked_at'] ? \Carbon\Carbon::parse($row['checked_at'])->format('M d, Y H:i') : '-' }}</td>
                         </tr>
                     @empty
                         <tr><td colspan="6" class="text-center text-muted py-4">{{ translate('No tracked keywords yet. Run a Google ranking check above to save your first keywords.') }}</td></tr>

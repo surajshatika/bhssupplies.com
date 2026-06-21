@@ -1806,6 +1806,9 @@ class AiSeoBoardService
         if ($howto = $this->howToSchema($entity, $type, $meta)) {
             $stack[] = $howto;
         }
+        if ($video = $this->videoSchema($entity, $type)) {
+            $stack[] = $video;
+        }
 
         return $stack;
     }
@@ -1969,6 +1972,27 @@ class AiSeoBoardService
             'name'     => Str::limit('How to use ' . $this->displayName($entity, $type), 100, ''),
             'step'     => $stepNodes,
         ];
+    }
+
+    /** Extract video iframes from content and generate VideoObject schema. */
+    protected function videoSchema(Model $entity, string $type): ?array
+    {
+        $html = $this->rawContent($entity, $type);
+        if (!$html) return null;
+
+        if (preg_match('/<iframe[^>]+src=["\'](https:\/\/(www\.)?(youtube\.com\/embed\/|vimeo\.com\/video\/)[^"\']+)["\']/i', $html, $matches)) {
+            $videoUrl = $matches[1];
+            return [
+                '@context'     => 'https://schema.org',
+                '@type'        => 'VideoObject',
+                'name'         => 'Video about ' . $this->displayName($entity, $type),
+                'description'  => 'An informational video about ' . $this->displayName($entity, $type),
+                'thumbnailUrl' => $this->fallbackImage($entity, $type) ?: rtrim(url('/'), '/') . '/default-video-thumb.jpg',
+                'uploadDate'   => optional($entity->created_at)->toAtomString() ?: now()->toAtomString(),
+                'embedUrl'     => $videoUrl,
+            ];
+        }
+        return null;
     }
 
     /** Rich Product schema: brand, aggregateRating, stock-aware Offer, seller. */

@@ -15,7 +15,7 @@ class AutoOptimizePendingSeoCommand extends Command
                             {--provider= : AI provider override}
                             {--dry-run : Show what would be queued without creating a batch}';
 
-    protected $description = 'Automatically generate advanced Canada SEO for pending Page, Category, and Product URLs in priority order.';
+    protected $description = 'Automatically generate advanced Canada SEO for pending Page, Category, Product, and Blog URLs in priority order.';
 
     public function handle(AiSeoBoardService $board, SeoBudgetGuard $budget): int
     {
@@ -46,14 +46,14 @@ class AutoOptimizePendingSeoCommand extends Command
         $limit = max(1, min(AiSeoBoardService::MAX_AUTO_BATCH_TARGETS, $limit));
 
         $provider = $this->option('provider') ?: get_setting('seo_suite_default_provider', config('seo.default_provider', 'openai'));
-        $targetRows = $board->nextAutopilotTargetPreview($limit, ['page', 'category', 'product']);
+        $targetRows = $board->nextAutopilotTargetPreview($limit, ['page', 'category', 'product', 'blog']);
         $targets = $targetRows
             ->map(fn(array $row) => ['type' => $row['type'], 'id' => (int) $row['id']])
             ->values()
             ->all();
 
         if (empty($targets)) {
-            $this->info('No pending Page, Category, or Product URLs found.');
+            $this->info('No pending Page, Category, Product, or Blog URLs found.');
             return self::SUCCESS;
         }
 
@@ -62,7 +62,7 @@ class AutoOptimizePendingSeoCommand extends Command
         $this->info('Provider: ' . $estimate['provider'] . ' | Estimated cost: $' . number_format($estimate['usd'], 4));
 
         if ($this->option('dry-run')) {
-            $this->line('Dry-run preview. Previous pending queue URLs retry first. Fresh URLs then run Pages, Categories, and Products. Weak SEO URLs below 80 can be refined.');
+            $this->line('Dry-run preview. Previous pending queue URLs retry first. Fresh URLs then run Pages, Categories, Products, and Blogs. Weak SEO URLs below 80 can be refined.');
             foreach ($targetRows as $target) {
                 $this->line(sprintf(
                     '- %s#%d | source %s%s | priority %d/100 | current SEO %d/100 | issues: %s',

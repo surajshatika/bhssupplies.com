@@ -104,17 +104,29 @@
 
             @if(!empty($result['opportunities']['external']))
             <div class="card mb-3">
-                <div class="card-header"><h6 class="mb-0"><i class="las la-external-link-alt mr-1 text-info"></i>{{ translate('External Authority Links') }}</h6></div>
+                <div class="card-header"><h6 class="mb-0"><i class="las la-external-link-alt mr-1 text-info"></i>{{ translate('External Outreach Prospects') }}</h6></div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
-                            <thead><tr><th>{{ translate('Domain') }}</th><th>{{ translate('DA') }}</th><th>{{ translate('Type') }}</th></tr></thead>
+                            <thead><tr>
+                                <th>{{ translate('Prospect URL') }}</th>
+                                <th>{{ translate('Est. DA') }}</th>
+                                <th>{{ translate('Type') }}</th>
+                                <th class="text-right">{{ translate('Action') }}</th>
+                            </tr></thead>
                             <tbody>
                                 @foreach($result['opportunities']['external'] as $link)
                                 <tr>
-                                    <td><a href="{{ $link['url'] }}" target="_blank">{{ $link['url'] }}</a></td>
+                                    <td class="text-truncate" style="max-width:250px;">
+                                        <a href="{{ $link['url'] }}" target="_blank" title="{{ $link['title'] ?? '' }}">{{ $link['url'] }}</a>
+                                    </td>
                                     <td><span class="badge badge-soft-primary">{{ $link['domain_authority'] ?? '—' }}</span></td>
                                     <td><span class="badge badge-soft-info">{{ $link['type'] ?? '—' }}</span></td>
+                                    <td class="text-right">
+                                        <button class="btn btn-xs btn-primary draft-email-btn" data-url="{{ $link['url'] }}">
+                                            <i class="las la-envelope"></i> {{ translate('Draft Email') }}
+                                        </button>
+                                    </td>
                                 </tr>
                                 @endforeach
                             </tbody>
@@ -141,6 +153,37 @@
             </div>
         @endif
     </div>
+    </div>
+</div>
+
+{{-- Email Draft Modal --}}
+<div class="modal fade" id="email-draft-modal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">{{ translate('AI Generated Outreach Email') }}</h5>
+                <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+            </div>
+            <div class="modal-body">
+                <div id="email-draft-loading" class="text-center py-5 d-none">
+                    <div class="spinner-border text-primary mb-3"></div>
+                    <p>{{ translate('Analyzing prospect and drafting personalized email...') }}</p>
+                </div>
+                <div id="email-draft-content" class="d-none">
+                    <div class="form-group">
+                        <label>{{ translate('Email Template') }}</label>
+                        <textarea id="email-draft-text" class="form-control" rows="12"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ translate('Close') }}</button>
+                <button type="button" class="btn btn-primary" id="copy-email-btn">
+                    <i class="las la-copy mr-1"></i>{{ translate('Copy to Clipboard') }}
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 @endsection
 
@@ -153,6 +196,58 @@ $(function() {
         var html = '<a href="' + url + '">' + anchor + '</a>';
         navigator.clipboard.writeText(html).then(function() {
             alert('Link HTML copied to clipboard!');
+        });
+    });
+
+    $(document).on('click', '.draft-email-btn', function() {
+        var prospectUrl = $(this).data('url');
+        var siteUrl = $('input[name="url"]').val();
+        var targetKeyword = $('input[name="keyword"]').val();
+
+        if (!siteUrl || !targetKeyword) {
+            alert('Please ensure you have filled out your Page URL and Focus Keyword before generating an email.');
+            return;
+        }
+
+        $('#email-draft-modal').modal('show');
+        $('#email-draft-loading').removeClass('d-none');
+        $('#email-draft-content').addClass('d-none');
+        $('#email-draft-text').val('');
+
+        $.ajax({
+            url: '{{ route('admin.seo-suite.link_assistant.draft') }}',
+            method: 'POST',
+            data: {
+                _token: '{{ csrf_token() }}',
+                prospect_url: prospectUrl,
+                site_url: siteUrl,
+                target_keyword: targetKeyword
+            },
+            success: function(res) {
+                $('#email-draft-loading').addClass('d-none');
+                if (res.success) {
+                    $('#email-draft-text').val(res.draft);
+                    $('#email-draft-content').removeClass('d-none');
+                } else {
+                    $('#email-draft-text').val('Error generating email: ' + res.error);
+                    $('#email-draft-content').removeClass('d-none');
+                }
+            },
+            error: function() {
+                $('#email-draft-loading').addClass('d-none');
+                $('#email-draft-text').val('A network error occurred. Please try again.');
+                $('#email-draft-content').removeClass('d-none');
+            }
+        });
+    });
+
+    $('#copy-email-btn').on('click', function() {
+        var text = $('#email-draft-text').val();
+        navigator.clipboard.writeText(text).then(function() {
+            $('#copy-email-btn').text('Copied!');
+            setTimeout(function() {
+                $('#copy-email-btn').html('<i class="las la-copy mr-1"></i>Copy to Clipboard');
+            }, 2000);
         });
     });
 });

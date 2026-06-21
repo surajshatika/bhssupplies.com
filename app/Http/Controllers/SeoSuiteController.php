@@ -66,6 +66,13 @@ class SeoSuiteController extends Controller
 
         $settings = $this->loadSettings();
         $advancedDashboard = $this->buildAdvancedDashboard($runs, $histories, $redirects, $settings, $dashboard, $siteSummary);
+        
+        // Prepare historical trend data for charts
+        $historicalScores = $histories->reverse()->values();
+        $chartData = [
+            'dates' => $historicalScores->pluck('recorded_at')->map(fn($date) => \Carbon\Carbon::parse($date)->format('M d'))->toArray(),
+            'scores' => $historicalScores->pluck('score')->toArray(),
+        ];
         $urlInventory = $setupRequired
             ? ['done' => collect(), 'pending' => collect(), 'done_count' => 0, 'pending_count' => 0, 'total_count' => 0]
             : $board->dashboardUrlInventory(10, 12);
@@ -88,8 +95,42 @@ class SeoSuiteController extends Controller
             'urlInventory',
             'autopilot',
             'keywordIntelligence',
-            'automationCoverage'
+            'automationCoverage',
+            'chartData'
         ));
+    }
+
+    public function liveDashboardSync()
+    {
+        if (!$this->seoTablesReady()) {
+            return response()->json(['error' => 'not configured']);
+        }
+
+        $board = app(AiSeoBoardService::class);
+        $siteSummary = $board->siteSummary();
+        $runs = SeoRun::query()->latest()->limit(15)->get();
+        $runsCompleted = $runs->where('status', 'completed')->count();
+        $runsTotal = $runs->count();
+        $successRate = $runsTotal > 0 ? round(($runsCompleted / $runsTotal) * 100) : 0;
+        
+        $histories = SeoScoreHistory::query()->latest('recorded_at')->limit(12)->get();
+        $historicalScores = $histories->reverse()->values();
+        
+        return response()->json([
+            'site_health' => [
+                'done' => $siteSummary['done'] ?? 0,
+                'pending' => $siteSummary['pending'] ?? 0,
+                'critical' => $siteSummary['critical'] ?? 0,
+                'score' => $siteSummary['score'] ?? 0,
+            ],
+            'success_rate' => $successRate,
+            'runs_completed' => $runsCompleted,
+            'runs_total' => $runsTotal,
+            'chart_data' => [
+                'dates' => $historicalScores->pluck('recorded_at')->map(fn($date) => \Carbon\Carbon::parse($date)->format('M d'))->toArray(),
+                'scores' => $historicalScores->pluck('score')->toArray(),
+            ]
+        ]);
     }
 
     public function bulkOptimizePendingUrls(Request $request)
@@ -719,6 +760,46 @@ class SeoSuiteController extends Controller
         }
 
         return view('backend.seo_suite.link_assistant', compact('settings', 'result'));
+    }
+
+    public function draftOutreachEmail(Request $request)
+    {
+        $request->validate([
+            'prospect_url' => 'required|url',
+            'target_keyword' => 'required|string',
+            'site_url' => 'required|url'
+        ]);
+
+        $prompt = "You are an expert SEO Outreach Specialist.\n"
+            . "Write a highly personalized, cold outreach email to the webmaster of this prospect URL:\n"
+            . "{$request->prospect_url}\n\n"
+            . "Your goal is to build a backlink for your own page:\n"
+            . "{$request->site_url}\n"
+            . "Which targets the keyword: '{$request->target_keyword}'\n\n"
+            . "Requirements:\n"
+            . "- Use an engaging, non-spammy subject line.\n"
+            . "- Keep it concise, friendly, and professional.\n"
+            . "- Depending on the prospect URL (if it looks like a blog, a resource page, or a directory), adapt your angle (e.g., offer a guest post, a broken link replacement, or a valuable resource addition).\n"
+            . "- Include placeholders for [Name] and [Your Name].\n"
+            . "- Output ONLY the email template (Subject and Body).";
+
+        try {
+            $providerManager = app(SeoProviderManager::class);
+            $providerId = get_setting('seo_suite_default_provider', config('seo.default_provider', 'openai'));
+            $provider = $providerManager->driver($providerId);
+            
+            $draft = $provider->generate($prompt, 'You are an expert SEO Outreach Specialist.');
+            
+            return response()->json([
+                'success' => true,
+                'draft' => trim($draft)
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     // ── Public endpoints ────────────────────────────────────────────────────────

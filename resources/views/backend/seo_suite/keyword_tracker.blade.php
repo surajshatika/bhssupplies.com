@@ -147,6 +147,20 @@
     </div>
 </div>
 
+{{-- Share of Voice Chart --}}
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">{{ translate('Share of Voice vs Competitors (Estimated)') }}</h6>
+            </div>
+            <div class="card-body">
+                <div id="chart-sov" style="min-height: 300px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="card mt-3">
     <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
         <h6 class="mb-0">{{ translate('Saved Google Rank Tracker') }}</h6>
@@ -281,7 +295,50 @@
 @endsection
 
 @section('script')
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 <script>
+// Parse SoV data
+var keywordData = {!! json_encode($trackedKeywords->map(function($kw) {
+    return [
+        'keyword' => $kw['keyword'],
+        'sov' => $kw['sov'],
+        'competitors' => collect($kw['competitors'] ?? [])->mapWithKeys(fn($c) => [$c['domain'] => ($c['rank'] > 0 ? (100 - $c['rank']) : 0)])->toArray()
+    ];
+})->take(15)->toArray()) !!};
+
+var chartCategories = keywordData.map(function(k) { return k.keyword; });
+var mySov = keywordData.map(function(k) { return k.sov; });
+
+var compDomains = [];
+keywordData.forEach(function(k) {
+    Object.keys(k.competitors).forEach(function(domain) {
+        if (!compDomains.includes(domain)) compDomains.push(domain);
+    });
+});
+
+var chartSeries = [{ name: 'Your Domain', data: mySov }];
+compDomains.forEach(function(domain) {
+    chartSeries.push({
+        name: domain,
+        data: keywordData.map(function(k) { return k.competitors[domain] || 0; })
+    });
+});
+
+if (chartCategories.length > 0) {
+    var options = {
+        series: chartSeries,
+        chart: { type: 'bar', height: 300, stacked: true, toolbar: { show: false } },
+        plotOptions: { bar: { horizontal: false, borderRadius: 2 } },
+        xaxis: { categories: chartCategories },
+        yaxis: { max: 100 },
+        colors: ['#1cc88a', '#f6c23e', '#4e73df', '#e74a3b'],
+        fill: { opacity: 1 },
+        legend: { position: 'top', horizontalAlign: 'right' },
+        dataLabels: { enabled: false }
+    };
+    new ApexCharts(document.querySelector("#chart-sov"), options).render();
+}
+
 var statusBadges = {
     'top_3': '<span class="badge badge-success">Top 3</span>',
     'page_1': '<span class="badge badge-info">Page 1</span>',

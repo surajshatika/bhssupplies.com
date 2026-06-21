@@ -173,61 +173,35 @@
     <div class="col-lg-6">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h6 class="mb-0 font-weight-600">{{ translate('SEO Site Score') }}</h6>
+                <h6 class="mb-0 font-weight-600">{{ translate('SEO Site Health') }}</h6>
                 <a href="{{ route('admin.seo-suite.revisions') }}" class="btn btn-xs btn-soft-primary">{{ translate('Full Report') }} <i class="las la-arrow-right ml-1"></i></a>
             </div>
             <div class="card-body">
                 <div class="row align-items-center">
-                    <div class="col-5 text-center">
-                        {{-- Circular Score Ring --}}
-                        <div class="seo-score-ring mx-auto">
-                            <svg width="140" height="140" viewBox="0 0 140 140">
-                                <circle cx="70" cy="70" r="56" fill="none" stroke="#f0f0f0" stroke-width="12"/>
-                                <circle cx="70" cy="70" r="56" fill="none" stroke="{{ $scoreColor }}" stroke-width="12"
-                                        stroke-dasharray="{{ round(2 * 3.14159 * 56) }}"
-                                        stroke-dashoffset="{{ round(2 * 3.14159 * 56 * (1 - $seoScore / 100)) }}"
-                                        stroke-linecap="round"/>
-                            </svg>
-                            <div class="score-text">
-                                <div class="h2 mb-0 font-weight-bold" style="color:{{ $scoreColor }};">{{ $seoScore }}</div>
-                                <small class="text-muted">/ 100</small>
-                                <div class="small font-weight-600" style="color:{{ $scoreColor }};">
-                                    @if($seoScore >= 80) Excellent!
-                                    @elseif($seoScore >= 60) Good
-                                    @elseif($seoScore >= 40) Needs Work
-                                    @else Poor @endif
-                                </div>
-                            </div>
-                        </div>
+                    <div class="col-6 text-center">
+                        <div id="chart-seo-score" style="min-height: 200px;"></div>
                     </div>
-                    <div class="col-7">
-                        <div class="mb-3">
-                            <div class="d-flex align-items-center mb-2">
-                                <span class="rounded-circle bg-success d-inline-block mr-2" style="width:10px;height:10px;"></span>
-                                <span class="mr-2 text-success font-weight-600">{{ number_format($siteHealth['done'] ?? 0) }}</span>
-                                <span class="text-muted small">{{ translate('SEO Done URLs') }}</span>
-                            </div>
-                            <div class="d-flex align-items-center mb-2">
-                                <span class="rounded-circle bg-warning d-inline-block mr-2" style="width:10px;height:10px;"></span>
-                                <span class="mr-2 text-warning font-weight-600">{{ number_format($siteHealth['pending'] ?? 0) }}</span>
-                                <span class="text-muted small">{{ translate('Pending URLs') }}</span>
-                            </div>
-                            <div class="d-flex align-items-center mb-2">
-                                <span class="rounded-circle bg-danger d-inline-block mr-2" style="width:10px;height:10px;"></span>
-                                <span class="mr-2 text-danger font-weight-600">{{ number_format($siteHealth['critical'] ?? 0) }}</span>
-                                <span class="text-muted small">{{ translate('Critical URLs') }}</span>
-                            </div>
-                            <div class="d-flex align-items-center mb-3">
-                                <span class="rounded-circle bg-info d-inline-block mr-2" style="width:10px;height:10px;"></span>
-                                <span class="mr-2 text-info font-weight-600">{{ (int) ($siteHealth['completion_rate'] ?? 0) }}%</span>
-                                <span class="text-muted small">{{ translate('Done Coverage') }}</span>
-                            </div>
-                        </div>
-                        <a href="{{ route('admin.seo_optimization.index') }}" class="btn btn-soft-primary btn-sm btn-block">
+                    <div class="col-6">
+                        <div id="chart-seo-health" style="min-height: 200px;"></div>
+                        <a href="{{ route('admin.seo_optimization.index') }}" class="btn btn-soft-primary btn-sm btn-block mt-2">
                             {{ translate('Complete Site Audit') }} <i class="las la-arrow-right ml-1"></i>
                         </a>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{-- ROW 1.5: SEO Score Trend Chart --}}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0 font-weight-600">{{ translate('SEO Score Trend (Last 30 Days)') }}</h6>
+            </div>
+            <div class="card-body">
+                <div id="chart-seo-trend" style="min-height: 300px;"></div>
             </div>
         </div>
     </div>
@@ -278,8 +252,8 @@
                         <span class="text-muted small">{{ translate('Run Success Rate') }}</span>
                         <i class="las la-check-double text-success la-lg"></i>
                     </div>
-                    <div class="metric-value text-success mt-3">{{ $successRate }}%</div>
-                    <small class="text-muted">{{ $runsCompleted }} {{ translate('completed') }} / {{ $runsTotal }} {{ translate('recent') }}</small>
+                    <div class="metric-value text-success mt-3" id="sync-success-rate">{{ $successRate }}%</div>
+                    <small class="text-muted"><span id="sync-runs-completed">{{ $runsCompleted }}</span> {{ translate('completed') }} / <span id="sync-runs-total">{{ $runsTotal }}</span> {{ translate('recent') }}</small>
                 </div>
             </div>
             <div class="col-md-3 mb-3 mb-md-0">
@@ -1858,6 +1832,7 @@
 @endsection
 
 @section('script')
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 <script>
 // Module-feature sync
 var seoFeatureOptions = [];
@@ -1926,6 +1901,105 @@ $(function() {
             setTimeout(function() { $('#wa-copy-btn').html('<i class="las la-copy mr-1"></i>Copy'); }, 2000);
         });
     });
+
+    // --- ApexCharts Implementations ---
+    var scoreData = {!! json_encode($chartData ?? ['dates' => [], 'scores' => []]) !!};
+    var currentScore = {{ $seoScore }};
+    var healthCounts = {
+        done: {{ $siteHealth['done'] ?? 0 }},
+        pending: {{ $siteHealth['pending'] ?? 0 }},
+        critical: {{ $siteHealth['critical'] ?? 0 }}
+    };
+
+    // 1. RadialBar for Current Score
+    var scoreOptions = {
+        chart: { type: 'radialBar', height: 250, sparkline: { enabled: true } },
+        series: [currentScore],
+        colors: [currentScore >= 80 ? '#1cc88a' : (currentScore >= 50 ? '#f6c23e' : '#e74a3b')],
+        plotOptions: {
+            radialBar: {
+                hollow: { size: '65%' },
+                track: { background: '#edf0f5' },
+                dataLabels: {
+                    name: { show: false },
+                    value: { offsetY: 10, fontSize: '32px', fontWeight: 700, formatter: function(val) { return val; } }
+                }
+            }
+        }
+    };
+    new ApexCharts(document.querySelector("#chart-seo-score"), scoreOptions).render();
+
+    // 2. Doughnut for Site Health
+    var healthOptions = {
+        chart: { type: 'donut', height: 220 },
+        series: [healthCounts.done, healthCounts.pending, healthCounts.critical],
+        labels: ['Done', 'Pending', 'Critical'],
+        colors: ['#1cc88a', '#f6c23e', '#e74a3b'],
+        dataLabels: { enabled: false },
+        legend: { show: false },
+        plotOptions: {
+            pie: { donut: { size: '75%', labels: { show: true, name: { show: false }, value: { fontSize: '24px', fontWeight: 700 } } } }
+        }
+    };
+    new ApexCharts(document.querySelector("#chart-seo-health"), healthOptions).render();
+
+    // 3. Line Chart for SEO Trend
+    if (scoreData.dates.length > 0) {
+        var trendOptions = {
+            chart: { type: 'area', height: 300, toolbar: { show: false } },
+            series: [{ name: 'SEO Score', data: scoreData.scores }],
+            xaxis: { categories: scoreData.dates },
+            colors: ['#4e73df'],
+            fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0, stops: [0, 90, 100] } },
+            dataLabels: { enabled: false },
+            stroke: { curve: 'smooth', width: 3 },
+            yaxis: { min: 0, max: 100 }
+        };
+        new ApexCharts(document.querySelector("#chart-seo-trend"), trendOptions).render();
+    }
+
+    // --- Live Dashboard Sync (AJAX Polling) ---
+    function syncDashboardData() {
+        $.ajax({
+            url: '{{ route('admin.seo-suite.live_sync') }}',
+            method: 'GET',
+            success: function(res) {
+                if (res.error) return;
+
+                // Update Radial Score
+                if (res.site_health.score !== currentScore) {
+                    currentScore = res.site_health.score;
+                    var newColor = currentScore >= 80 ? '#1cc88a' : (currentScore >= 50 ? '#f6c23e' : '#e74a3b');
+                    ApexCharts.exec('chart-seo-score', 'updateOptions', {
+                        series: [currentScore],
+                        colors: [newColor]
+                    }, false, true);
+                }
+
+                // Update Doughnut Health
+                if (res.site_health.done !== healthCounts.done || res.site_health.pending !== healthCounts.pending || res.site_health.critical !== healthCounts.critical) {
+                    healthCounts = res.site_health;
+                    ApexCharts.exec('chart-seo-health', 'updateSeries', [healthCounts.done, healthCounts.pending, healthCounts.critical]);
+                }
+
+                // Update Trend Line
+                if (res.chart_data && res.chart_data.dates.length > 0) {
+                    ApexCharts.exec('chart-seo-trend', 'updateOptions', {
+                        xaxis: { categories: res.chart_data.dates },
+                        series: [{ name: 'SEO Score', data: res.chart_data.scores }]
+                    }, false, true);
+                }
+
+                // Update basic metric spans if they have these specific IDs
+                if ($('#sync-success-rate').length) $('#sync-success-rate').text(res.success_rate + '%');
+                if ($('#sync-runs-completed').length) $('#sync-runs-completed').text(res.runs_completed);
+                if ($('#sync-runs-total').length) $('#sync-runs-total').text(res.runs_total);
+            }
+        });
+    }
+
+    // Poll every 10 seconds
+    setInterval(syncDashboardData, 10000);
 });
 </script>
 @endsection

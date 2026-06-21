@@ -23,6 +23,19 @@
         <button type="button" class="close py-2" data-dismiss="alert"><span>&times;</span></button>
     </div>
 
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header border-bottom-0">
+                    <h6 class="mb-0"><i class="las la-chart-area text-primary mr-1"></i> {{ translate('Estimated Traffic Growth Curve') }}</h6>
+                </div>
+                <div class="card-body">
+                    <div id="chart-roi-forecast" style="min-height: 300px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="card shadow-sm mb-4">
         <div class="card-header border-bottom-0 d-flex justify-content-between align-items-center">
             <h6 class="mb-0"><i class="las la-bullseye text-primary mr-1"></i> {{ translate('Top ROI Opportunities (Striking Distance)') }}</h6>
@@ -83,4 +96,36 @@
         </div>
     </div>
 </div>
+@endsection
+
+@section('script')
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script>
+$(function() {
+    var forecasts = {!! json_encode(collect($forecasts)->take(10)->toArray()) !!};
+    if (forecasts.length > 0) {
+        var categories = forecasts.map(function(f) { return f.query; });
+        var currentTraffic = forecasts.map(function(f) { return f.current_clicks; });
+        var projectedTraffic = forecasts.map(function(f) { return f.predicted_clicks; });
+        
+        var options = {
+            series: [
+                { name: 'Estimated Future Traffic', data: projectedTraffic },
+                { name: 'Current Traffic Baseline', data: currentTraffic }
+            ],
+            chart: { type: 'area', height: 350, toolbar: { show: false } },
+            colors: ['#1cc88a', '#4e73df'],
+            dataLabels: { enabled: false },
+            stroke: { curve: 'smooth', width: 2 },
+            xaxis: { categories: categories, labels: { show: false } },
+            tooltip: { x: { show: true } },
+            fill: {
+                type: 'gradient',
+                gradient: { shadeIntensity: 1, opacityFrom: 0.7, opacityTo: 0.1, stops: [0, 90, 100] }
+            }
+        };
+        new ApexCharts(document.querySelector("#chart-roi-forecast"), options).render();
+    }
+});
+</script>
 @endsection

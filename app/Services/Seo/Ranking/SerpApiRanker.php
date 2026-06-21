@@ -24,6 +24,42 @@ class SerpApiRanker implements SerpRankerInterface
         return !empty($this->apiKey());
     }
 
+    public function search(string $keyword, string $country = 'us', int $limit = 10): array
+    {
+        if (!$this->isConfigured()) {
+            return [];
+        }
+
+        try {
+            $resp = null;
+            for ($attempt = 1; $attempt <= 3; $attempt++) {
+                $resp = Http::timeout(30)
+                    ->withOptions(['verify' => config('seo.ssl_verify', true)])
+                    ->get('https://serpapi.com/search.json', [
+                        'engine'  => 'google',
+                        'q'       => $keyword,
+                        'gl'      => $country,
+                        'hl'      => 'en',
+                        'num'     => $limit,
+                        'api_key' => $this->apiKey(),
+                    ]);
+
+                if ($resp->status() !== 429 || $attempt === 3) {
+                    break;
+                }
+                usleep(1_200_000 * $attempt);
+            }
+
+            if (!$resp->successful()) {
+                return [];
+            }
+
+            return (array) ($resp->json('organic_results') ?? []);
+        } catch (Throwable $e) {
+            return [];
+        }
+    }
+
     public function rank(string $keyword, string $targetDomainOrUrl, string $country = 'us', string $device = 'desktop'): array
     {
         if (!$this->isConfigured()) {

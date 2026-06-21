@@ -4,12 +4,4 @@ Disallow: /admin/
 Disallow: /checkout/
 Disallow: /cart/
 Disallow: /compare/
-Disallow: /login
-Disallow: /register
-Disallow: /password/
-
-Sitemap: https://www.bhssupplies.com/sitemap-index.xml
-Sitemap: https://www.bhssupplies.com/sitemap-products.xml
-Sitemap: https://www.bhssupplies.com/sitemap-categories.xml
-Sitemap: https://www.bhssupplies.com/sitemap-brands.xml
-Sitemap: https://www.bhssupplies.com/sitemap-static.xml
+Sitemap: http://127.0.0.1:8000/sitemap.xml

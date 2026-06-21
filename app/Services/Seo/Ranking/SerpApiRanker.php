@@ -64,6 +64,8 @@ class SerpApiRanker implements SerpRankerInterface
             }
 
             $results = (array) ($resp->json('organic_results') ?? []);
+            $rawJson = $resp->json();
+            
             foreach ($results as $row) {
                 $link = (string) ($row['link'] ?? '');
                 $position = (int) ($row['position'] ?? 0);
@@ -71,11 +73,11 @@ class SerpApiRanker implements SerpRankerInterface
                     continue;
                 }
                 if (stripos($link, $target) !== false) {
-                    return ['rank' => $position, 'found_url' => $link, 'raw' => null, 'error' => null];
+                    return ['rank' => $position, 'found_url' => $link, 'raw' => $rawJson, 'error' => null];
                 }
             }
 
-            return ['rank' => 0, 'found_url' => null, 'raw' => null, 'error' => null];
+            return ['rank' => 0, 'found_url' => null, 'raw' => $rawJson, 'error' => null];
         } catch (Throwable $e) {
             return ['rank' => null, 'found_url' => null, 'raw' => null, 'error' => $e->getMessage()];
         }

@@ -16,7 +16,14 @@ class SeoKeyword extends Model
         'history'         => 'array',
         'cpc_usd'         => 'float',
         'difficulty'      => 'float',
+        'search_volume'   => 'integer',
+        'serp_features'   => 'array',
     ];
+
+    public function competitors()
+    {
+        return $this->hasMany(SeoKeywordCompetitor::class);
+    }
 
     public function recordRank(int $rank): void
     {

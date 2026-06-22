@@ -1245,22 +1245,41 @@
                                 <th>{{ translate('URL') }}</th>
                                 <th>{{ translate('Type') }}</th>
                                 <th>{{ translate('Score') }}</th>
-                                <th>{{ translate('Missing') }}</th>
+                                <th>{{ translate('Failing Checks') }}</th>
                             </tr>
                         </thead>
                         <tbody>
                             @forelse(($urlInventory['pending'] ?? collect()) as $row)
+                                @php
+                                    $scoreColor = $row['score'] >= 60 ? 'warning' : 'danger';
+                                    $failingIssues = array_slice($row['issues'] ?? [], 0, 4);
+                                @endphp
                                 <tr>
                                     <td class="text-truncate" style="max-width:240px;">
-                                        <a href="{{ $row['url'] }}" target="_blank" class="small">{{ $row['title'] }}</a>
+                                        <a href="{{ $row['url'] }}" target="_blank" class="small font-weight-600">{{ $row['title'] }}</a>
                                         <span class="d-block text-muted small">{{ $row['url'] }}</span>
                                     </td>
                                     <td><span class="badge badge-soft-warning">{{ ucfirst($row['type']) }}</span></td>
-                                    <td><span class="badge badge-{{ $row['score'] >= 50 ? 'warning' : 'danger' }}">{{ $row['score'] }}/100</span></td>
-                                    <td class="small text-muted">
-                                        @if(!$row['has_meta']) {{ translate('Meta') }} @endif
-                                        @if(!$row['has_focus_kw']) <span class="d-block">{{ translate('Focus keyword') }}</span> @endif
-                                        @if(!$row['has_schema']) <span class="d-block">{{ translate('Schema') }}</span> @endif
+                                    <td>
+                                        <span class="badge badge-{{ $scoreColor }}">{{ $row['score'] }}/100</span>
+                                        @php
+                                            $pointsLeft = 80 - $row['score'];
+                                        @endphp
+                                        @if($pointsLeft > 0)
+                                            <span class="d-block text-muted" style="font-size:.7rem;">+{{ $pointsLeft }} to done</span>
+                                        @endif
+                                    </td>
+                                    <td class="small">
+                                        @forelse($failingIssues as $issue)
+                                            <span class="d-block text-danger" style="font-size:.75rem;">
+                                                <i class="las la-times-circle"></i> {{ $issue }}
+                                            </span>
+                                        @empty
+                                            <span class="text-muted">—</span>
+                                        @endforelse
+                                        @if(count($row['issues'] ?? []) > 4)
+                                            <span class="text-muted" style="font-size:.7rem;">+{{ count($row['issues']) - 4 }} more</span>
+                                        @endif
                                     </td>
                                 </tr>
                             @empty

@@ -23,9 +23,18 @@
     <meta name="twitter:title" content="{{ $blog->meta_title }}">
     <meta name="twitter:description" content="{{ $blog->meta_description }}">
     <meta name="twitter:image" content="{{ uploaded_asset($blog->meta_img) }}">
+
+    @if(!empty($blog->seoMeta?->canonical_url))
+        <link rel="canonical" href="{{ $blog->seoMeta->canonical_url }}" />
+    @endif
 @endsection
 
 @section('structured_data')
+@if(!empty($blog->seoMeta?->schema_json))
+<script type="application/ld+json">
+{!! $blog->seoMeta->schema_json !!}
+</script>
+@else
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -93,6 +102,7 @@
   ]
 }
 </script>
+@endif
 @endsection
 
 @section('content')

@@ -2077,6 +2077,18 @@ class SeoSuiteController extends Controller
 
         return view('backend.seo_suite.core_web_vitals', compact('vitals'));
     }
+    // ──────────────────────────────────────────────────────────────────────────
+    // Link Assistant
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function runAutoLinker()
+    {
+        \Illuminate\Support\Facades\Artisan::call('seo:auto-linker');
+        $output = \Illuminate\Support\Facades\Artisan::output();
+        
+        flash(translate('Auto-Linker completed.') . ' ' . $output)->success();
+        return back();
+    }
 
     // ──────────────────────────────────────────────────────────────────────────
     // Predictive Traffic & ROI Forecasting
@@ -2085,6 +2097,7 @@ class SeoSuiteController extends Controller
     public function predictiveTraffic()
     {
         $forecasts = collect();
+        $anomalies = collect();
 
         if (\Illuminate\Support\Facades\Schema::hasTable('seo_analytics')) {
             // Get top performing keywords from GSC
@@ -2125,14 +2138,44 @@ class SeoSuiteController extends Controller
                 ->sortByDesc('impressions')
                 ->take(50);
 
-            // Calculate forecast
+            // Calculate forecast & detect anomalies
             // Assuming moving up 3 positions or reaching top 3 increases CTR
             foreach ($gscData as $data) {
-                if ($data['position'] <= 1 || $data['impressions'] < 50) continue;
+                if ($data['impressions'] < 50) continue;
 
                 $currentCtr = $data['ctr'] / 100;
+                $roundedPos = max(1, round($data['position']));
                 
-                // Simplified CTR curve model for top 10 positions
+                // Standard CTR curve for anomaly detection
+                $expectedCtr = match($roundedPos) {
+                    1.0 => 0.31,
+                    2.0 => 0.15,
+                    3.0 => 0.10,
+                    4.0 => 0.07,
+                    5.0 => 0.05,
+                    6.0 => 0.04,
+                    7.0 => 0.03,
+                    8.0 => 0.02,
+                    9.0 => 0.015,
+                    10.0 => 0.01,
+                    default => 0.005
+                };
+
+                // Anomaly Detection: If actual CTR is significantly lower than expected for top 10 rankings
+                if ($roundedPos <= 10 && $currentCtr < ($expectedCtr * 0.5)) {
+                    $anomalies->push([
+                        'query' => $data['query'],
+                        'page' => $data['page'],
+                        'position' => $roundedPos,
+                        'actual_ctr' => $currentCtr * 100,
+                        'expected_ctr' => $expectedCtr * 100,
+                        'missed_clicks' => round($data['impressions'] * ($expectedCtr - $currentCtr))
+                    ]);
+                }
+
+                if ($data['position'] <= 1) continue;
+                
+                // Simplified CTR curve model for forecasting
                 $targetPosition = max(1, round($data['position']) - 3);
                 $targetCtr = match($targetPosition) {
                     1.0 => 0.31,
@@ -2172,9 +2215,10 @@ class SeoSuiteController extends Controller
             }
 
             $forecasts = $forecasts->sortByDesc('potential_gain')->values();
+            $anomalies = $anomalies->sortByDesc('missed_clicks')->values();
         }
 
-        return view('backend.seo_suite.predictive_traffic', compact('forecasts'));
+        return view('backend.seo_suite.predictive_traffic', compact('forecasts', 'anomalies'));
     }
 
     // ──────────────────────────────────────────────────────────────────────────

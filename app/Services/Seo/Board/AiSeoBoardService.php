@@ -1031,7 +1031,8 @@ class AiSeoBoardService
                 $providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')),
                 $name,
                 $desc,
-                $type
+                $type,
+                $meta['analysis_checks']['target_competitor_domain'] ?? null
             );
         } else {
             $bundle = ['data' => [], 'tried' => [], 'attempt_details' => [], 'provider' => null];
@@ -2184,7 +2185,7 @@ class AiSeoBoardService
      * SEO writers. Weak/partial JSON is repaired once, but empty or unusable
      * output moves to the next provider automatically.
      */
-    protected function askBestAiForSeoBundle(?string $preferredProvider, string $name, string $description, string $type): array
+    protected function askBestAiForSeoBundle(?string $preferredProvider, string $name, string $description, string $type, ?string $competitorDomain = null): array
     {
         $tried = [];
         $attemptDetails = [];
@@ -2204,7 +2205,7 @@ class AiSeoBoardService
             $actualName = method_exists($ai, 'getName') ? $ai->getName() : $providerName;
             $startedAt = microtime(true);
             try {
-                $data = $this->askAiForSeoBundle($ai, $name, $description, $type);
+                $data = $this->askAiForSeoBundle($ai, $name, $description, $type, $competitorDomain);
             } catch (\Throwable $e) {
                 logger()->error('AI SEO provider failed', [
                     'provider' => $actualName,
@@ -2330,7 +2331,7 @@ class AiSeoBoardService
         return $data;
     }
 
-    protected function askAiForSeoBundle($ai, string $name, string $description, string $type): ?array
+    protected function askAiForSeoBundle($ai, string $name, string $description, string $type, ?string $competitorDomain = null): ?array
     {
         $siteName = get_setting('website_name', config('app.name'));
         $entityLabel = $this->typeMap[$type]['label'];
@@ -2349,26 +2350,34 @@ class AiSeoBoardService
             default => 'Use search intent and Canada-focused commercial relevance.',
         };
 
-        $systemPrompt = 'You are an expert SEO copywriter. Output ONLY valid JSON, no markdown, no code fences, no extra commentary.';
+        $systemPrompt = 'You are an elite SEO and Semantic Entity expert. Output ONLY valid JSON, no markdown, no code fences, no extra commentary.';
+
+        $competitorGapPrompt = $competitorDomain 
+            ? "CRITICAL COMPETITOR GAP ANALYSIS: You are currently being outranked by {$competitorDomain} for this keyword. Perform an entity extraction on what they likely cover. You MUST aggressively inject those missing semantic entities into this new content to overtake them.\n"
+            : "";
 
         $prompt = "Generate advanced Canada-focused SEO for an ecommerce {$entityLabel} on {$siteName}.\n"
             . "Name: \"{$name}\"\n"
             . ($description ? "Details: \"" . Str::limit($description, 400) . "\"\n" : '')
             . "Algorithm: {$strategy}\n"
+            . $competitorGapPrompt
             . "Local priority: primary targets are Mississauga, Brampton, Toronto, GTA, Ontario, Canada. Include Trade Account and Leave a Review intent only where natural.\n"
             . "Focus keyword rules: the focus_keyword MUST be a short 2-4 word head term buyers actually type (brand + product type, e.g. \"knipex diagonal cutters\"). NEVER include sizes, dimensions, voltages, inch marks, or model numbers in it.\n"
+            . "Semantic SEO & Entity Rules (STRICT):\n"
+            . "  - You must utilize Latent Semantic Indexing (LSI). Do not just repeat the focus keyword; naturally weave in deeply related topical entities (e.g., if selling 'safety boots', mention 'steel toe', 'slip resistant', 'CSA approved', 'workplace safety standards').\n"
+            . "  - Analyze the user intent and provide comprehensive information that answers 'People Also Ask' questions directly in the content body.\n"
             . "Keyword distribution rules (STRICT):\n"
             . "  - Title MUST start with the exact focus keyword (first 4 words). Include one power word (Best/Top/Trusted/Wholesale/Certified) and the year 2026. Keep 50-60 chars.\n"
-            . "  - Meta description: 150-160 chars EXACTLY, NEVER under 150. Must contain focus keyword AND at least one secondary keyword AND a clear CTA.\n"
+            . "  - Meta description: 150-160 chars EXACTLY, NEVER under 150. Must contain focus keyword AND at least one secondary LSI keyword AND a clear CTA.\n"
             . "  - Content: focus keyword must appear in at least one <h2> AND 5-8 times in the body (≈1% density — never stuffed).\n"
             . "  - Content MUST have at least 3 <h2> subheadings and 500+ words total.\n"
-            . "  - At least 2 secondary keywords must appear naturally in the content body.\n"
+            . "  - At least 4 distinct secondary/LSI keywords must appear naturally in the content body.\n"
             . "Writing style: short sentences under 20 words. Active voice only. Positive, benefit-driven tone. No fluff or filler paragraphs.\n"
             . $competitorContext
             . $this->keywordTargetingContext($type . ':' . $name)
             . "Also return 4-6 genuine FAQs (question + answer) that match real Canadian buyer questions — specific, useful answers only.\n"
             . "Return ONLY this JSON shape with no other text:\n"
-            . '{"title":"SEO title 50-60 chars, STARTS with focus keyword, power word + 2026","description":"meta description 150-160 chars EXACTLY, focus keyword + 1 secondary keyword + CTA","focus_keyword":"2-4 word head keyword, no sizes/model numbers","secondary_keywords":["keyword 1","keyword 2","keyword 3","keyword 4","keyword 5","keyword 6","keyword 7"],"'.$contentField.'":"clean HTML; 500+ words; 3+ <h2> sections; focus keyword in first <h2> and 5-8x in body; 2+ secondary keywords woven in; short active sentences; Canada GTA buyer intent","faqs":[{"question":"...","answer":"..."}]}';
+            . '{"title":"SEO title 50-60 chars, STARTS with focus keyword, power word + 2026","description":"meta description 150-160 chars EXACTLY, focus keyword + 1 secondary LSI keyword + CTA","focus_keyword":"2-4 word head keyword, no sizes/model numbers","secondary_keywords":["LSI keyword 1","LSI keyword 2","Entity 3","Entity 4","LSI 5"],"'.$contentField.'":"clean HTML; 500+ words; 3+ <h2> sections; focus keyword in first <h2> and 5-8x in body; 4+ secondary LSI keywords woven in; answers PAA questions; short active sentences; Canada GTA buyer intent","faqs":[{"question":"...","answer":"..."}]}';
 
         try {
             $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 2400]);
@@ -2440,6 +2449,13 @@ class AiSeoBoardService
             }
         } elseif ($type === 'page' && Schema::hasColumn($table, 'content') && $this->needsSeoContentRefresh($entity->content ?? null, $meta, 300)) {
             $patch['content'] = $this->mergeSeoHtml($entity->content ?? null, $html, $meta, $entity, $type);
+        } elseif ($type === 'blog') {
+            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 300)) {
+                $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta, $entity, $type);
+            }
+            if (Schema::hasColumn($table, 'short_description') && $this->isBlank($entity->short_description ?? null)) {
+                $patch['short_description'] = $this->shortSeoText($name, $type, $meta);
+            }
         }
 
         return $patch;

@@ -323,6 +323,13 @@ class AiAutoFixSeoJob implements ShouldQueue
             logger()->warning('SEO post-action sitemap refresh failed', ['batch' => $batch->id, 'err' => $e->getMessage()]);
         }
 
+        try {
+            \Illuminate\Support\Facades\Artisan::call('seo:auto-linker');
+        } catch (Throwable $e) {
+            $batch->appendError('Post-action auto-linker failed: ' . $e->getMessage());
+            logger()->warning('SEO post-action auto-linker failed', ['batch' => $batch->id, 'err' => $e->getMessage()]);
+        }
+
         if ((int) get_setting('seo_auto_indexnow', 0) !== 1) {
             return;
         }

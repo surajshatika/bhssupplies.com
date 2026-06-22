@@ -436,6 +436,7 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         // Link Assistant
         Route::match(['get','post'], '/seo-suite/link-assistant', 'linkAssistant')->name('admin.seo-suite.link_assistant');
         Route::post('/seo-suite/link-assistant/draft', 'draftOutreachEmail')->name('admin.seo-suite.link_assistant.draft');
+        Route::post('/seo-suite/run-auto-linker', 'runAutoLinker')->name('admin.seo-suite.run_auto_linker');
     });
 
     Route::controller(OnPageSeoController::class)->group(function () {

@@ -49,7 +49,6 @@
 
             <hr>
 
-            {{-- Resource Hints --}}
             <div class="form-group row">
                 <div class="col-md-3">
                     <label class="col-form-label">
@@ -60,6 +59,51 @@
                     <textarea name="perf_preconnect_domains" rows="4" class="form-control" placeholder="https://fonts.googleapis.com&#10;https://connect.facebook.net">{{ get_setting('perf_preconnect_domains') }}</textarea>
                     <small class="form-text text-muted">
                         {{ translate('Enter one domain per line (e.g. https://fonts.googleapis.com). The system will inject <link rel="preconnect"> and <link rel="dns-prefetch"> tags to reduce connection setup latency for external resources.') }}
+                    </small>
+                </div>
+            </div>
+
+            <hr>
+
+            {{-- Delay JS Execution --}}
+            <div class="form-group row">
+                <div class="col-md-3">
+                    <label class="col-form-label">
+                        {{ translate('Delay JavaScript Execution') }}
+                        <div class="text-muted small">{{ translate('Boosts Mobile PageSpeed score') }}</div>
+                    </label>
+                </div>
+                <div class="col-md-9">
+                    <label class="aiz-switch aiz-switch-success mb-0">
+                        <input type="checkbox" name="perf_delay_js_status" value="1" @if(get_setting('perf_delay_js_status') == 1) checked @endif>
+                        <span class="slider round"></span>
+                    </label>
+                    <small class="form-text text-muted">
+                        {{ translate('Delays the loading of non-critical JavaScript until user interaction (scroll, click, mousemove). This drastically improves Time to Interactive (TTI) and Total Blocking Time (TBT) on Google PageSpeed Insights.') }}
+                    </small>
+                    <div class="mt-2">
+                        <textarea name="perf_delay_js_exclusions" rows="2" class="form-control" placeholder="jquery.min.js&#10;main.js">{{ get_setting('perf_delay_js_exclusions') }}</textarea>
+                        <small class="form-text text-muted">{{ translate('Excluded scripts (one keyword or filename per line). These will NOT be delayed.') }}</small>
+                    </div>
+                </div>
+            </div>
+
+            <hr>
+
+            {{-- Defer CSS --}}
+            <div class="form-group row">
+                <div class="col-md-3">
+                    <label class="col-form-label">
+                        {{ translate('Defer Non-Critical CSS') }}
+                    </label>
+                </div>
+                <div class="col-md-9">
+                    <label class="aiz-switch aiz-switch-success mb-0">
+                        <input type="checkbox" name="perf_defer_css_status" value="1" @if(get_setting('perf_defer_css_status') == 1) checked @endif>
+                        <span class="slider round"></span>
+                    </label>
+                    <small class="form-text text-muted">
+                        {{ translate('Applies the media="print" technique to defer stylesheets so they do not block the initial page render.') }}
                     </small>
                 </div>
             </div>

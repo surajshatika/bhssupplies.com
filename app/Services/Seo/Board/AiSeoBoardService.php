@@ -1590,7 +1590,11 @@ class AiSeoBoardService
 
     protected function shouldRollbackSeoMutation(array $before, array $after): bool
     {
-        return (int) ($after['score'] ?? 0) < (int) ($before['score'] ?? 0);
+        // Only rollback on a meaningful regression (>5 points). A 1-2 point drop
+        // often happens when AI adds content that temporarily shifts keyword density —
+        // rolling back on any regression wastes the AI call and blocks improvement.
+        $drop = (int) ($before['score'] ?? 0) - (int) ($after['score'] ?? 0);
+        return $drop > 5;
     }
 
     protected function mutationSnapshot(Model $entity, string $type): array
@@ -2432,7 +2436,7 @@ class AiSeoBoardService
         $patch = [];
 
         if ($type === 'product') {
-            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 300)) {
+            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 500)) {
                 $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta, $entity, $type);
             }
             // Short summary fields are filled once when empty, never refreshed on a
@@ -2444,13 +2448,13 @@ class AiSeoBoardService
             if (Schema::hasColumn($table, 'top_description') && $this->isBlank($entity->top_description ?? null)) {
                 $patch['top_description'] = $this->categoryIntroHtml($name, $meta);
             }
-            if (Schema::hasColumn($table, 'bottom_description') && $this->needsSeoContentRefresh($entity->bottom_description ?? null, $meta, 300)) {
+            if (Schema::hasColumn($table, 'bottom_description') && $this->needsSeoContentRefresh($entity->bottom_description ?? null, $meta, 500)) {
                 $patch['bottom_description'] = $this->mergeSeoHtml($entity->bottom_description ?? null, $html, $meta, $entity, $type);
             }
-        } elseif ($type === 'page' && Schema::hasColumn($table, 'content') && $this->needsSeoContentRefresh($entity->content ?? null, $meta, 300)) {
+        } elseif ($type === 'page' && Schema::hasColumn($table, 'content') && $this->needsSeoContentRefresh($entity->content ?? null, $meta, 500)) {
             $patch['content'] = $this->mergeSeoHtml($entity->content ?? null, $html, $meta, $entity, $type);
         } elseif ($type === 'blog') {
-            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 300)) {
+            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 500)) {
                 $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta, $entity, $type);
             }
             if (Schema::hasColumn($table, 'short_description') && $this->isBlank($entity->short_description ?? null)) {
@@ -2477,12 +2481,18 @@ class AiSeoBoardService
         }
 
         // Already SEO-processed once (has injected context links), meets the word
-        // target AND still carries the current focus keyword → treat as done.
-        // The focus condition matters: when the keyword is regenerated (e.g. a
-        // verbose spec name shortened to a head term), the old injected block no
-        // longer matches and must be refreshed — mergeSeoHtml swaps it in place.
+        // target AND still carries the current focus keyword → treat as done ONLY
+        // when it also has proper heading structure and FAQ content, otherwise it
+        // will still fail the has_multiple_h2 (w=4) and has_faq (w=6) scoring checks.
+        $h2Count = $html !== '' ? preg_match_all('/<h2[\s>]/i', $html) : 0;
+        $hasFaq  = $html !== ''
+            && (preg_match('/<h[2-4][^>]*>\s*(frequently asked|faq|common question)/i', $html)
+                || preg_match('/frequently asked questions|FAQ/i', $plain)
+                || preg_match_all('/[^\.\?]{10,}\?/u', $plain) >= 2);
         if (str_contains($html, 'data-seo-context-links')
             && ($focus === '' || mb_stripos($plain, $focus) !== false)
+            && $h2Count >= 3
+            && $hasFaq
         ) {
             return false;
         }
@@ -2513,10 +2523,16 @@ class AiSeoBoardService
         // Idempotency guard: once SEO content has been injected (marker present),
         // never prepend the generated block again — otherwise the description
         // doubles in size on every autopilot batch. When the focus keyword has
-        // CHANGED since injection (old block no longer matches), excise the old
-        // injected block and swap in the regenerated one instead of stacking.
+        // CHANGED, or heading structure/FAQ is still missing, regenerate instead.
         if (str_contains($current, 'data-seo-context-links')) {
-            if ($focus === '' || mb_stripos($plain, $focus) !== false) {
+            $mergeH2Count = preg_match_all('/<h2[\s>]/i', $current);
+            $mergeFaq     = preg_match('/<h[2-4][^>]*>\s*(frequently asked|faq|common question)/i', $current)
+                || preg_match('/frequently asked questions|FAQ/i', $plain)
+                || preg_match_all('/[^\.\?]{10,}\?/u', $plain) >= 2;
+            if (($focus === '' || mb_stripos($plain, $focus) !== false)
+                && $mergeH2Count >= 3
+                && $mergeFaq
+            ) {
                 return $current;
             }
 
@@ -2889,6 +2905,28 @@ class AiSeoBoardService
             }
         }
 
+        // Even when meta is complete, check content-level scoring signals that
+        // still keep the score below 80: 500+ word check (w=8), 3 H2s (w=4), FAQ (w=6).
+        // Without this, entities with short/thin content get source='complete' and
+        // never receive a billable AI call — stuck below DONE score forever.
+        $rawHtml = trim((string) $this->rawContent($entity, $type));
+        if ($rawHtml !== '') {
+            $wordCount = str_word_count(strip_tags($rawHtml));
+            if ($wordCount < 500) {
+                return true;
+            }
+            if (preg_match_all('/<h2[\s>]/i', $rawHtml) < 3) {
+                return true;
+            }
+            $plainCheck = trim(preg_replace('/\s+/', ' ', strip_tags($rawHtml)));
+            $hasFaqCheck = preg_match('/<h[2-4][^>]*>\s*(frequently asked|faq|common question)/i', $rawHtml)
+                || preg_match('/frequently asked questions|FAQ/i', $plainCheck)
+                || preg_match_all('/[^\.\?]{10,}\?/u', $plainCheck) >= 2;
+            if (!$hasFaqCheck) {
+                return true;
+            }
+        }
+
         return $this->autopilotContentNeedsWork($entity, $type, $meta);
     }
 
@@ -2903,10 +2941,12 @@ class AiSeoBoardService
         $table = $entity->getTable();
 
         [$field, $minWords] = match ($type) {
-            'product'  => ['description', 300],
-            'category' => ['bottom_description', 300],
-            'page'     => ['content', 300],
-            'blog'     => ['description', 300],
+            // 500 words aligns with the TruSEO content_length_500 scoring check (weight 8).
+            // 300 was too low — content at 350 words was "done" to autopilot but still failing scoring.
+            'product'  => ['description', 500],
+            'category' => ['bottom_description', 500],
+            'page'     => ['content', 500],
+            'blog'     => ['description', 500],
             default    => [null, 0],
         };
 
@@ -2946,8 +2986,10 @@ class AiSeoBoardService
         $value = trim((string) $value);
         $len = mb_strlen($value);
 
+        // Min is 140 to match TruSEO desc_length scoring check (140–160 chars).
+        // Using 120 caused descriptions 120–139 chars to never refresh but always fail scoring.
         return $value === ''
-            || $len < 120
+            || $len < 140
             || $len > 160
             || ($focus !== '' && mb_stripos($value, $focus) === false);
     }

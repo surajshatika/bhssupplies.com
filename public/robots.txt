@@ -4,8 +4,4 @@ Disallow: /admin/
 Disallow: /checkout/
 Disallow: /cart/
 Disallow: /compare/
-<<<<<<< HEAD
 Sitemap: https://www.bhssupplies.com/sitemap.xml
-=======
-Sitemap: http://127.0.0.1:8000/sitemap.xml
->>>>>>> 7169239ef9fda1bbcf6e37d9bdd7801dec37f971

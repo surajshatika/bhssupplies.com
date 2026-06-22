@@ -348,6 +348,8 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         // Dashboard & Run
         Route::get('/seo-suite',             'index')->name('admin.seo-suite.index');
         Route::post('/seo-suite/run',        'run')->name('admin.seo-suite.run');
+        Route::get('/seo-suite/run/{id}', 'showRun')->name('admin.seo-suite.run.show');
+        Route::get('/seo-suite/live-sync', 'liveDashboardSync')->name('admin.seo-suite.live_sync');
         Route::post('/seo-suite/bulk-pending','bulkOptimizePendingUrls')->name('admin.seo-suite.bulk_pending');
         Route::post('/seo-suite/queue/recover','recoverSeoQueue')->middleware('seo.rate')->name('admin.seo-suite.queue.recover');
         Route::post('/seo-suite/gsc/sync',   'syncSearchConsoleNow')->middleware('seo.rate')->name('admin.seo-suite.gsc.sync');
@@ -433,6 +435,7 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
 
         // Link Assistant
         Route::match(['get','post'], '/seo-suite/link-assistant', 'linkAssistant')->name('admin.seo-suite.link_assistant');
+        Route::post('/seo-suite/link-assistant/draft', 'draftOutreachEmail')->name('admin.seo-suite.link_assistant.draft');
     });
 
     Route::controller(OnPageSeoController::class)->group(function () {

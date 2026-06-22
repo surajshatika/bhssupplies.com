@@ -66,6 +66,13 @@ class SeoSuiteController extends Controller
 
         $settings = $this->loadSettings();
         $advancedDashboard = $this->buildAdvancedDashboard($runs, $histories, $redirects, $settings, $dashboard, $siteSummary);
+        
+        // Prepare historical trend data for charts
+        $historicalScores = $histories->reverse()->values();
+        $chartData = [
+            'dates' => $historicalScores->pluck('recorded_at')->map(fn($date) => \Carbon\Carbon::parse($date)->format('M d'))->toArray(),
+            'scores' => $historicalScores->pluck('score')->toArray(),
+        ];
         $urlInventory = $setupRequired
             ? ['done' => collect(), 'pending' => collect(), 'done_count' => 0, 'pending_count' => 0, 'total_count' => 0]
             : $board->dashboardUrlInventory(10, 12);
@@ -88,8 +95,42 @@ class SeoSuiteController extends Controller
             'urlInventory',
             'autopilot',
             'keywordIntelligence',
-            'automationCoverage'
+            'automationCoverage',
+            'chartData'
         ));
+    }
+
+    public function liveDashboardSync()
+    {
+        if (!$this->seoTablesReady()) {
+            return response()->json(['error' => 'not configured']);
+        }
+
+        $board = app(AiSeoBoardService::class);
+        $siteSummary = $board->siteSummary();
+        $runs = SeoRun::query()->latest()->limit(15)->get();
+        $runsCompleted = $runs->where('status', 'completed')->count();
+        $runsTotal = $runs->count();
+        $successRate = $runsTotal > 0 ? round(($runsCompleted / $runsTotal) * 100) : 0;
+        
+        $histories = SeoScoreHistory::query()->latest('recorded_at')->limit(12)->get();
+        $historicalScores = $histories->reverse()->values();
+        
+        return response()->json([
+            'site_health' => [
+                'done' => $siteSummary['done'] ?? 0,
+                'pending' => $siteSummary['pending'] ?? 0,
+                'critical' => $siteSummary['critical'] ?? 0,
+                'score' => $siteSummary['score'] ?? 0,
+            ],
+            'success_rate' => $successRate,
+            'runs_completed' => $runsCompleted,
+            'runs_total' => $runsTotal,
+            'chart_data' => [
+                'dates' => $historicalScores->pluck('recorded_at')->map(fn($date) => \Carbon\Carbon::parse($date)->format('M d'))->toArray(),
+                'scores' => $historicalScores->pluck('score')->toArray(),
+            ]
+        ]);
     }
 
     public function bulkOptimizePendingUrls(Request $request)
@@ -105,10 +146,10 @@ class SeoSuiteController extends Controller
         ]);
 
         $limit = (int) $request->input('limit', 10);
-        $targets = app(AiSeoBoardService::class)->collectPendingTargetsAcrossTypes($limit, ['page', 'category', 'product']);
+        $targets = app(AiSeoBoardService::class)->collectPendingTargetsAcrossTypes($limit, ['page', 'category', 'product', 'blog']);
 
         if (empty($targets)) {
-            flash(translate('No pending Product, Category, or Page URLs found for SEO generation.'))->warning();
+            flash(translate('No pending Product, Category, Page, or Blog URLs found for SEO generation.'))->warning();
             return redirect()->route('admin.seo-suite.index');
         }
 
@@ -719,6 +760,46 @@ class SeoSuiteController extends Controller
         }
 
         return view('backend.seo_suite.link_assistant', compact('settings', 'result'));
+    }
+
+    public function draftOutreachEmail(Request $request)
+    {
+        $request->validate([
+            'prospect_url' => 'required|url',
+            'target_keyword' => 'required|string',
+            'site_url' => 'required|url'
+        ]);
+
+        $prompt = "You are an expert SEO Outreach Specialist.\n"
+            . "Write a highly personalized, cold outreach email to the webmaster of this prospect URL:\n"
+            . "{$request->prospect_url}\n\n"
+            . "Your goal is to build a backlink for your own page:\n"
+            . "{$request->site_url}\n"
+            . "Which targets the keyword: '{$request->target_keyword}'\n\n"
+            . "Requirements:\n"
+            . "- Use an engaging, non-spammy subject line.\n"
+            . "- Keep it concise, friendly, and professional.\n"
+            . "- Depending on the prospect URL (if it looks like a blog, a resource page, or a directory), adapt your angle (e.g., offer a guest post, a broken link replacement, or a valuable resource addition).\n"
+            . "- Include placeholders for [Name] and [Your Name].\n"
+            . "- Output ONLY the email template (Subject and Body).";
+
+        try {
+            $providerManager = app(SeoProviderManager::class);
+            $providerId = get_setting('seo_suite_default_provider', config('seo.default_provider', 'openai'));
+            $provider = $providerManager->driver($providerId);
+            
+            $draft = $provider->generate($prompt, 'You are an expert SEO Outreach Specialist.');
+            
+            return response()->json([
+                'success' => true,
+                'draft' => trim($draft)
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     // ── Public endpoints ────────────────────────────────────────────────────────
@@ -1443,7 +1524,7 @@ class SeoSuiteController extends Controller
             ->values()
             ->all();
         $nextEstimate = $board->estimateBatchCost($nextTargets, $settings['default_provider'] ?? null);
-        $offpageTargets = $board->offPageCampaignTargetPreview(10, ['page', 'category', 'product']);
+        $offpageTargets = $board->offPageCampaignTargetPreview(10, ['page', 'category', 'product', 'blog']);
         $recentScoreActivity = $this->recentSeoScoreActivity(60, 300);
         $recentScoreChanges = $recentScoreActivity
             ->filter(fn(array $row) => ((int) ($row['delta'] ?? 0) > 0) || !empty($row['seo_done']))
@@ -1736,8 +1817,17 @@ class SeoSuiteController extends Controller
         $provider = get_setting('seo_suite_default_provider', 'openai');
         $llmService = app(\App\Services\Seo\AiSeoProviderFactory::class)->make($provider);
 
-        $prompt = "Act as an expert SEO analyst. Analyze the provided target keyword: '{$keyword}' and the user's page URL: '{$url}'. "
-            . "Identify the top 10 Latent Semantic Indexing (LSI) keywords and NLP entities (people, places, concepts) that top-ranking competitors use for this query. "
+        try {
+            $html = \Illuminate\Support\Facades\Http::timeout(10)->get($url)->body();
+            // Basic strip tags and limit to 10k chars
+            $pageContent = \Illuminate\Support\Str::limit(preg_replace('/\s+/', ' ', strip_tags($html)), 10000);
+        } catch (\Exception $e) {
+            $pageContent = "(Could not fetch URL content. URL: $url)";
+        }
+
+        $prompt = "Act as an expert SEO analyst. Analyze the provided target keyword: '{$keyword}' and the actual text content of the user's page below.\n\n"
+            . "PAGE CONTENT:\n{$pageContent}\n\n"
+            . "Identify the top 10 Latent Semantic Indexing (LSI) keywords and NLP entities (people, places, concepts) that are MISSING from the page content but top-ranking competitors would use for the query '{$keyword}'. "
             . "Provide the output in a JSON array format where each item has 'entity' (string) and 'relevance' (High, Medium, Low).";
 
         try {

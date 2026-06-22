@@ -88,6 +88,7 @@ class PerformanceOptimizerController extends Controller
             'perf_hotlink_protect_status', 'perf_hotlink_allowed_domains',
             'perf_slow_query_status', 'perf_slow_query_threshold_ms',
             'perf_ai_recs_status', 'perf_ai_recs_auto_apply', 'perf_ai_recs_auto_apply_threshold',
+            'perf_speculation_rules_status', 'perf_preconnect_domains', 'perf_localize_scripts_status',
         ];
 
         $failed = [];

@@ -2203,7 +2203,15 @@ class AiSeoBoardService
 
             $actualName = method_exists($ai, 'getName') ? $ai->getName() : $providerName;
             $startedAt = microtime(true);
-            $data = $this->askAiForSeoBundle($ai, $name, $description, $type);
+            try {
+                $data = $this->askAiForSeoBundle($ai, $name, $description, $type);
+            } catch (\Throwable $e) {
+                logger()->error('AI SEO provider failed', [
+                    'provider' => $actualName,
+                    'error' => $e->getMessage(),
+                ]);
+                $data = [];
+            }
             $tried[] = $actualName;
 
             if (empty($data)) {
@@ -2215,10 +2223,10 @@ class AiSeoBoardService
                     $durationMs,
                     $reliability->estimateAttemptCost($actualName)
                 );
-                logger()->info('AI SEO provider returned empty bundle; trying fallback', [
+                logger()->info('AI SEO provider returned empty bundle or threw error; trying fallback', [
                     'provider' => $actualName,
                     'type' => $type,
-                    'name' => Str::limit($name, 80),
+                    'name' => \Illuminate\Support\Str::limit($name, 80),
                 ]);
                 continue;
             }

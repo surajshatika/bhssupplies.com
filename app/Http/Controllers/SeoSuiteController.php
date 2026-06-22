@@ -146,10 +146,10 @@ class SeoSuiteController extends Controller
         ]);
 
         $limit = (int) $request->input('limit', 10);
-        $targets = app(AiSeoBoardService::class)->collectPendingTargetsAcrossTypes($limit, ['page', 'category', 'product']);
+        $targets = app(AiSeoBoardService::class)->collectPendingTargetsAcrossTypes($limit, ['page', 'category', 'product', 'blog']);
 
         if (empty($targets)) {
-            flash(translate('No pending Product, Category, or Page URLs found for SEO generation.'))->warning();
+            flash(translate('No pending Product, Category, Page, or Blog URLs found for SEO generation.'))->warning();
             return redirect()->route('admin.seo-suite.index');
         }
 
@@ -1524,7 +1524,7 @@ class SeoSuiteController extends Controller
             ->values()
             ->all();
         $nextEstimate = $board->estimateBatchCost($nextTargets, $settings['default_provider'] ?? null);
-        $offpageTargets = $board->offPageCampaignTargetPreview(10, ['page', 'category', 'product']);
+        $offpageTargets = $board->offPageCampaignTargetPreview(10, ['page', 'category', 'product', 'blog']);
         $recentScoreActivity = $this->recentSeoScoreActivity(60, 300);
         $recentScoreChanges = $recentScoreActivity
             ->filter(fn(array $row) => ((int) ($row['delta'] ?? 0) > 0) || !empty($row['seo_done']))
@@ -1817,8 +1817,17 @@ class SeoSuiteController extends Controller
         $provider = get_setting('seo_suite_default_provider', 'openai');
         $llmService = app(\App\Services\Seo\AiSeoProviderFactory::class)->make($provider);
 
-        $prompt = "Act as an expert SEO analyst. Analyze the provided target keyword: '{$keyword}' and the user's page URL: '{$url}'. "
-            . "Identify the top 10 Latent Semantic Indexing (LSI) keywords and NLP entities (people, places, concepts) that top-ranking competitors use for this query. "
+        try {
+            $html = \Illuminate\Support\Facades\Http::timeout(10)->get($url)->body();
+            // Basic strip tags and limit to 10k chars
+            $pageContent = \Illuminate\Support\Str::limit(preg_replace('/\s+/', ' ', strip_tags($html)), 10000);
+        } catch (\Exception $e) {
+            $pageContent = "(Could not fetch URL content. URL: $url)";
+        }
+
+        $prompt = "Act as an expert SEO analyst. Analyze the provided target keyword: '{$keyword}' and the actual text content of the user's page below.\n\n"
+            . "PAGE CONTENT:\n{$pageContent}\n\n"
+            . "Identify the top 10 Latent Semantic Indexing (LSI) keywords and NLP entities (people, places, concepts) that are MISSING from the page content but top-ranking competitors would use for the query '{$keyword}'. "
             . "Provide the output in a JSON array format where each item has 'entity' (string) and 'relevance' (High, Medium, Low).";
 
         try {

@@ -59,6 +59,7 @@ class PerformanceOutputMiddleware
 
         $html = $this->injectHead($html, $request, $lcpSrc);
         $html = $this->processImages($html, $lcpSrc);
+        $html = $this->processLocalizedScripts($html);
         $html = $this->processScripts($html);
         $html = $this->processScriptManager($html, $request);
         $html = $this->injectBodyEnd($html);
@@ -124,6 +125,24 @@ class PerformanceOutputMiddleware
         // Force font-display: swap
         if ((int) $this->setting('perf_fonts_swap_status', 0) === 1) {
             $injects[] = $this->fonts->renderFontDisplaySwap();
+        }
+
+        // Preconnect and DNS-Prefetch
+        if ($domains = trim($this->setting('perf_preconnect_domains', ''))) {
+            $domainList = array_filter(array_map('trim', explode("\n", $domains)));
+            foreach ($domainList as $domain) {
+                if ($domain !== '') {
+                    $injects[] = '<link rel="preconnect" href="' . htmlspecialchars($domain, ENT_QUOTES, 'UTF-8') . '" crossorigin>';
+                    $injects[] = '<link rel="dns-prefetch" href="' . htmlspecialchars($domain, ENT_QUOTES, 'UTF-8') . '">';
+                }
+            }
+        }
+
+        // Speculation Rules (Prerendering)
+        if ((int) $this->setting('perf_speculation_rules_status', 0) === 1) {
+            $injects[] = '<script type="speculationrules">
+{"prerender":[{"source":"document","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":["/admin/*","/login","/logout","/cart","/checkout","/api/*"]}}]},"eagerness":"moderate"}]}
+</script>';
         }
 
         if (empty($injects)) return $html;
@@ -233,6 +252,36 @@ class PerformanceOutputMiddleware
         $path   = ltrim((string) ($parsed['path'] ?? ''), '/');
         if ($path === '') return null;
         return public_path($path);
+    }
+
+    // ── Localize 3rd-Party Scripts ───────────────────────────────────
+
+    protected function processLocalizedScripts(string $html): string
+    {
+        if ((int) $this->setting('perf_localize_scripts_status', 0) !== 1) return $html;
+
+        $map = [
+            'https://www.google-analytics.com/analytics.js' => asset('perf/scripts/analytics.js'),
+            'https://connect.facebook.net/en_US/fbevents.js' => asset('perf/scripts/fbevents.js'),
+            'https://www.googletagmanager.com/gtm.js' => asset('perf/scripts/gtm.js'),
+        ];
+
+        return preg_replace_callback('/<script\b([^>]*)>/i', function ($m) use ($map) {
+            $attrs = $m[1];
+            if (!preg_match('/\bsrc\s*=\s*(["\'])([^"\']+)\1/i', $attrs, $sm)) return $m[0];
+            
+            $src = $sm[2];
+            foreach ($map as $remote => $local) {
+                if (str_starts_with($src, $remote)) {
+                    $path = public_path('perf/scripts/' . basename(parse_url($remote, PHP_URL_PATH)));
+                    if ($this->cachedFileExists($path)) {
+                        $attrs = str_replace($src, $local, $attrs);
+                        return '<script' . $attrs . '>';
+                    }
+                }
+            }
+            return $m[0];
+        }, $html);
     }
 
     // ── <script> processing (defer) ──────────────────────────────────
@@ -410,6 +459,9 @@ class PerformanceOutputMiddleware
         if ((int) $this->setting('perf_lcp_preload_status', 0) === 1) return true;
         if ((int) $this->setting('perf_html_minify_status', 0) === 1) return true;
         if (trim($this->setting('perf_critical_css', '')) !== '') return true;
+        if ((int) $this->setting('perf_speculation_rules_status', 0) === 1) return true;
+        if (trim($this->setting('perf_preconnect_domains', '')) !== '') return true;
+        if ((int) $this->setting('perf_localize_scripts_status', 0) === 1) return true;
         return false;
     }
 

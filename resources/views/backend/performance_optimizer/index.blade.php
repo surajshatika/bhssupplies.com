@@ -45,6 +45,7 @@
         'security'   => ['Security Audit',      'las la-shield-alt',     'performance_optimizer.security'],
         'ai'         => ['AI Recommendations',  'las la-robot',          'performance_optimizer.ai.index'],
         'vitals'     => ['Web Vitals',          'las la-chart-line',     'performance_optimizer.vitals'],
+        'advanced'   => ['Advanced',            'las la-cogs',           'performance_optimizer.index'],
     ];
 
     // AI tab pending-count badge (graceful if model not yet present)
@@ -189,7 +190,8 @@
     ──────────────────────────────────────────────────────────────── --}}
     <div class="perf-tab-bar">
         @foreach($perfTabs as $k => $t)
-            <a href="{{ route($t[2]) }}" class="perf-tab {{ $tab === $k ? 'active' : '' }}">
+            @php $routeUrl = $t[2] === 'performance_optimizer.index' ? route('performance_optimizer.index', ['tab' => $k]) : route($t[2]); @endphp
+            <a href="{{ $routeUrl }}" class="perf-tab {{ $tab === $k ? 'active' : '' }}">
                 <i class="{{ $t[1] }}"></i>
                 <span>{{ translate($t[0]) }}</span>
                 @if($k === 'logs' && $g_err_log_count > 0)

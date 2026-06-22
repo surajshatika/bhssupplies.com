@@ -257,7 +257,7 @@ class CssJsMinifierService
 (function(){
     var delayed = [];
     var fired   = false;
-    document.querySelectorAll('script[type="text/perf-delay"]').forEach(function(node){
+    document.querySelectorAll('script[type="text/delayed-script"]').forEach(function(node){
         var attrs = [];
         Array.prototype.forEach.call(node.attributes, function(attr){
             if (attr.name !== 'type' && attr.name !== 'data-perf-delay' && attr.name !== 'src') {

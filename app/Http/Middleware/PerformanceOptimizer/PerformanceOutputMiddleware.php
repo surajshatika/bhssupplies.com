@@ -61,6 +61,7 @@ class PerformanceOutputMiddleware
         $html = $this->processImages($html, $lcpSrc);
         $html = $this->processLocalizedScripts($html);
         $html = $this->processScripts($html);
+        $html = $this->processStylesheets($html);
         $html = $this->processScriptManager($html, $request);
         $html = $this->injectBodyEnd($html);
         $html = $this->minifyHtml($html);
@@ -284,32 +285,72 @@ class PerformanceOutputMiddleware
         }, $html);
     }
 
-    // ── <script> processing (defer) ──────────────────────────────────
+    // ── <script> processing (defer & delay) ──────────────────────────
 
     protected function processScripts(string $html): string
     {
-        if ((int) $this->setting('perf_js_defer_status', 0) !== 1) return $html;
+        $defer = (int) $this->setting('perf_js_defer_status', 0) === 1;
+        $delay = (int) $this->setting('perf_js_delay_status', 0) === 1;
 
-        // Safety baseline: never defer scripts that ship jQuery or the AIZ core,
+        if (!$defer && !$delay) return $html;
+
+        // Safety baseline: never defer or delay scripts that ship jQuery or the AIZ core,
         // because the layout has inline <script> blocks that call $() / AIZ.* at parse time.
-        // Deferring these breaks home-section AJAX loaders, infinite scroll, modals, etc.
+        // Delaying these breaks home-section AJAX loaders, infinite scroll, modals, etc.
         $defaultExcludes = ['jquery', 'vendors.js', 'aiz-core', 'bootstrap', 'slick', 'checkout', 'stripe', 'recaptcha', 'firebase'];
-        $userExcludes    = array_filter(array_map('trim', explode("\n", $this->setting('perf_js_defer_exclude', ''))));
-        $excludes        = array_values(array_unique(array_merge($defaultExcludes, $userExcludes)));
+        
+        $userExcludes = array_filter(array_map('trim', explode("\n", $this->setting('perf_js_defer_exclude', ''))));
+        if ($delay) {
+            $userExcludes = array_merge($userExcludes, array_filter(array_map('trim', explode("\n", $this->setting('perf_delay_js_exclusions', '')))));
+        }
+        
+        $excludes = array_values(array_unique(array_merge($defaultExcludes, $userExcludes)));
 
-        return preg_replace_callback('/<script\b([^>]*)>/i', function ($m) use ($excludes) {
+        return preg_replace_callback('/<script\b([^>]*)>/i', function ($m) use ($excludes, $defer, $delay) {
             $attrs = $m[1];
 
-            // Already has defer / async / module
-            if (preg_match('/\b(defer|async|type\s*=\s*["\']?module)\b/i', $attrs)) return $m[0];
-            // Skip inline (no src) — too risky to defer
+            // Already has type="text/delayed-script" or type="module"
+            if (preg_match('/\btype\s*=\s*["\']?(text\/delayed-script|module)["\']?/i', $attrs)) return $m[0];
+            
+            // Skip inline (no src) — too risky to defer/delay globally
             if (!preg_match('/\bsrc\s*=\s*(["\'])([^"\']+)\1/i', $attrs, $sm)) return $m[0];
 
             $src = $sm[2];
             foreach ($excludes as $ex) {
                 if ($ex !== '' && stripos($src, $ex) !== false) return $m[0];
             }
+            
+            if ($delay) {
+                // Remove existing type if any, and add our delayed type
+                $attrs = preg_replace('/\btype\s*=\s*["\']?[^"\']*["\']?/i', '', $attrs);
+                return '<script type="text/delayed-script"' . $attrs . '>';
+            }
+
+            // Already has defer or async
+            if (preg_match('/\b(defer|async)\b/i', $attrs)) return $m[0];
+            
             return '<script defer' . $attrs . '>';
+        }, $html);
+    }
+
+    // ── <link> processing (defer css) ────────────────────────────────
+
+    protected function processStylesheets(string $html): string
+    {
+        if ((int) $this->setting('perf_defer_css_status', 0) !== 1) return $html;
+
+        return preg_replace_callback('/<link\b([^>]*)>/i', function ($m) {
+            $attrs = $m[1];
+            
+            // Only process stylesheet links
+            if (!preg_match('/\brel\s*=\s*["\']stylesheet["\']/i', $attrs)) return $m[0];
+            
+            // Skip if already deferred or if it's meant to be print media
+            if (preg_match('/\bmedia\s*=\s*["\']print["\']/i', $attrs)) return $m[0];
+            if (preg_match('/\bonload\s*=/i', $attrs)) return $m[0];
+
+            // Add the media="print" onload trick
+            return '<link' . $attrs . ' media="print" onload="this.media=\'all\'"><noscript><link' . $attrs . '></noscript>';
         }, $html);
     }
 
@@ -454,6 +495,7 @@ class PerformanceOutputMiddleware
         if ((int) $this->setting('perf_fonts_swap_status', 0) === 1) return true;
         if ((int) $this->setting('perf_js_defer_status', 0) === 1) return true;
         if ((int) $this->setting('perf_js_delay_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_defer_css_status', 0) === 1) return true;
         if ((int) $this->setting('perf_script_manager_status', 0) === 1) return true;
         if ((int) $this->setting('perf_vitals_collect_status', 0) === 1) return true;
         if ((int) $this->setting('perf_lcp_preload_status', 0) === 1) return true;

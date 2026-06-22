@@ -105,6 +105,20 @@ class Kernel extends ConsoleKernel
             ->runInBackground()
             ->appendOutputTo(storage_path('logs/seo-ranks.log'));
 
+        // SEO — Evergreen Auto-Improver loop (05:00)
+        $schedule->command('seo:evergreen-loop')
+            ->dailyAt('05:00')
+            ->withoutOverlapping(10)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/seo-evergreen-loop.log'));
+
+        // SEO — Cannibalization Resolver (weekly on Sunday 05:30)
+        $schedule->command('seo:resolve-cannibalization')
+            ->weeklyOn(0, '05:30')
+            ->withoutOverlapping(10)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/seo-cannibalization.log'));
+
         // SEO — PageSpeed Insights audit, twice daily (06:00 + 18:00)
         $schedule->command('seo:pagespeed --strategy=mobile')
             ->twiceDaily(6, 18)

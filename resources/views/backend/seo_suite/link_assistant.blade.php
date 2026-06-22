@@ -19,7 +19,7 @@
 
 <div class="row">
     <div class="col-lg-4">
-        <div class="card">
+        <div class="card mb-4">
             <div class="card-header"><h6 class="mb-0">{{ translate('Find Link Opportunities') }}</h6></div>
             <div class="card-body">
                 <form action="{{ route('admin.seo-suite.link_assistant') }}" method="POST">
@@ -45,6 +45,21 @@
                         </select>
                     </div>
                     <button class="btn btn-primary w-100"><i class="las la-search mr-1"></i>{{ translate('Find Opportunities') }}</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card border-left-success shadow-sm">
+            <div class="card-header border-bottom-0 bg-soft-success">
+                <h6 class="mb-0 text-success"><i class="las la-magic mr-1"></i> {{ translate('Auto-Linker Engine') }}</h6>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">{{ translate('Automatically scans your products and blogs to inject internal links for your established SEO focus keywords.') }}</p>
+                <form action="{{ route('admin.seo-suite.run_auto_linker') }}" method="POST">
+                    @csrf
+                    <button type="submit" class="btn btn-success w-100 btn-sm">
+                        <i class="las la-play mr-1"></i> {{ translate('Run Auto-Linker Now') }}
+                    </button>
                 </form>
             </div>
         </div>

@@ -95,6 +95,47 @@
             </div>
         </div>
     </div>
+
+    @if(isset($anomalies) && count($anomalies) > 0)
+    <div class="card shadow-sm mb-4 border-left-warning">
+        <div class="card-header border-bottom-0 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0 text-warning"><i class="las la-exclamation-triangle mr-1"></i> {{ translate('CTR Anomalies (Bleeding Traffic)') }}</h6>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>{{ translate('Target Query & Page') }}</th>
+                            <th>{{ translate('Rank') }}</th>
+                            <th>{{ translate('Actual CTR') }}</th>
+                            <th>{{ translate('Expected CTR') }}</th>
+                            <th>{{ translate('Missed Clicks') }}</th>
+                            <th class="text-right">{{ translate('Recommendation') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($anomalies as $anomaly)
+                            <tr>
+                                <td>
+                                    <div class="font-weight-600">{{ $anomaly['query'] }}</div>
+                                    <a href="{{ $anomaly['page'] }}" target="_blank" class="small text-muted text-truncate d-inline-block" style="max-width: 250px;">{{ str_replace(url('/'), '', $anomaly['page']) ?: '/' }}</a>
+                                </td>
+                                <td><span class="badge badge-secondary">{{ $anomaly['position'] }}</span></td>
+                                <td><span class="text-danger font-weight-bold">{{ number_format($anomaly['actual_ctr'], 1) }}%</span></td>
+                                <td><span class="text-success">{{ number_format($anomaly['expected_ctr'], 1) }}%</span></td>
+                                <td><span class="text-danger">~{{ $anomaly['missed_clicks'] }}</span></td>
+                                <td class="text-right">
+                                    <span class="badge badge-soft-warning"><i class="las la-edit"></i> {{ translate('Fix Meta Title/Description') }}</span>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    @endif
 </div>
 @endsection
 

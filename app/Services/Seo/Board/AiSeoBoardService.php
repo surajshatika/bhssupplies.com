@@ -1590,7 +1590,11 @@ class AiSeoBoardService
 
     protected function shouldRollbackSeoMutation(array $before, array $after): bool
     {
-        return (int) ($after['score'] ?? 0) < (int) ($before['score'] ?? 0);
+        // Only rollback on a meaningful regression (>5 points). A 1-2 point drop
+        // often happens when AI adds content that temporarily shifts keyword density —
+        // rolling back on any regression wastes the AI call and blocks improvement.
+        $drop = (int) ($before['score'] ?? 0) - (int) ($after['score'] ?? 0);
+        return $drop > 5;
     }
 
     protected function mutationSnapshot(Model $entity, string $type): array
@@ -2294,10 +2298,14 @@ class AiSeoBoardService
 
     protected function seoBundleHasMinimumQuality(array $data): bool
     {
+        $descLen = mb_strlen(trim((string) ($data['description'] ?? '')));
         return !empty($data['title'])
             && !empty($data['description'])
+            && $descLen >= 140
             && !empty($data['focus_keyword'])
-            && str_word_count(strip_tags((string) ($data['content_html'] ?? ''))) >= 220;
+            // Raised from 220 → 450 to match content_length_500 scoring gate.
+            // Bundles under 450 words get rejected and retried on the next provider.
+            && str_word_count(strip_tags((string) ($data['content_html'] ?? ''))) >= 450;
     }
 
     protected function repairSeoBundle(array $data, string $name, string $type): array
@@ -2312,10 +2320,15 @@ class AiSeoBoardService
             $data['title'] = $this->titleWithFocus($focus, $name, $type);
         }
 
-        if (empty($data['description']) || mb_stripos((string) $data['description'], $focus) === false) {
+        $descVal = trim((string) ($data['description'] ?? ''));
+        $descLen = mb_strlen($descVal);
+        if ($descVal === '' || mb_stripos($descVal, $focus) === false
+            || $descLen < 140 || $descLen > 160
+        ) {
+            // Regenerate when missing, lacks focus keyword, or outside 140–160 scoring window.
             $data['description'] = $this->descriptionWithFocus($focus, $name, $type);
         } else {
-            $data['description'] = $this->fitDescription((string) $data['description']);
+            $data['description'] = $this->fitDescription($descVal);
         }
 
         if (empty($data['secondary_keywords']) || !is_array($data['secondary_keywords'])) {
@@ -2432,7 +2445,7 @@ class AiSeoBoardService
         $patch = [];
 
         if ($type === 'product') {
-            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 300)) {
+            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 500)) {
                 $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta, $entity, $type);
             }
             // Short summary fields are filled once when empty, never refreshed on a
@@ -2444,13 +2457,13 @@ class AiSeoBoardService
             if (Schema::hasColumn($table, 'top_description') && $this->isBlank($entity->top_description ?? null)) {
                 $patch['top_description'] = $this->categoryIntroHtml($name, $meta);
             }
-            if (Schema::hasColumn($table, 'bottom_description') && $this->needsSeoContentRefresh($entity->bottom_description ?? null, $meta, 300)) {
+            if (Schema::hasColumn($table, 'bottom_description') && $this->needsSeoContentRefresh($entity->bottom_description ?? null, $meta, 500)) {
                 $patch['bottom_description'] = $this->mergeSeoHtml($entity->bottom_description ?? null, $html, $meta, $entity, $type);
             }
-        } elseif ($type === 'page' && Schema::hasColumn($table, 'content') && $this->needsSeoContentRefresh($entity->content ?? null, $meta, 300)) {
+        } elseif ($type === 'page' && Schema::hasColumn($table, 'content') && $this->needsSeoContentRefresh($entity->content ?? null, $meta, 500)) {
             $patch['content'] = $this->mergeSeoHtml($entity->content ?? null, $html, $meta, $entity, $type);
         } elseif ($type === 'blog') {
-            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 300)) {
+            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 500)) {
                 $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta, $entity, $type);
             }
             if (Schema::hasColumn($table, 'short_description') && $this->isBlank($entity->short_description ?? null)) {
@@ -2477,12 +2490,18 @@ class AiSeoBoardService
         }
 
         // Already SEO-processed once (has injected context links), meets the word
-        // target AND still carries the current focus keyword → treat as done.
-        // The focus condition matters: when the keyword is regenerated (e.g. a
-        // verbose spec name shortened to a head term), the old injected block no
-        // longer matches and must be refreshed — mergeSeoHtml swaps it in place.
+        // target AND still carries the current focus keyword → treat as done ONLY
+        // when it also has proper heading structure and FAQ content, otherwise it
+        // will still fail the has_multiple_h2 (w=4) and has_faq (w=6) scoring checks.
+        $h2Count = $html !== '' ? preg_match_all('/<h2[\s>]/i', $html) : 0;
+        $hasFaq  = $html !== ''
+            && (preg_match('/<h[2-4][^>]*>\s*(frequently asked|faq|common question)/i', $html)
+                || preg_match('/frequently asked questions|FAQ/i', $plain)
+                || preg_match_all('/[^\.\?]{10,}\?/u', $plain) >= 2);
         if (str_contains($html, 'data-seo-context-links')
             && ($focus === '' || mb_stripos($plain, $focus) !== false)
+            && $h2Count >= 3
+            && $hasFaq
         ) {
             return false;
         }
@@ -2513,10 +2532,16 @@ class AiSeoBoardService
         // Idempotency guard: once SEO content has been injected (marker present),
         // never prepend the generated block again — otherwise the description
         // doubles in size on every autopilot batch. When the focus keyword has
-        // CHANGED since injection (old block no longer matches), excise the old
-        // injected block and swap in the regenerated one instead of stacking.
+        // CHANGED, or heading structure/FAQ is still missing, regenerate instead.
         if (str_contains($current, 'data-seo-context-links')) {
-            if ($focus === '' || mb_stripos($plain, $focus) !== false) {
+            $mergeH2Count = preg_match_all('/<h2[\s>]/i', $current);
+            $mergeFaq     = preg_match('/<h[2-4][^>]*>\s*(frequently asked|faq|common question)/i', $current)
+                || preg_match('/frequently asked questions|FAQ/i', $plain)
+                || preg_match_all('/[^\.\?]{10,}\?/u', $plain) >= 2;
+            if (($focus === '' || mb_stripos($plain, $focus) !== false)
+                && $mergeH2Count >= 3
+                && $mergeFaq
+            ) {
                 return $current;
             }
 
@@ -2577,7 +2602,7 @@ class AiSeoBoardService
         }
 
         $plain = trim(preg_replace('/\s+/', ' ', strip_tags($html)));
-        $needsCoreBlock = str_word_count($plain) < 300
+        $needsCoreBlock = str_word_count($plain) < 500
             || mb_stripos($plain, $focus) === false
             || !$this->htmlHeadingContains($html, $focus);
 
@@ -2594,42 +2619,77 @@ class AiSeoBoardService
 
     protected function seoSupportHtml(string $name, string $type, array $meta, ?Model $entity = null): string
     {
-        $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
+        $focus       = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
         $keywordList = implode(', ', array_slice($meta['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type), 0, 15));
-        $areaText = 'Mississauga, Brampton, Toronto and the wider GTA';
+        $areaText    = 'Mississauga, Brampton, Toronto and the wider GTA';
 
         $intro = match ($type) {
-            'product'  => "{$focus} is available for Canadian buyers who need reliable supply, clear product details, and fast purchasing support. BHS Supplies helps contractors, maintenance teams, and trade customers compare fit, availability, and value across {$areaText}.",
-            'category' => "{$focus} options help Canadian buyers compare product families, availability, and trade purchasing needs in one place. This category supports sourcing for contractors, maintenance teams, and local buyers across {$areaText}.",
-            'page'     => "{$focus} information is organized for Canadian customers who need clear next steps, local trust signals, and practical support from BHS Supplies across {$areaText}.",
-            default    => "{$focus} is covered with Canadian search intent, buyer questions, and practical guidance for customers across {$areaText}.",
+            'product'  => "{$focus} is available for Canadian buyers who need reliable supply, clear product details, and fast purchasing support. BHS Supplies helps contractors, maintenance teams, and trade customers compare fit, availability, and value across {$areaText}. Whether you are ordering a single unit or sourcing for a larger project, this page covers the key selection points and purchasing steps.",
+            'category' => "{$focus} options help Canadian buyers compare product families, availability, and trade purchasing needs in one place. This category supports sourcing for contractors, maintenance teams, and local buyers across {$areaText}. Organized by application, so the right product is easier to find for any commercial, residential, or industrial job.",
+            'page'     => "{$focus} information is organized for Canadian customers who need clear next steps, local trust signals, and practical support from BHS Supplies across {$areaText}. Contact details, trade account options, and common purchasing questions are addressed here.",
+            default    => "{$focus} is covered with Canadian search intent, buyer questions, and practical guidance for customers across {$areaText}. BHS Supplies stocks a broad range to serve both one-off purchases and ongoing supply needs.",
         };
 
         $whyList = match ($type) {
-            'product'  => '<li>HVAC, plumbing, water systems, and tool supply for Canadian buyers.</li>',
-            'category' => '<li>Wide selection across HVAC, plumbing, water treatment, and tools.</li>',
-            default    => '<li>Canada-focused supply for HVAC, plumbing, water systems, and tools.</li>',
+            'product'  => '<li>Quality HVAC, plumbing, water systems, and tools available for Canadian contractors and trade buyers.</li>'
+                        . '<li>Fast shipping and same-day pickup available in the GTA region for urgent supply needs.</li>'
+                        . '<li>Trade account pricing for volume buyers, maintenance teams, and repeat business customers.</li>'
+                        . '<li>Knowledgeable staff who can assist with product matching and compatibility questions.</li>',
+            'category' => '<li>Wide selection across HVAC, plumbing, water treatment, and tools for Canadian trade buyers.</li>'
+                        . '<li>Organized by application so contractors and maintenance teams find compatible products faster.</li>'
+                        . '<li>Bulk order support and trade account discounts available for qualifying businesses.</li>'
+                        . '<li>Serving commercial, residential, and industrial buyers across the GTA.</li>',
+            default    => '<li>Canada-focused supply for HVAC, plumbing, water systems, and tools.</li>'
+                        . '<li>Trade account support for bulk and repeat business orders across the GTA.</li>'
+                        . '<li>Fast local fulfillment in Mississauga, Brampton, and Toronto.</li>'
+                        . '<li>Competitive pricing with volume discounts for trade customers.</li>',
         };
 
-        return '<h2>' . e(Str::title($focus)) . ' for Canada and GTA Buyers</h2>'
+        $selectionNotes = match ($type) {
+            'product'  => "Selecting the right {$focus} depends on application requirements, site conditions, and compatibility with existing systems. Canadian buyers should confirm the material grade, pressure or capacity rating, and any local code requirements before ordering. BHS Supplies can assist with product matching when specifications are unclear. Always check installation requirements and whether accessories or adapters are needed before finalizing your order.",
+            'category' => "Choosing the right {$focus} product starts with defining the application: commercial, residential, or industrial. Review compatibility with existing equipment, required certifications, and order quantity before finalizing a purchase. Trade buyers can open a BHS Supplies account to streamline repeat purchasing and access volume pricing across the full product range.",
+            'page'     => "Getting the most from {$focus} requires understanding what information or service is available and how to take the next step. Canadian customers can contact BHS Supplies directly for clarification, trade account setup, or to request a product quote. Response times are fast for trade inquiries during business hours.",
+            default    => "Selecting the right {$focus} option depends on technical requirements, application context, and budget. Review specifications carefully before ordering and contact BHS Supplies with any compatibility questions. The team is available to help match products to specific job requirements.",
+        };
+
+        $faqQ1 = match ($type) {
+            'product'  => "What should I check before ordering {$focus}?",
+            'category' => "How do I find the right {$focus} product for my application?",
+            default    => "How do I get started with {$focus} at BHS Supplies?",
+        };
+        $faqA1 = match ($type) {
+            'product'  => "Confirm the size, material grade, pressure rating, and compatibility with your existing system. Review local code requirements if applicable. BHS Supplies can assist with product matching when specifications are unclear — contact the team with your job site details for a faster answer.",
+            'category' => "Start by defining your application — commercial, residential, or industrial. Filter by required certifications, material type, and operating conditions. Use the product detail pages to compare specifications side by side before adding to your order.",
+            default    => "Contact BHS Supplies through the website or visit the trade counter directly. Trade account holders receive priority support and access to volume pricing across the full range.",
+        };
+        $faqQ2 = "Does BHS Supplies serve customers in Mississauga, Brampton, and Toronto?";
+        $faqA2 = "Yes. BHS Supplies serves contractors, maintenance teams, and trade buyers across Mississauga, Brampton, Toronto, and the wider GTA. Same-day pickup and fast local delivery options are available depending on stock availability and order size. Call ahead to confirm stock before making a trip.";
+        $faqQ3 = "Can I open a trade account for {$focus} purchases?";
+        $faqA3 = "Yes. BHS Supplies offers trade accounts for contractors, facility managers, and volume buyers. Trade accounts provide access to volume pricing, priority order processing, and streamlined repeat ordering. Apply through the website or speak to the team at the trade counter to get started.";
+
+        return
+            // H2 #1 — primary topic introduction
+            '<h2>' . e(Str::title($focus)) . ' — Canadian Supply Guide</h2>'
             . '<p>' . e($intro) . '</p>'
-            . '<h3>Why Buyers Choose BHS Supplies</h3>'
-            . '<p>' . e('Customers need fast access to product information, dependable stock, and a supplier that understands commercial, residential, and trade requirements. Buying decisions depend on compatibility, quality, price, and delivery — this page keeps the most important selection points easy to review before ordering.') . '</p>'
-            . '<ul>'
-            . '<li>Canada-focused sourcing for local and regional buyers across the GTA.</li>'
-            . $whyList
-            . '<li>Trade account support for bulk orders and repeat business purchasing.</li>'
-            . '<li>Clear product context so buyers can compare specifications and use cases.</li>'
-            . '</ul>'
-            . '<h3>Applications and Selection Notes</h3>'
-            . '<p>' . e("The right {$focus} choice depends on the job site, required specifications, installation conditions, and delivery timeline. Compare product details with the intended application, then confirm whether accessories or compatible items are required. Repeat buyers can open a trade account to simplify future orders.") . '</p>'
-            . '<h3>Local Search Coverage</h3>'
-            . '<p>' . e("This page is optimized for buyers searching in {$areaText}. It supports trade account, pickup, quote request, and leave a review intent where natural for the customer journey.") . '</p>'
-            . '<h3>Related Canada Keywords</h3>'
+            // H2 #2 — trust and differentiation
+            . '<h2>' . e('Why Canadian Buyers Choose BHS Supplies for ' . Str::title($focus)) . '</h2>'
+            . '<p>BHS Supplies is a Canadian trade supply house serving HVAC technicians, plumbers, contractors, and facility managers across the GTA. Buyers rely on BHS Supplies for consistent stock levels, transparent pricing, and responsive support.</p>'
+            . '<ul>' . $whyList . '</ul>'
+            // H2 #3 — selection and buying information
+            . '<h2>' . e('How to Select the Right ' . Str::title($focus)) . '</h2>'
+            . '<p>' . e($selectionNotes) . '</p>'
+            . '<h3>Local Availability and Coverage</h3>'
+            . '<p>This page is optimized for buyers searching in ' . e($areaText) . '. BHS Supplies stocks products for both trade and retail customers with pickup available at the main location and delivery across the region.</p>'
+            . '<h3>Related Products and Keywords</h3>'
             . '<p>' . e($keywordList) . '</p>'
-            . $this->seoLinkParagraph($meta, $entity, $type)
+            // H2 #4 — FAQ (triggers has_faq scoring check)
+            . '<h2>Frequently Asked Questions</h2>'
+            . '<p><strong>' . e($faqQ1) . '</strong><br>' . e($faqA1) . '</p>'
+            . '<p><strong>' . e($faqQ2) . '</strong><br>' . e($faqA2) . '</p>'
+            . '<p><strong>' . e($faqQ3) . '</strong><br>' . e($faqA3) . '</p>'
             . '<h3>Buying Guidance</h3>'
-            . '<p>' . e("First, confirm the {$focus} size, application, material, and compatibility. Next, compare delivery or pickup options with order quantity and pricing. Contact BHS Supplies when you need help matching an item, opening a trade account, or planning a repeat order.") . '</p>';
+            . '<p>' . e("First, confirm the {$focus} specifications, application, material, and compatibility. Next, compare delivery timelines or local pickup availability. For trade buyers, a BHS Supplies account simplifies repeat ordering and unlocks volume pricing.") . '</p>'
+            . $this->seoLinkParagraph($meta, $entity, $type);
     }
 
     protected function seoLinkParagraph(array $meta, ?Model $entity = null, ?string $type = null): string
@@ -2889,6 +2949,28 @@ class AiSeoBoardService
             }
         }
 
+        // Even when meta is complete, check content-level scoring signals that
+        // still keep the score below 80: 500+ word check (w=8), 3 H2s (w=4), FAQ (w=6).
+        // Without this, entities with short/thin content get source='complete' and
+        // never receive a billable AI call — stuck below DONE score forever.
+        $rawHtml = trim((string) $this->rawContent($entity, $type));
+        if ($rawHtml !== '') {
+            $wordCount = str_word_count(strip_tags($rawHtml));
+            if ($wordCount < 500) {
+                return true;
+            }
+            if (preg_match_all('/<h2[\s>]/i', $rawHtml) < 3) {
+                return true;
+            }
+            $plainCheck = trim(preg_replace('/\s+/', ' ', strip_tags($rawHtml)));
+            $hasFaqCheck = preg_match('/<h[2-4][^>]*>\s*(frequently asked|faq|common question)/i', $rawHtml)
+                || preg_match('/frequently asked questions|FAQ/i', $plainCheck)
+                || preg_match_all('/[^\.\?]{10,}\?/u', $plainCheck) >= 2;
+            if (!$hasFaqCheck) {
+                return true;
+            }
+        }
+
         return $this->autopilotContentNeedsWork($entity, $type, $meta);
     }
 
@@ -2903,10 +2985,12 @@ class AiSeoBoardService
         $table = $entity->getTable();
 
         [$field, $minWords] = match ($type) {
-            'product'  => ['description', 300],
-            'category' => ['bottom_description', 300],
-            'page'     => ['content', 300],
-            'blog'     => ['description', 300],
+            // 500 words aligns with the TruSEO content_length_500 scoring check (weight 8).
+            // 300 was too low — content at 350 words was "done" to autopilot but still failing scoring.
+            'product'  => ['description', 500],
+            'category' => ['bottom_description', 500],
+            'page'     => ['content', 500],
+            'blog'     => ['description', 500],
             default    => [null, 0],
         };
 
@@ -2946,8 +3030,10 @@ class AiSeoBoardService
         $value = trim((string) $value);
         $len = mb_strlen($value);
 
+        // Min is 140 to match TruSEO desc_length scoring check (140–160 chars).
+        // Using 120 caused descriptions 120–139 chars to never refresh but always fail scoring.
         return $value === ''
-            || $len < 120
+            || $len < 140
             || $len > 160
             || ($focus !== '' && mb_stripos($value, $focus) === false);
     }

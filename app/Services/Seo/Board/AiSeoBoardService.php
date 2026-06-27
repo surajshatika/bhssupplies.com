@@ -1066,14 +1066,22 @@ class AiSeoBoardService
             $applied['meta_title'] = $patch['meta_title'];
         }
 
-        if ($this->needsMetaDescriptionRefresh($meta['meta_description'] ?? null, $focusForCopy)) {
-            $patch['meta_description'] = $this->bestDescriptionForFocus($aiData['description'] ?? null, $focusForCopy, $name, $type);
-            $applied['meta_description'] = $patch['meta_description'];
+        // Resolve secondary keywords BEFORE the description so the desc check
+        // can verify that at least one secondary keyword is present in it.
+        $resolvedSecondaries = null;
+        if ($this->needsSecondaryKeywordsRefresh($meta['secondary_keywords'] ?? null)) {
+            $resolvedSecondaries = $aiData['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type);
+            $patch['secondary_keywords'] = $resolvedSecondaries;
+            $applied['secondary_keywords'] = implode(', ', $resolvedSecondaries);
+        }
+        $secondariesForDesc = $resolvedSecondaries ?? ($meta['secondary_keywords'] ?? []);
+        if (is_string($secondariesForDesc)) {
+            $secondariesForDesc = array_filter(array_map('trim', preg_split('/[\r\n,]+/', $secondariesForDesc)));
         }
 
-        if ($this->needsSecondaryKeywordsRefresh($meta['secondary_keywords'] ?? null)) {
-            $patch['secondary_keywords'] = $aiData['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type);
-            $applied['secondary_keywords'] = implode(', ', $patch['secondary_keywords']);
+        if ($this->needsMetaDescriptionRefresh($meta['meta_description'] ?? null, $focusForCopy, $secondariesForDesc)) {
+            $patch['meta_description'] = $this->bestDescriptionForFocus($aiData['description'] ?? null, $focusForCopy, $name, $type);
+            $applied['meta_description'] = $patch['meta_description'];
         }
 
         if (empty($meta['og_image'])) {
@@ -2794,7 +2802,16 @@ class AiSeoBoardService
     protected function descriptionWithFocus(string $focus, string $name, string $type): string
     {
         $focusTitle = Str::title(trim($focus));
-        $text = "{$focusTitle} for Mississauga, Brampton, Toronto and GTA buyers. Compare specs, trade pricing, stock, pickup options, and order from BHS Supplies.";
+        // Include a secondary keyword phrase naturally to pass TruSEO's secondary_kw_in_desc check.
+        $secondary = match ($type) {
+            'product'  => Str::lower($name) . ' supplier',
+            'category' => Str::lower($name) . ' wholesale',
+            'page'     => Str::lower($name) . ' Canada',
+            'blog'     => Str::lower($name) . ' guide',
+            default    => Str::lower($name),
+        };
+        $secondaryTitle = Str::title($secondary);
+        $text = "Shop {$focusTitle} — trusted {$secondaryTitle} for Mississauga, Brampton, Toronto and GTA buyers. Trade pricing, stock, fast pickup. Order from BHS Supplies.";
 
         return $this->fitDescription($text);
     }
@@ -3019,23 +3036,49 @@ class AiSeoBoardService
         $value = trim((string) $value);
         $len = mb_strlen($value);
 
-        return $value === ''
-            || $len < 30
-            || $len > 60
-            || ($focus !== '' && mb_stripos($value, $focus) === false);
+        if ($value === '' || $len < 30 || $len > 60) {
+            return true;
+        }
+        if ($focus !== '' && mb_stripos($value, $focus) === false) {
+            return true;
+        }
+        // Refresh when title lacks a power word, positive-sentiment word, OR number —
+        // these are scored by TruSEO (5+4+4=13 pts) and the template title includes all three.
+        $hasPower    = (bool) preg_match('/\b(best|top|ultimate|proven|essential|complete|expert|professional|premium|quality|trusted|reliable|affordable|official|genuine|wholesale|bulk|fast|guaranteed|certified|leading)\b/i', $value);
+        $hasPositive = (bool) preg_match('/\b(best|top|trusted|proven|quality|reliable|premium|expert|leading|essential|complete|fast|guaranteed|professional|affordable|certified)\b/i', $value);
+        $hasNumber   = (bool) preg_match('/\d/', $value);
+        return !$hasPower || !$hasPositive || !$hasNumber;
     }
 
-    protected function needsMetaDescriptionRefresh($value, string $focus): bool
+    protected function needsMetaDescriptionRefresh($value, string $focus, array $secondaries = []): bool
     {
         $value = trim((string) $value);
         $len = mb_strlen($value);
 
         // Min is 140 to match TruSEO desc_length scoring check (140–160 chars).
-        // Using 120 caused descriptions 120–139 chars to never refresh but always fail scoring.
-        return $value === ''
-            || $len < 140
-            || $len > 160
-            || ($focus !== '' && mb_stripos($value, $focus) === false);
+        if ($value === '' || $len < 140 || $len > 160) {
+            return true;
+        }
+        if ($focus !== '' && mb_stripos($value, $focus) === false) {
+            return true;
+        }
+        // Refresh when NO secondary keyword appears in the description — TruSEO awards
+        // 5 pts for secondary_kw_in_desc, which every template description now satisfies.
+        if (!empty($secondaries)) {
+            $valueLower = mb_strtolower($value);
+            $hasSecondary = false;
+            foreach (array_slice($secondaries, 0, 10) as $kw) {
+                $kw = mb_strtolower(trim((string) $kw));
+                if ($kw !== '' && mb_stripos($valueLower, $kw) !== false) {
+                    $hasSecondary = true;
+                    break;
+                }
+            }
+            if (!$hasSecondary) {
+                return true;
+            }
+        }
+        return false;
     }
 
     protected function needsSecondaryKeywordsRefresh($value): bool

@@ -81,6 +81,7 @@ class SeoSuiteController extends Controller
             : $this->buildAutopilotDashboard($settings);
         $keywordIntelligence = $setupRequired ? $this->emptyKeywordIntelligence() : $this->buildKeywordIntelligence();
         $automationCoverage = app(SeoAutomationCoverage::class)->summary();
+        $aiProviderHealth = $this->quickProviderHealthCheck($settings);
 
         return view('backend.seo_suite.index', compact(
             'project',
@@ -96,7 +97,8 @@ class SeoSuiteController extends Controller
             'autopilot',
             'keywordIntelligence',
             'automationCoverage',
-            'chartData'
+            'chartData',
+            'aiProviderHealth'
         ));
     }
 
@@ -1616,6 +1618,93 @@ class SeoSuiteController extends Controller
             'spent_today' => 0,
             'remaining_today' => null,
         ];
+    }
+
+    protected function quickProviderHealthCheck(array $settings): array
+    {
+        $labelMap = [
+            'openai' => 'OpenAI',
+            'claude' => 'Claude',
+            'gemini' => 'Gemini',
+            'grok'   => 'Grok',
+        ];
+        $modelMap = [
+            'openai' => config('seo.providers.openai.model', 'gpt-4o-mini'),
+            'claude' => config('seo.providers.claude.model', 'claude-sonnet-4-6'),
+            'gemini' => config('seo.providers.gemini.model', 'gemini-2.0-flash'),
+            'grok'   => config('seo.providers.grok.model', 'grok-3-mini'),
+        ];
+
+        try {
+            $raw = app(SeoProviderReliability::class)->dashboard();
+        } catch (\Throwable $e) {
+            return ['providers' => [], 'any_working' => false];
+        }
+
+        $results = [];
+        $anyWorking = false;
+
+        foreach ($raw as $name => $data) {
+            $label = $labelMap[$name] ?? $name;
+            $model = $modelMap[$name] ?? '';
+
+            if (!($data['configured'] ?? false)) {
+                $results[$name] = ['label' => $label, 'status' => 'no_key', 'error' => 'API key not configured'];
+                continue;
+            }
+
+            if ($data['cooling_down'] ?? false) {
+                $results[$name] = [
+                    'label'    => $label,
+                    'status'   => 'cooldown',
+                    'error'    => 'On cooldown — consecutive failures: ' . ($data['consecutive_failures'] ?? '?'),
+                    'failures' => $data['consecutive_failures'] ?? 0,
+                ];
+                continue;
+            }
+
+            $consecutiveFails = (int) ($data['consecutive_failures'] ?? 0);
+            $lastStatus = $data['last_status'] ?? null;
+            $attempts   = (int) ($data['attempts'] ?? 0);
+
+            // Mark degraded when consecutive failures stack up but haven't hit cooldown threshold
+            if ($consecutiveFails >= 2 || ($attempts > 0 && $lastStatus && $lastStatus !== 'success')) {
+                $results[$name] = [
+                    'label'    => $label,
+                    'status'   => 'degraded',
+                    'error'    => $lastStatus ? "Last status: {$lastStatus}" : "Consecutive failures: {$consecutiveFails}",
+                    'failures' => $consecutiveFails,
+                    'model'    => $model,
+                ];
+                continue;
+            }
+
+            // Check for a cached last-error from the provider (written on HTTP failure)
+            $lastErrCache = \Illuminate\Support\Facades\Cache::get("seo:provider-last-error:{$name}");
+            if ($lastErrCache) {
+                $results[$name] = [
+                    'label'  => $label,
+                    'status' => 'error',
+                    'error'  => 'HTTP ' . ($lastErrCache['status'] ?? '?') . ': ' . ($lastErrCache['error'] ?? 'unknown error'),
+                    'model'  => $model,
+                ];
+                continue;
+            }
+
+            // No failures recorded yet — key configured and no recent errors
+            $results[$name] = ['label' => $label, 'status' => 'configured', 'model' => $model];
+            $anyWorking = true;
+        }
+
+        // If no reliability data at all (fresh install or cache cleared), fall back to key presence
+        if (empty($raw)) {
+            $anyWorking = !empty($settings['openai_api_key'])
+                || !empty($settings['anthropic_api_key'])
+                || !empty($settings['seo_gemini_api_key'])
+                || !empty($settings['seo_grok_api_key']);
+        }
+
+        return ['providers' => $results, 'any_working' => $anyWorking];
     }
 
     protected function recentSeoScoreActivity(int $minutes = 60, int $limit = 300): \Illuminate\Support\Collection

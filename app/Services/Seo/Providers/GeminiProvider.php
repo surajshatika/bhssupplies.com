@@ -30,11 +30,15 @@ class GeminiProvider implements SeoAiProviderInterface
             ]);
 
             if (!$response->successful()) {
+                $errMsg = data_get($response->json(), 'error.message', substr($response->body(), 0, 200));
+                \Illuminate\Support\Facades\Log::warning('[SEO] GeminiProvider HTTP error', ['status' => $response->status(), 'error' => $errMsg]);
+                \Illuminate\Support\Facades\Cache::put('seo:provider-last-error:gemini', ['status' => $response->status(), 'error' => $errMsg], now()->addHours(12));
                 return null;
             }
 
             return data_get($response->json(), 'candidates.0.content.parts.0.text');
         } catch (\Throwable $exception) {
+            \Illuminate\Support\Facades\Log::warning('[SEO] GeminiProvider exception', ['error' => $exception->getMessage()]);
             return null;
         }
     }

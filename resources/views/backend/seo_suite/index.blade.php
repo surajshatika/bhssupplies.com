@@ -121,6 +121,50 @@
 </div>
 @endif
 
+@php
+    $aiHealth = $aiProviderHealth ?? ['providers' => [], 'any_working' => false];
+    $aiProviders = $aiHealth['providers'] ?? [];
+    $aiAnyWorking = $aiHealth['any_working'] ?? false;
+    $aiAllDown = !$aiAnyWorking && count($aiProviders) > 0;
+    $aiNoneConfigured = count(array_filter($aiProviders, fn($p) => ($p['status'] ?? '') !== 'no_key')) === 0;
+@endphp
+@if($aiAllDown || $aiNoneConfigured)
+<div class="alert mb-3 py-2" style="background:#fff3cd;border:1px solid #ffc107;border-left:4px solid #e74a3b;" role="alert">
+    <div class="d-flex align-items-start">
+        <i class="las la-robot la-lg mr-2 mt-1" style="color:#e74a3b;flex-shrink:0;"></i>
+        <div class="flex-1">
+            <strong style="color:#e74a3b;">{{ translate('AI Autopilot: No working providers') }}</strong>
+            &mdash;
+            <span class="text-dark">{{ translate('All AI providers are either unconfigured or failing. The autopilot will apply template content only — scores may not reach 80. Add or fix a provider key in SEO Settings → AI Providers.') }}</span>
+            <div class="mt-2 d-flex flex-wrap" style="gap:.4rem;">
+                @foreach($aiProviders as $pName => $pInfo)
+                @php
+                    $pStatus = $pInfo['status'] ?? 'unknown';
+                    $pLabel  = $pInfo['label'] ?? $pName;
+                    $pErr    = $pInfo['error'] ?? '';
+                    $pColor  = match($pStatus) { 'configured' => '#1cc88a', 'cooldown','degraded' => '#f6c23e', default => '#e74a3b' };
+                    $pIcon   = match($pStatus) { 'configured' => 'la-check-circle', 'cooldown' => 'la-pause-circle', 'degraded' => 'la-exclamation-triangle', default => 'la-times-circle' };
+                    $pShort  = match($pStatus) { 'no_key' => 'no key', 'cooldown' => 'cooldown', 'error' => 'key error', 'degraded' => 'degraded', 'configured' => '✓', default => $pStatus };
+                @endphp
+                <span class="badge py-1 px-2" style="background:#fff;border:1px solid {{ $pColor }};color:{{ $pColor }};font-size:.75rem;cursor:help;" title="{{ mb_substr($pErr, 0, 150) }}">
+                    <i class="las {{ $pIcon }}"></i> {{ $pLabel }}
+                    <span class="ml-1" style="opacity:.8;">({{ $pShort }})</span>
+                </span>
+                @endforeach
+            </div>
+        </div>
+        <a href="{{ route('admin.seo-suite.settings.view') }}#ai-providers" class="btn btn-sm btn-danger ml-3 flex-shrink-0" style="white-space:nowrap;">
+            <i class="las la-key mr-1"></i>{{ translate('Fix Keys') }}
+        </a>
+    </div>
+</div>
+@elseif(!$aiAnyWorking && !$setupRequired)
+<div class="alert alert-warning py-2 mb-3 small">
+    <i class="las la-exclamation-circle mr-1"></i>
+    {{ translate('No AI provider keys detected. Add an OpenAI, Claude, Gemini, or Grok key in SEO Settings → AI Providers to enable AI-powered score improvements.') }}
+</div>
+@endif
+
 {{-- ROW 1: Setup Wizard + SEO Site Score --}}
 <div id="seo-overview" class="row gutters-16 mb-4 seo-section-anchor">
     {{-- Setup Card --}}

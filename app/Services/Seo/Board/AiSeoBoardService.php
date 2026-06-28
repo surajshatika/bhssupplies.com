@@ -999,10 +999,41 @@ class AiSeoBoardService
             // Allow re-processing when keywords were updated after this entity
             // was last analyzed — so new keywords get woven into its content.
             if (!$this->needsKeywordRefresh($entity)) {
+                // Sync DB score when stale (e.g., entity was improved outside the
+                // autopilot and the seo_meta.seo_score column was never updated).
+                $computedScore = (int) ($currentRow['score'] ?? 0);
+                $meta = $this->loadOrSynthesizeMeta($entity, $type);
+                $storedScore = (int) ($meta['seo_score'] ?? 0);
+
+                // Even for "done" entities, fill in any missing required fields so
+                // pendingBreakdownByType counts them as truly done (all 4 fields + score ≥ 80).
+                $dbMeta = \App\Models\SeoMeta::where('model_type', $this->typeMap[$type]['class'])
+                    ->where('model_id', $entity->getKey())
+                    ->where('lang', config('app.locale', 'en'))
+                    ->first();
+                $fillPatch = [];
+                if ($dbMeta && empty($dbMeta->meta_description)) {
+                    $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($this->displayName($entity, $type), $type)));
+                    $fillPatch['meta_description'] = $this->bestDescriptionForFocus(null, $focus, $this->displayName($entity, $type), $type);
+                }
+                if ($dbMeta && empty($dbMeta->meta_title)) {
+                    $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($this->displayName($entity, $type), $type)));
+                    $fillPatch['meta_title'] = $this->titleWithFocus($focus, $this->displayName($entity, $type), $type);
+                }
+                if (!empty($fillPatch)) {
+                    $this->persistMeta($entity, $type, $fillPatch);
+                }
+                if ($storedScore !== $computedScore) {
+                    $this->persistMeta($entity, $type, [
+                        'seo_score'       => $computedScore,
+                        'seo_grade'       => $currentRow['grade'] ?? $this->grade($computedScore),
+                        'last_analyzed_at' => now(),
+                    ]);
+                }
                 return [
                     'applied'      => [],
-                    'score_before' => (int) ($currentRow['score'] ?? 0),
-                    'score_after'  => (int) ($currentRow['score'] ?? 0),
+                    'score_before' => $computedScore,
+                    'score_after'  => $computedScore,
                     'source'       => 'protected',
                     'row'          => $currentRow,
                 ];
@@ -1066,14 +1097,22 @@ class AiSeoBoardService
             $applied['meta_title'] = $patch['meta_title'];
         }
 
-        if ($this->needsMetaDescriptionRefresh($meta['meta_description'] ?? null, $focusForCopy)) {
-            $patch['meta_description'] = $this->bestDescriptionForFocus($aiData['description'] ?? null, $focusForCopy, $name, $type);
-            $applied['meta_description'] = $patch['meta_description'];
+        // Resolve secondary keywords BEFORE the description so the desc check
+        // can verify that at least one secondary keyword is present in it.
+        $resolvedSecondaries = null;
+        if ($this->needsSecondaryKeywordsRefresh($meta['secondary_keywords'] ?? null)) {
+            $resolvedSecondaries = $aiData['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type);
+            $patch['secondary_keywords'] = $resolvedSecondaries;
+            $applied['secondary_keywords'] = implode(', ', $resolvedSecondaries);
+        }
+        $secondariesForDesc = $resolvedSecondaries ?? ($meta['secondary_keywords'] ?? []);
+        if (is_string($secondariesForDesc)) {
+            $secondariesForDesc = array_filter(array_map('trim', preg_split('/[\r\n,]+/', $secondariesForDesc)));
         }
 
-        if ($this->needsSecondaryKeywordsRefresh($meta['secondary_keywords'] ?? null)) {
-            $patch['secondary_keywords'] = $aiData['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type);
-            $applied['secondary_keywords'] = implode(', ', $patch['secondary_keywords']);
+        if ($this->needsMetaDescriptionRefresh($meta['meta_description'] ?? null, $focusForCopy, $secondariesForDesc)) {
+            $patch['meta_description'] = $this->bestDescriptionForFocus($aiData['description'] ?? null, $focusForCopy, $name, $type);
+            $applied['meta_description'] = $patch['meta_description'];
         }
 
         if (empty($meta['og_image'])) {
@@ -1094,7 +1133,11 @@ class AiSeoBoardService
         // is only emitted when the matching Q&A is actually on the page.
         $contentPatch = $this->contentPatch($entity, $type, $aiData, $patch + $meta);
         if (!empty($contentPatch)) {
-            $entity->forceFill($contentPatch)->save();
+            // Bypass page-cache purge observers — redundant during batch processing.
+            $entityClass = get_class($entity);
+            $entityClass::withoutEvents(function () use ($entity, $contentPatch) {
+                $entity->forceFill($contentPatch)->save();
+            });
             foreach ($contentPatch as $field => $value) {
                 $applied[$field] = Str::limit(strip_tags((string) $value), 120);
             }
@@ -1518,14 +1561,19 @@ class AiSeoBoardService
 
         $patch['seo_score'] = $patch['seo_score'] ?? null;
 
-        SeoMeta::updateOrCreate(
-            [
-                'model_type' => $class,
-                'model_id'   => $entity->getKey(),
-                'lang'       => config('app.locale', 'en'),
-            ],
-            $patch
-        );
+        // Skip page-cache purge observers during batch autopilot writes — the
+        // cache invalidation queries (currencies × locales × devices) add 3–5s
+        // per entity on localhost and are redundant during bulk processing.
+        SeoMeta::withoutEvents(function () use ($class, $entity, $patch) {
+            SeoMeta::updateOrCreate(
+                [
+                    'model_type' => $class,
+                    'model_id'   => $entity->getKey(),
+                    'lang'       => config('app.locale', 'en'),
+                ],
+                $patch
+            );
+        });
     }
 
     /**
@@ -1729,7 +1777,10 @@ class AiSeoBoardService
     protected function urlFor(Model $entity, string $type): string
     {
         $slug = $entity->slug ?? '';
-        $base = rtrim(url('/'), '/');
+        // Use seo.site_url so internal-link detection works correctly when the
+        // stored links use the production domain (bhssupplies.com) but APP_URL
+        // is localhost. Falls back to url('/') when not configured.
+        $base = rtrim(config('seo.site_url', url('/')), '/');
 
         return match ($type) {
             'product'  => $base . '/product/' . $slug,
@@ -2500,6 +2551,7 @@ class AiSeoBoardService
                 || preg_match_all('/[^\.\?]{10,}\?/u', $plain) >= 2);
         if (str_contains($html, 'data-seo-context-links')
             && ($focus === '' || mb_stripos($plain, $focus) !== false)
+            && ($focus === '' || $this->htmlHeadingContains($html, $focus))
             && $h2Count >= 3
             && $hasFaq
         ) {
@@ -2513,6 +2565,12 @@ class AiSeoBoardService
             return true;
         }
         if ($needHeading && !str_contains($html, 'data-seo-context-links')) {
+            return true;
+        }
+
+        // Even if previously processed, refresh if heading structure or FAQ is missing,
+        // since those are scored checks (has_multiple_h2 +4, has_faq +6, has_subheadings +5).
+        if ($h2Count < 2 || !$hasFaq) {
             return true;
         }
 
@@ -2539,14 +2597,18 @@ class AiSeoBoardService
                 || preg_match('/frequently asked questions|FAQ/i', $plain)
                 || preg_match_all('/[^\.\?]{10,}\?/u', $plain) >= 2;
             if (($focus === '' || mb_stripos($plain, $focus) !== false)
+                && ($focus === '' || $this->htmlHeadingContains($current, $focus))
                 && $mergeH2Count >= 3
                 && $mergeFaq
             ) {
                 return $current;
             }
 
+            // Strip either the old template (H2 "...for Canada and GTA Buyers") or
+            // the current template (H2 "...Canadian Supply Guide") through the
+            // closing "Buying Guidance" H3, then also remove the link paragraph.
             $stripped = preg_replace(
-                '/<h2>[^<]*for Canada and GTA Buyers<\/h2>.*?<h3>Buying Guidance<\/h3>\s*<p>.*?<\/p>/su',
+                '/<h2[^>]*>[^<]*(?:Canadian Supply Guide|for Canada and GTA Buyers)[^<]*<\/h2>.*?<h3[^>]*>\s*Buying Guidance\s*<\/h3>\s*<p[^>]*>.*?<\/p>/su',
                 '',
                 $current,
                 1
@@ -2602,9 +2664,13 @@ class AiSeoBoardService
         }
 
         $plain = trim(preg_replace('/\s+/', ' ', strip_tags($html)));
-        $needsCoreBlock = str_word_count($plain) < 500
-            || mb_stripos($plain, $focus) === false
-            || !$this->htmlHeadingContains($html, $focus);
+        // Never prepend a core block when the html is already the template output
+        // (has the context-links marker), as that would double the keyword density.
+        $alreadyHasTemplate = str_contains($html, 'data-seo-context-links');
+        $needsCoreBlock = !$alreadyHasTemplate
+            && (str_word_count($plain) < 500
+                || mb_stripos($plain, $focus) === false
+                || !$this->htmlHeadingContains($html, $focus));
 
         if ($needsCoreBlock) {
             return $this->seoSupportHtml($name, $type, $meta, $entity) . ($html !== '' ? "\n\n" . $html : '');
@@ -2620,7 +2686,25 @@ class AiSeoBoardService
     protected function seoSupportHtml(string $name, string $type, array $meta, ?Model $entity = null): string
     {
         $focus       = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
-        $keywordList = implode(', ', array_slice($meta['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type), 0, 15));
+        // For long keywords (4+ words), use a short pronoun in secondary mentions to
+        // keep keyword density in the 0.5–2.5% range and avoid the stuffing penalty.
+        $shortRef = (str_word_count($focus) >= 4)
+            ? match ($type) { 'product' => 'this product', 'category' => 'this category', default => 'this' }
+            : $focus;
+        $rawSecondaries = $meta['secondary_keywords'] ?? null;
+        if (is_string($rawSecondaries)) {
+            $rawSecondaries = array_filter(array_map('trim', preg_split('/[\r\n,]+/', $rawSecondaries)));
+        }
+        // Strip the focus keyword prefix from secondary keywords before display so
+        // long-tail phrases like "focus keyword Mississauga, focus keyword Brampton"
+        // don't inflate the focus keyword density into the stuffing range (> 3%).
+        $rawKeywords = array_slice($rawSecondaries ?: $this->canadaKeywordSet($name, $type), 0, 15);
+        $focusLower  = mb_strtolower($focus);
+        $dedupedKeywords = array_map(function (string $kw) use ($focusLower): string {
+            $stripped = trim(mb_substr($kw, mb_stripos($kw, $focusLower) === 0 ? mb_strlen($focusLower) : 0));
+            return $stripped !== '' ? $stripped : $kw;
+        }, $rawKeywords);
+        $keywordList = implode(', ', array_filter($dedupedKeywords));
         $areaText    = 'Mississauga, Brampton, Toronto and the wider GTA';
 
         $intro = match ($type) {
@@ -2653,9 +2737,9 @@ class AiSeoBoardService
         };
 
         $faqQ1 = match ($type) {
-            'product'  => "What should I check before ordering {$focus}?",
-            'category' => "How do I find the right {$focus} product for my application?",
-            default    => "How do I get started with {$focus} at BHS Supplies?",
+            'product'  => "What should I check before ordering {$shortRef}?",
+            'category' => "How do I find the right {$shortRef} for my application?",
+            default    => "How do I get started with {$shortRef} at BHS Supplies?",
         };
         $faqA1 = match ($type) {
             'product'  => "Confirm the size, material grade, pressure rating, and compatibility with your existing system. Review local code requirements if applicable. BHS Supplies can assist with product matching when specifications are unclear — contact the team with your job site details for a faster answer.",
@@ -2664,7 +2748,7 @@ class AiSeoBoardService
         };
         $faqQ2 = "Does BHS Supplies serve customers in Mississauga, Brampton, and Toronto?";
         $faqA2 = "Yes. BHS Supplies serves contractors, maintenance teams, and trade buyers across Mississauga, Brampton, Toronto, and the wider GTA. Same-day pickup and fast local delivery options are available depending on stock availability and order size. Call ahead to confirm stock before making a trip.";
-        $faqQ3 = "Can I open a trade account for {$focus} purchases?";
+        $faqQ3 = "Can I open a trade account for {$shortRef} purchases?";
         $faqA3 = "Yes. BHS Supplies offers trade accounts for contractors, facility managers, and volume buyers. Trade accounts provide access to volume pricing, priority order processing, and streamlined repeat ordering. Apply through the website or speak to the team at the trade counter to get started.";
 
         return
@@ -2688,13 +2772,17 @@ class AiSeoBoardService
             . '<p><strong>' . e($faqQ2) . '</strong><br>' . e($faqA2) . '</p>'
             . '<p><strong>' . e($faqQ3) . '</strong><br>' . e($faqA3) . '</p>'
             . '<h3>Buying Guidance</h3>'
-            . '<p>' . e("First, confirm the {$focus} specifications, application, material, and compatibility. Next, compare delivery timelines or local pickup availability. For trade buyers, a BHS Supplies account simplifies repeat ordering and unlocks volume pricing.") . '</p>'
+            . '<p>' . e("First, confirm the {$shortRef} specifications, application, material, and compatibility. Next, compare delivery timelines or local pickup availability. For trade buyers, a BHS Supplies account simplifies repeat ordering and unlocks volume pricing.") . '</p>'
             . $this->seoLinkParagraph($meta, $entity, $type);
     }
 
     protected function seoLinkParagraph(array $meta, ?Model $entity = null, ?string $type = null): string
     {
         $focus = trim((string) ($meta['focus_keyword'] ?? 'products'));
+        $shortRef = (str_word_count($focus) >= 4)
+            ? match ($type ?? '') { 'product' => 'this product', 'category' => 'this category', default => 'these' }
+            : $focus;
+        $focus = $shortRef;
         $links = $this->contextualInternalLinks($entity, $type);
         $anchors = array_map(
             fn(array $link) => '<a href="' . e($link['url']) . '">' . e($link['label']) . '</a>',
@@ -2710,18 +2798,20 @@ class AiSeoBoardService
     {
         $links = [];
 
+        $siteBase = rtrim(config('seo.site_url', url('/')), '/');
+
         try {
             if ($entity && $type === 'product' && $category = $entity->main_category) {
                 if (!empty($category->slug)) {
                     $links[] = [
-                        'url' => url('/category/' . ltrim((string) $category->slug, '/')),
+                        'url' => $siteBase . '/category/' . ltrim((string) $category->slug, '/'),
                         'label' => Str::limit((string) ($category->name ?: 'related category'), 70, ''),
                     ];
                 }
             } elseif ($entity && $type === 'category' && $parent = $entity->parentCategory) {
                 if (!empty($parent->slug)) {
                     $links[] = [
-                        'url' => url('/category/' . ltrim((string) $parent->slug, '/')),
+                        'url' => $siteBase . '/category/' . ltrim((string) $parent->slug, '/'),
                         'label' => Str::limit((string) ($parent->name ?: 'parent category'), 70, ''),
                     ];
                 }
@@ -2730,9 +2820,10 @@ class AiSeoBoardService
             // The core internal-link set below is still useful if a relation is unavailable.
         }
 
-        $links[] = ['url' => url('/shop'), 'label' => 'BHS Supplies products'];
-        $links[] = ['url' => url('/contractor-trade-account'), 'label' => 'contractor trade account'];
-        $links[] = ['url' => url('/review'), 'label' => 'leave a review'];
+        $base = rtrim(config('seo.site_url', url('/')), '/');
+        $links[] = ['url' => $base . '/shop', 'label' => 'BHS Supplies products'];
+        $links[] = ['url' => $base . '/contractor-trade-account', 'label' => 'contractor trade account'];
+        $links[] = ['url' => $base . '/review', 'label' => 'leave a review'];
         $links[] = $this->localLandingLink($entity, $type);
 
         return collect($links)->unique('url')->values()->all();
@@ -2748,8 +2839,9 @@ class AiSeoBoardService
         $seed = ($type ?: 'page') . ':' . ($entity?->getKey() ?: ($entity?->slug ?? 'default'));
         $location = $locations[abs(crc32($seed)) % count($locations)];
 
+        $base = rtrim(config('seo.site_url', url('/')), '/');
         return [
-            'url' => url('/hvac-supplies-' . $location['slug']),
+            'url' => $base . '/hvac-supplies-' . $location['slug'],
             'label' => $location['label'],
         ];
     }
@@ -2794,7 +2886,16 @@ class AiSeoBoardService
     protected function descriptionWithFocus(string $focus, string $name, string $type): string
     {
         $focusTitle = Str::title(trim($focus));
-        $text = "{$focusTitle} for Mississauga, Brampton, Toronto and GTA buyers. Compare specs, trade pricing, stock, pickup options, and order from BHS Supplies.";
+        // Include a secondary keyword phrase naturally to pass TruSEO's secondary_kw_in_desc check.
+        $secondary = match ($type) {
+            'product'  => Str::lower($name) . ' supplier',
+            'category' => Str::lower($name) . ' wholesale',
+            'page'     => Str::lower($name) . ' Canada',
+            'blog'     => Str::lower($name) . ' guide',
+            default    => Str::lower($name),
+        };
+        $secondaryTitle = Str::title($secondary);
+        $text = "Shop {$focusTitle} — trusted {$secondaryTitle} for Mississauga, Brampton, Toronto and GTA buyers. Trade pricing, stock, fast pickup. Order from BHS Supplies.";
 
         return $this->fitDescription($text);
     }
@@ -3019,23 +3120,49 @@ class AiSeoBoardService
         $value = trim((string) $value);
         $len = mb_strlen($value);
 
-        return $value === ''
-            || $len < 30
-            || $len > 60
-            || ($focus !== '' && mb_stripos($value, $focus) === false);
+        if ($value === '' || $len < 30 || $len > 60) {
+            return true;
+        }
+        if ($focus !== '' && mb_stripos($value, $focus) === false) {
+            return true;
+        }
+        // Refresh when title lacks a power word, positive-sentiment word, OR number —
+        // these are scored by TruSEO (5+4+4=13 pts) and the template title includes all three.
+        $hasPower    = (bool) preg_match('/\b(best|top|ultimate|proven|essential|complete|expert|professional|premium|quality|trusted|reliable|affordable|official|genuine|wholesale|bulk|fast|guaranteed|certified|leading)\b/i', $value);
+        $hasPositive = (bool) preg_match('/\b(best|top|trusted|proven|quality|reliable|premium|expert|leading|essential|complete|fast|guaranteed|professional|affordable|certified)\b/i', $value);
+        $hasNumber   = (bool) preg_match('/\d/', $value);
+        return !$hasPower || !$hasPositive || !$hasNumber;
     }
 
-    protected function needsMetaDescriptionRefresh($value, string $focus): bool
+    protected function needsMetaDescriptionRefresh($value, string $focus, array $secondaries = []): bool
     {
         $value = trim((string) $value);
         $len = mb_strlen($value);
 
         // Min is 140 to match TruSEO desc_length scoring check (140–160 chars).
-        // Using 120 caused descriptions 120–139 chars to never refresh but always fail scoring.
-        return $value === ''
-            || $len < 140
-            || $len > 160
-            || ($focus !== '' && mb_stripos($value, $focus) === false);
+        if ($value === '' || $len < 140 || $len > 160) {
+            return true;
+        }
+        if ($focus !== '' && mb_stripos($value, $focus) === false) {
+            return true;
+        }
+        // Refresh when NO secondary keyword appears in the description — TruSEO awards
+        // 5 pts for secondary_kw_in_desc, which every template description now satisfies.
+        if (!empty($secondaries)) {
+            $valueLower = mb_strtolower($value);
+            $hasSecondary = false;
+            foreach (array_slice($secondaries, 0, 10) as $kw) {
+                $kw = mb_strtolower(trim((string) $kw));
+                if ($kw !== '' && mb_stripos($valueLower, $kw) !== false) {
+                    $hasSecondary = true;
+                    break;
+                }
+            }
+            if (!$hasSecondary) {
+                return true;
+            }
+        }
+        return false;
     }
 
     protected function needsSecondaryKeywordsRefresh($value): bool

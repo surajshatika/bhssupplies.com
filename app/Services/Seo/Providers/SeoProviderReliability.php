@@ -117,6 +117,7 @@ class SeoProviderReliability
         $providers = $provider ? [$this->normalize($provider)] : self::PROVIDERS;
         foreach ($providers as $name) {
             Cache::forget(self::CACHE_PREFIX . $name);
+            Cache::forget('seo:provider-last-error:' . $name);
         }
     }
 

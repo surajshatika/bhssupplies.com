@@ -1004,6 +1004,25 @@ class AiSeoBoardService
                 $computedScore = (int) ($currentRow['score'] ?? 0);
                 $meta = $this->loadOrSynthesizeMeta($entity, $type);
                 $storedScore = (int) ($meta['seo_score'] ?? 0);
+
+                // Even for "done" entities, fill in any missing required fields so
+                // pendingBreakdownByType counts them as truly done (all 4 fields + score ≥ 80).
+                $dbMeta = \App\Models\SeoMeta::where('model_type', $this->typeMap[$type]['class'])
+                    ->where('model_id', $entity->getKey())
+                    ->where('lang', config('app.locale', 'en'))
+                    ->first();
+                $fillPatch = [];
+                if ($dbMeta && empty($dbMeta->meta_description)) {
+                    $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($this->displayName($entity, $type), $type)));
+                    $fillPatch['meta_description'] = $this->bestDescriptionForFocus(null, $focus, $this->displayName($entity, $type), $type);
+                }
+                if ($dbMeta && empty($dbMeta->meta_title)) {
+                    $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($this->displayName($entity, $type), $type)));
+                    $fillPatch['meta_title'] = $this->titleWithFocus($focus, $this->displayName($entity, $type), $type);
+                }
+                if (!empty($fillPatch)) {
+                    $this->persistMeta($entity, $type, $fillPatch);
+                }
                 if ($storedScore !== $computedScore) {
                     $this->persistMeta($entity, $type, [
                         'seo_score'       => $computedScore,

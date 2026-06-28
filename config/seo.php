@@ -14,6 +14,7 @@ return [
         'cooldown_enabled' => env('SEO_AI_PROVIDER_COOLDOWN_ENABLED', true),
         'failure_threshold' => env('SEO_AI_PROVIDER_FAILURE_THRESHOLD', 3),
         'cooldown_minutes' => env('SEO_AI_PROVIDER_COOLDOWN_MINUTES', 15),
+        'request_timeout' => env('SEO_AI_REQUEST_TIMEOUT', 10),
         'attempt_cost_usd' => [
             'openai' => env('SEO_OPENAI_ESTIMATED_REQUEST_USD', 0.0009),
             'claude' => env('SEO_CLAUDE_ESTIMATED_REQUEST_USD', 0.0207),
@@ -51,6 +52,12 @@ return [
         'off_page' => env('SEO_OFFPAGE_QUEUE', 'default'),
         'optimization' => env('SEO_OPTIMIZATION_QUEUE', 'default'),
     ],
+
+    // Production site URL used for internal-link detection in TruSEO scoring.
+    // Set SEO_SITE_URL=https://www.bhssupplies.com in .env so links like
+    // https://www.bhssupplies.com/shop are correctly counted as internal even
+    // when running on localhost where APP_URL is 127.0.0.1.
+    'site_url' => env('SEO_SITE_URL', env('APP_URL')),
 
     'search_console' => [
         'site_url' => env('SEO_GOOGLE_SEARCH_CONSOLE_SITE', env('APP_URL')),

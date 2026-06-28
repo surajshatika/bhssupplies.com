@@ -999,10 +999,22 @@ class AiSeoBoardService
             // Allow re-processing when keywords were updated after this entity
             // was last analyzed — so new keywords get woven into its content.
             if (!$this->needsKeywordRefresh($entity)) {
+                // Sync DB score when stale (e.g., entity was improved outside the
+                // autopilot and the seo_meta.seo_score column was never updated).
+                $computedScore = (int) ($currentRow['score'] ?? 0);
+                $meta = $this->loadOrSynthesizeMeta($entity, $type);
+                $storedScore = (int) ($meta['seo_score'] ?? 0);
+                if ($storedScore !== $computedScore) {
+                    $this->persistMeta($entity, $type, [
+                        'seo_score'       => $computedScore,
+                        'seo_grade'       => $currentRow['grade'] ?? $this->grade($computedScore),
+                        'last_analyzed_at' => now(),
+                    ]);
+                }
                 return [
                     'applied'      => [],
-                    'score_before' => (int) ($currentRow['score'] ?? 0),
-                    'score_after'  => (int) ($currentRow['score'] ?? 0),
+                    'score_before' => $computedScore,
+                    'score_after'  => $computedScore,
                     'source'       => 'protected',
                     'row'          => $currentRow,
                 ];
@@ -1102,7 +1114,11 @@ class AiSeoBoardService
         // is only emitted when the matching Q&A is actually on the page.
         $contentPatch = $this->contentPatch($entity, $type, $aiData, $patch + $meta);
         if (!empty($contentPatch)) {
-            $entity->forceFill($contentPatch)->save();
+            // Bypass page-cache purge observers — redundant during batch processing.
+            $entityClass = get_class($entity);
+            $entityClass::withoutEvents(function () use ($entity, $contentPatch) {
+                $entity->forceFill($contentPatch)->save();
+            });
             foreach ($contentPatch as $field => $value) {
                 $applied[$field] = Str::limit(strip_tags((string) $value), 120);
             }
@@ -1526,14 +1542,19 @@ class AiSeoBoardService
 
         $patch['seo_score'] = $patch['seo_score'] ?? null;
 
-        SeoMeta::updateOrCreate(
-            [
-                'model_type' => $class,
-                'model_id'   => $entity->getKey(),
-                'lang'       => config('app.locale', 'en'),
-            ],
-            $patch
-        );
+        // Skip page-cache purge observers during batch autopilot writes — the
+        // cache invalidation queries (currencies × locales × devices) add 3–5s
+        // per entity on localhost and are redundant during bulk processing.
+        SeoMeta::withoutEvents(function () use ($class, $entity, $patch) {
+            SeoMeta::updateOrCreate(
+                [
+                    'model_type' => $class,
+                    'model_id'   => $entity->getKey(),
+                    'lang'       => config('app.locale', 'en'),
+                ],
+                $patch
+            );
+        });
     }
 
     /**
@@ -1737,7 +1758,10 @@ class AiSeoBoardService
     protected function urlFor(Model $entity, string $type): string
     {
         $slug = $entity->slug ?? '';
-        $base = rtrim(url('/'), '/');
+        // Use seo.site_url so internal-link detection works correctly when the
+        // stored links use the production domain (bhssupplies.com) but APP_URL
+        // is localhost. Falls back to url('/') when not configured.
+        $base = rtrim(config('seo.site_url', url('/')), '/');
 
         return match ($type) {
             'product'  => $base . '/product/' . $slug,
@@ -2508,6 +2532,7 @@ class AiSeoBoardService
                 || preg_match_all('/[^\.\?]{10,}\?/u', $plain) >= 2);
         if (str_contains($html, 'data-seo-context-links')
             && ($focus === '' || mb_stripos($plain, $focus) !== false)
+            && ($focus === '' || $this->htmlHeadingContains($html, $focus))
             && $h2Count >= 3
             && $hasFaq
         ) {
@@ -2521,6 +2546,12 @@ class AiSeoBoardService
             return true;
         }
         if ($needHeading && !str_contains($html, 'data-seo-context-links')) {
+            return true;
+        }
+
+        // Even if previously processed, refresh if heading structure or FAQ is missing,
+        // since those are scored checks (has_multiple_h2 +4, has_faq +6, has_subheadings +5).
+        if ($h2Count < 2 || !$hasFaq) {
             return true;
         }
 
@@ -2547,14 +2578,18 @@ class AiSeoBoardService
                 || preg_match('/frequently asked questions|FAQ/i', $plain)
                 || preg_match_all('/[^\.\?]{10,}\?/u', $plain) >= 2;
             if (($focus === '' || mb_stripos($plain, $focus) !== false)
+                && ($focus === '' || $this->htmlHeadingContains($current, $focus))
                 && $mergeH2Count >= 3
                 && $mergeFaq
             ) {
                 return $current;
             }
 
+            // Strip either the old template (H2 "...for Canada and GTA Buyers") or
+            // the current template (H2 "...Canadian Supply Guide") through the
+            // closing "Buying Guidance" H3, then also remove the link paragraph.
             $stripped = preg_replace(
-                '/<h2>[^<]*for Canada and GTA Buyers<\/h2>.*?<h3>Buying Guidance<\/h3>\s*<p>.*?<\/p>/su',
+                '/<h2[^>]*>[^<]*(?:Canadian Supply Guide|for Canada and GTA Buyers)[^<]*<\/h2>.*?<h3[^>]*>\s*Buying Guidance\s*<\/h3>\s*<p[^>]*>.*?<\/p>/su',
                 '',
                 $current,
                 1
@@ -2610,9 +2645,13 @@ class AiSeoBoardService
         }
 
         $plain = trim(preg_replace('/\s+/', ' ', strip_tags($html)));
-        $needsCoreBlock = str_word_count($plain) < 500
-            || mb_stripos($plain, $focus) === false
-            || !$this->htmlHeadingContains($html, $focus);
+        // Never prepend a core block when the html is already the template output
+        // (has the context-links marker), as that would double the keyword density.
+        $alreadyHasTemplate = str_contains($html, 'data-seo-context-links');
+        $needsCoreBlock = !$alreadyHasTemplate
+            && (str_word_count($plain) < 500
+                || mb_stripos($plain, $focus) === false
+                || !$this->htmlHeadingContains($html, $focus));
 
         if ($needsCoreBlock) {
             return $this->seoSupportHtml($name, $type, $meta, $entity) . ($html !== '' ? "\n\n" . $html : '');
@@ -2628,7 +2667,25 @@ class AiSeoBoardService
     protected function seoSupportHtml(string $name, string $type, array $meta, ?Model $entity = null): string
     {
         $focus       = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
-        $keywordList = implode(', ', array_slice($meta['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type), 0, 15));
+        // For long keywords (4+ words), use a short pronoun in secondary mentions to
+        // keep keyword density in the 0.5–2.5% range and avoid the stuffing penalty.
+        $shortRef = (str_word_count($focus) >= 4)
+            ? match ($type) { 'product' => 'this product', 'category' => 'this category', default => 'this' }
+            : $focus;
+        $rawSecondaries = $meta['secondary_keywords'] ?? null;
+        if (is_string($rawSecondaries)) {
+            $rawSecondaries = array_filter(array_map('trim', preg_split('/[\r\n,]+/', $rawSecondaries)));
+        }
+        // Strip the focus keyword prefix from secondary keywords before display so
+        // long-tail phrases like "focus keyword Mississauga, focus keyword Brampton"
+        // don't inflate the focus keyword density into the stuffing range (> 3%).
+        $rawKeywords = array_slice($rawSecondaries ?: $this->canadaKeywordSet($name, $type), 0, 15);
+        $focusLower  = mb_strtolower($focus);
+        $dedupedKeywords = array_map(function (string $kw) use ($focusLower): string {
+            $stripped = trim(mb_substr($kw, mb_stripos($kw, $focusLower) === 0 ? mb_strlen($focusLower) : 0));
+            return $stripped !== '' ? $stripped : $kw;
+        }, $rawKeywords);
+        $keywordList = implode(', ', array_filter($dedupedKeywords));
         $areaText    = 'Mississauga, Brampton, Toronto and the wider GTA';
 
         $intro = match ($type) {
@@ -2661,9 +2718,9 @@ class AiSeoBoardService
         };
 
         $faqQ1 = match ($type) {
-            'product'  => "What should I check before ordering {$focus}?",
-            'category' => "How do I find the right {$focus} product for my application?",
-            default    => "How do I get started with {$focus} at BHS Supplies?",
+            'product'  => "What should I check before ordering {$shortRef}?",
+            'category' => "How do I find the right {$shortRef} for my application?",
+            default    => "How do I get started with {$shortRef} at BHS Supplies?",
         };
         $faqA1 = match ($type) {
             'product'  => "Confirm the size, material grade, pressure rating, and compatibility with your existing system. Review local code requirements if applicable. BHS Supplies can assist with product matching when specifications are unclear — contact the team with your job site details for a faster answer.",
@@ -2672,7 +2729,7 @@ class AiSeoBoardService
         };
         $faqQ2 = "Does BHS Supplies serve customers in Mississauga, Brampton, and Toronto?";
         $faqA2 = "Yes. BHS Supplies serves contractors, maintenance teams, and trade buyers across Mississauga, Brampton, Toronto, and the wider GTA. Same-day pickup and fast local delivery options are available depending on stock availability and order size. Call ahead to confirm stock before making a trip.";
-        $faqQ3 = "Can I open a trade account for {$focus} purchases?";
+        $faqQ3 = "Can I open a trade account for {$shortRef} purchases?";
         $faqA3 = "Yes. BHS Supplies offers trade accounts for contractors, facility managers, and volume buyers. Trade accounts provide access to volume pricing, priority order processing, and streamlined repeat ordering. Apply through the website or speak to the team at the trade counter to get started.";
 
         return
@@ -2696,13 +2753,17 @@ class AiSeoBoardService
             . '<p><strong>' . e($faqQ2) . '</strong><br>' . e($faqA2) . '</p>'
             . '<p><strong>' . e($faqQ3) . '</strong><br>' . e($faqA3) . '</p>'
             . '<h3>Buying Guidance</h3>'
-            . '<p>' . e("First, confirm the {$focus} specifications, application, material, and compatibility. Next, compare delivery timelines or local pickup availability. For trade buyers, a BHS Supplies account simplifies repeat ordering and unlocks volume pricing.") . '</p>'
+            . '<p>' . e("First, confirm the {$shortRef} specifications, application, material, and compatibility. Next, compare delivery timelines or local pickup availability. For trade buyers, a BHS Supplies account simplifies repeat ordering and unlocks volume pricing.") . '</p>'
             . $this->seoLinkParagraph($meta, $entity, $type);
     }
 
     protected function seoLinkParagraph(array $meta, ?Model $entity = null, ?string $type = null): string
     {
         $focus = trim((string) ($meta['focus_keyword'] ?? 'products'));
+        $shortRef = (str_word_count($focus) >= 4)
+            ? match ($type ?? '') { 'product' => 'this product', 'category' => 'this category', default => 'these' }
+            : $focus;
+        $focus = $shortRef;
         $links = $this->contextualInternalLinks($entity, $type);
         $anchors = array_map(
             fn(array $link) => '<a href="' . e($link['url']) . '">' . e($link['label']) . '</a>',
@@ -2718,18 +2779,20 @@ class AiSeoBoardService
     {
         $links = [];
 
+        $siteBase = rtrim(config('seo.site_url', url('/')), '/');
+
         try {
             if ($entity && $type === 'product' && $category = $entity->main_category) {
                 if (!empty($category->slug)) {
                     $links[] = [
-                        'url' => url('/category/' . ltrim((string) $category->slug, '/')),
+                        'url' => $siteBase . '/category/' . ltrim((string) $category->slug, '/'),
                         'label' => Str::limit((string) ($category->name ?: 'related category'), 70, ''),
                     ];
                 }
             } elseif ($entity && $type === 'category' && $parent = $entity->parentCategory) {
                 if (!empty($parent->slug)) {
                     $links[] = [
-                        'url' => url('/category/' . ltrim((string) $parent->slug, '/')),
+                        'url' => $siteBase . '/category/' . ltrim((string) $parent->slug, '/'),
                         'label' => Str::limit((string) ($parent->name ?: 'parent category'), 70, ''),
                     ];
                 }
@@ -2738,9 +2801,10 @@ class AiSeoBoardService
             // The core internal-link set below is still useful if a relation is unavailable.
         }
 
-        $links[] = ['url' => url('/shop'), 'label' => 'BHS Supplies products'];
-        $links[] = ['url' => url('/contractor-trade-account'), 'label' => 'contractor trade account'];
-        $links[] = ['url' => url('/review'), 'label' => 'leave a review'];
+        $base = rtrim(config('seo.site_url', url('/')), '/');
+        $links[] = ['url' => $base . '/shop', 'label' => 'BHS Supplies products'];
+        $links[] = ['url' => $base . '/contractor-trade-account', 'label' => 'contractor trade account'];
+        $links[] = ['url' => $base . '/review', 'label' => 'leave a review'];
         $links[] = $this->localLandingLink($entity, $type);
 
         return collect($links)->unique('url')->values()->all();
@@ -2756,8 +2820,9 @@ class AiSeoBoardService
         $seed = ($type ?: 'page') . ':' . ($entity?->getKey() ?: ($entity?->slug ?? 'default'));
         $location = $locations[abs(crc32($seed)) % count($locations)];
 
+        $base = rtrim(config('seo.site_url', url('/')), '/');
         return [
-            'url' => url('/hvac-supplies-' . $location['slug']),
+            'url' => $base . '/hvac-supplies-' . $location['slug'],
             'label' => $location['label'],
         ];
     }

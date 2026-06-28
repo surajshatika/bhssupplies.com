@@ -14,7 +14,7 @@ class OpenAIProvider implements SeoAiProviderInterface
 
         $apiKey = $this->getApiKey();
         try {
-            $response = Http::timeout(60)
+            $response = Http::timeout(config('seo.provider_failover.request_timeout', 10))
                 ->withOptions(['verify' => config('seo.ssl_verify', true)])
                 ->withToken($apiKey)
                 ->post(config('seo.providers.openai.endpoint'), [

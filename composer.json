@@ -93,6 +93,7 @@
         ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php scripts/patch-myfatoorah-autoload.php",
             "@php artisan package:discover --ansi"
         ]
     },

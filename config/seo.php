@@ -14,7 +14,9 @@ return [
         'cooldown_enabled' => env('SEO_AI_PROVIDER_COOLDOWN_ENABLED', true),
         'failure_threshold' => env('SEO_AI_PROVIDER_FAILURE_THRESHOLD', 3),
         'cooldown_minutes' => env('SEO_AI_PROVIDER_COOLDOWN_MINUTES', 15),
-        'request_timeout' => env('SEO_AI_REQUEST_TIMEOUT', 10),
+        'request_timeout' => env('SEO_AI_REQUEST_TIMEOUT', 45),
+        'connect_timeout' => env('SEO_AI_CONNECT_TIMEOUT', 5),
+        'http_retries' => env('SEO_AI_HTTP_RETRIES', 2),
         'attempt_cost_usd' => [
             'openai' => env('SEO_OPENAI_ESTIMATED_REQUEST_USD', 0.0009),
             'claude' => env('SEO_CLAUDE_ESTIMATED_REQUEST_USD', 0.0207),

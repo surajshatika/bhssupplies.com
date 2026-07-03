@@ -55,15 +55,30 @@ class SeoProviderReliability
 
         if ($success) {
             $health['successes']++;
-            $health['consecutive_failures'] = 0;
+            // Decay instead of hard reset so a flapping provider
+            // (fail, fail, success, fail, fail, ...) still accumulates toward
+            // its cooldown threshold instead of never reaching it.
+            $health['consecutive_failures'] = max(0, (int) $health['consecutive_failures'] - 2);
             $health['cooldown_until'] = null;
+            $health['cooldown_streak'] = max(0, (int) ($health['cooldown_streak'] ?? 0) - 1);
             $health['last_success_at'] = CarbonImmutable::now()->toDateTimeString();
         } else {
             $health['failures']++;
             $health['consecutive_failures']++;
-            if ($this->cooldownEnabled() && $health['consecutive_failures'] >= $this->failureThreshold()) {
+
+            // Bad credentials never fix themselves — hard-disable for 12h
+            // instead of burning an attempt on every entity of every batch.
+            if ($this->looksLikeAuthError($error)) {
+                $health['cooldown_until'] = CarbonImmutable::now()->addHours(12)->toDateTimeString();
+                $health['last_error'] = ($error ? $error . ' ' : '') . '(auth error: provider disabled for 12h — fix the API key in SEO settings)';
+            } elseif ($this->cooldownEnabled() && $health['consecutive_failures'] >= $this->failureThreshold()) {
+                // Exponential backoff: each consecutive cooldown doubles the
+                // duration (15m, 30m, 60m, ...) capped at 24h.
+                $streak = (int) ($health['cooldown_streak'] ?? 0) + 1;
+                $health['cooldown_streak'] = $streak;
+                $minutes = min(1440, $this->cooldownMinutes() * (2 ** ($streak - 1)));
                 $health['cooldown_until'] = CarbonImmutable::now()
-                    ->addMinutes($this->cooldownMinutes())
+                    ->addMinutes($minutes)
                     ->toDateTimeString();
             }
         }
@@ -155,6 +170,23 @@ class SeoProviderReliability
         )));
     }
 
+    protected function looksLikeAuthError(?string $error): bool
+    {
+        if (!$error) {
+            return false;
+        }
+
+        $needle = mb_strtolower($error);
+
+        foreach (['401', '403', 'unauthorized', 'invalid api key', 'invalid x-api-key', 'authentication', 'permission denied', 'api key not valid'] as $marker) {
+            if (str_contains($needle, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     protected function normalize(string $provider): string
     {
         return SeoProviderManager::normalizeName($provider) ?: 'unknown';
@@ -188,6 +220,7 @@ class SeoProviderReliability
             'last_attempt_at' => null,
             'last_success_at' => null,
             'cooldown_until' => null,
+            'cooldown_streak' => 0,
         ];
     }
 }

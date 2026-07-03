@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\Http;
 
 class ClaudeProvider implements SeoAiProviderInterface
 {
+    use ResilientProviderHttp;
+
     public function generate($prompt, $systemPrompt = null, array $options = [])
     {
         if (!$this->isConfigured()) {
@@ -14,8 +16,7 @@ class ClaudeProvider implements SeoAiProviderInterface
 
         $apiKey = $this->getApiKey();
         try {
-            $response = Http::timeout(config('seo.provider_failover.request_timeout', 10))
-                ->withOptions(['verify' => config('seo.ssl_verify', true)])
+            $response = $this->providerHttp()
                 ->withHeaders([
                     'x-api-key' => $apiKey,
                     'anthropic-version' => '2023-06-01',

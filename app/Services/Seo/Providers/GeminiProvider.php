@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\Http;
 
 class GeminiProvider implements SeoAiProviderInterface
 {
+    use ResilientProviderHttp;
+
     public function generate($prompt, $systemPrompt = null, array $options = [])
     {
         if (!$this->isConfigured()) {
@@ -15,10 +17,12 @@ class GeminiProvider implements SeoAiProviderInterface
         try {
             $apiKey = $this->getApiKey();
             $model = config('seo.providers.gemini.model');
-            $endpoint = rtrim(config('seo.providers.gemini.endpoint'), '/').'/'.$model.':generateContent?key='.$apiKey;
+            // Key goes in a header, not the URL — URLs leak into logs and
+            // exception traces, query-string keys leak with them.
+            $endpoint = rtrim(config('seo.providers.gemini.endpoint'), '/').'/'.$model.':generateContent';
 
-            $response = Http::timeout(config('seo.provider_failover.request_timeout', 10))
-                ->withOptions(['verify' => config('seo.ssl_verify', true)])
+            $response = $this->providerHttp()
+                ->withHeaders(['x-goog-api-key' => $apiKey])
                 ->post($endpoint, [
                 'contents' => [
                     [

@@ -52,9 +52,11 @@
 .seo-score-ring { width: 140px; height: 140px; position: relative; }
 .seo-score-ring svg { transform: rotate(-90deg); }
 .seo-score-ring .score-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
-.setup-step.done .step-dot { background: #1cc88a; }
-.setup-step.pending .step-dot { background: #e0e0e0; }
-.step-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.setup-step { padding: 6px 8px; border-radius: 6px; transition: background .15s; }
+.setup-step:hover { background: #f8f9fc; }
+.setup-step.done .step-dot { background: #1cc88a; box-shadow: 0 0 0 3px rgba(28,200,138,.15); }
+.setup-step.pending .step-dot { background: #dbe0ea; }
+.step-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 8px; flex-shrink: 0; }
 .module-card { border-left: 3px solid transparent; transition: all 0.2s; }
 .module-card:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0,0,0,.1)!important; }
 .module-card.on-page   { border-color: #4e73df; }
@@ -71,6 +73,18 @@
 .seo-file-health { border: 1px solid #edf0f5; border-radius: 8px; padding: 12px; height: 100%; }
 .seo-status-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .provider-reliability-table td, .provider-reliability-table th { white-space: nowrap; vertical-align: middle; }
+
+/* --- Visual polish pass: overview cards --- */
+.seo-suite-card { border: 1px solid #edf0f5; border-radius: 12px; box-shadow: 0 1px 3px rgba(20,25,50,.04); }
+.seo-suite-card .card-header { background: #fff; border-bottom: 1px solid #f0f2f7; border-radius: 12px 12px 0 0 !important; padding: 1rem 1.25rem; }
+.seo-suite-card .card-body { padding: 1.25rem; }
+.seo-suite-card .card-header h6 { font-size: .95rem; letter-spacing: .01em; }
+.seo-setup-icon { width: 52px; height: 52px; }
+.seo-progress-track { height: 8px; border-radius: 999px; background: #eef1f8; overflow: hidden; }
+.seo-progress-track .progress-bar { border-radius: 999px; background: linear-gradient(90deg,#4e73df,#6f8ff0); }
+.seo-empty-chart { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 300px; color: #9aa2b1; text-align: center; }
+.seo-empty-chart i { font-size: 2rem; margin-bottom: .5rem; opacity: .6; }
+.seo-health-metric-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #98a1b3; font-weight: 600; }
 </style>
 
 <div class="mm-hero mm-hero--seo">
@@ -169,18 +183,18 @@
 <div id="seo-overview" class="row gutters-16 mb-4 seo-section-anchor">
     {{-- Setup Card --}}
     <div class="col-lg-6">
-        <div class="card h-100">
+        <div class="card seo-suite-card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h6 class="mb-0 font-weight-600">{{ translate('SEO Setup') }}</h6>
-                <span class="badge badge-soft-primary">{{ $completedSteps }} / {{ $totalSteps }}</span>
+                <span class="badge {{ $setupPct >= 100 ? 'badge-soft-success' : 'badge-soft-primary' }}">{{ $completedSteps }} / {{ $totalSteps }}</span>
             </div>
             <div class="card-body">
                 <div class="row align-items-center">
                     <div class="col-md-7">
                         <div class="d-flex align-items-center mb-3">
-                            <div class="rounded-circle d-flex align-items-center justify-content-center mr-3 flex-shrink-0"
-                                 style="width:48px;height:48px;background:rgba(78,115,223,.1);">
-                                <i class="las la-search la-lg text-primary"></i>
+                            <div class="seo-setup-icon rounded-circle d-flex align-items-center justify-content-center mr-3 flex-shrink-0"
+                                 style="background:{{ $setupPct >= 100 ? 'rgba(28,200,138,.12)' : 'rgba(78,115,223,.1)' }};">
+                                <i class="las {{ $setupPct >= 100 ? 'la-check-circle text-success' : 'la-search text-primary' }} la-lg"></i>
                             </div>
                             <div>
                                 <strong>{{ translate('Step') }} {{ $completedSteps }} {{ translate('of') }} {{ $totalSteps }}</strong>
@@ -193,12 +207,18 @@
                                 </p>
                             </div>
                         </div>
-                        <div class="progress mb-3" style="height:8px; border-radius:4px;">
-                            <div class="progress-bar bg-primary" style="width:{{ $setupPct }}%; border-radius:4px;"></div>
+                        <div class="seo-progress-track mb-3">
+                            <div class="progress-bar" style="width:{{ $setupPct }}%; height:100%;"></div>
                         </div>
+                        @if($setupPct < 100)
                         <a href="{{ route('admin.seo-suite.settings.view') }}" class="btn btn-primary btn-sm">
                             <i class="las la-rocket mr-1"></i>{{ translate('Complete SEO Setup') }}
                         </a>
+                        @else
+                        <a href="{{ route('admin.seo-suite.settings.view') }}" class="btn btn-soft-success btn-sm">
+                            <i class="las la-cog mr-1"></i>{{ translate('Review Settings') }}
+                        </a>
+                        @endif
                     </div>
                     <div class="col-md-5">
                         @foreach($setupSteps as $step)
@@ -215,7 +235,7 @@
 
     {{-- SEO Site Score --}}
     <div class="col-lg-6">
-        <div class="card h-100">
+        <div class="card seo-suite-card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h6 class="mb-0 font-weight-600">{{ translate('SEO Site Health') }}</h6>
                 <a href="{{ route('admin.seo-suite.revisions') }}" class="btn btn-xs btn-soft-primary">{{ translate('Full Report') }} <i class="las la-arrow-right ml-1"></i></a>
@@ -224,6 +244,7 @@
                 <div class="row align-items-center">
                     <div class="col-6 text-center">
                         <div id="chart-seo-score" style="min-height: 200px;"></div>
+                        <div class="seo-health-metric-label mt-1">{{ translate('Overall Score') }}</div>
                     </div>
                     <div class="col-6">
                         <div id="chart-seo-health" style="min-height: 200px;"></div>
@@ -240,12 +261,16 @@
 {{-- ROW 1.5: SEO Score Trend Chart --}}
 <div class="row mb-4">
     <div class="col-12">
-        <div class="card">
+        <div class="card seo-suite-card">
             <div class="card-header">
                 <h6 class="mb-0 font-weight-600">{{ translate('SEO Score Trend (Last 30 Days)') }}</h6>
             </div>
             <div class="card-body">
                 <div id="chart-seo-trend" style="min-height: 300px;"></div>
+                <div id="chart-seo-trend-empty" class="seo-empty-chart" style="display:none;">
+                    <i class="las la-chart-area"></i>
+                    <div>{{ translate('No score history yet — run an SEO audit to start tracking trends.') }}</div>
+                </div>
             </div>
         </div>
     </div>
@@ -2019,15 +2044,33 @@ $(function() {
             yaxis: { min: 0, max: 100 }
         };
         new ApexCharts(document.querySelector("#chart-seo-trend"), trendOptions).render();
+    } else {
+        $('#chart-seo-trend').hide();
+        $('#chart-seo-trend-empty').show();
     }
 
     // --- Live Dashboard Sync (AJAX Polling) ---
+    // Pauses while the tab is hidden and backs off after repeated failures
+    // instead of hammering a broken endpoint every 10s forever.
+    var syncFailures = 0;
+    var syncTimer = null;
+
     function syncDashboardData() {
+        if (document.visibilityState === 'hidden') {
+            scheduleNextSync(10000);
+            return;
+        }
+
         $.ajax({
             url: '{{ route('admin.seo-suite.live_sync') }}',
             method: 'GET',
+            timeout: 15000,
             success: function(res) {
-                if (res.error) return;
+                syncFailures = 0;
+                if (!res || res.error || !res.site_health) {
+                    scheduleNextSync(10000);
+                    return;
+                }
 
                 // Update Radial Score
                 if (res.site_health.score !== currentScore) {
@@ -2046,7 +2089,11 @@ $(function() {
                 }
 
                 // Update Trend Line
-                if (res.chart_data && res.chart_data.dates.length > 0) {
+                if (res.chart_data && res.chart_data.dates && res.chart_data.dates.length > 0) {
+                    if ($('#chart-seo-trend-empty').is(':visible')) {
+                        $('#chart-seo-trend-empty').hide();
+                        $('#chart-seo-trend').show();
+                    }
                     ApexCharts.exec('chart-seo-trend', 'updateOptions', {
                         xaxis: { categories: res.chart_data.dates },
                         series: [{ name: 'SEO Score', data: res.chart_data.scores }]
@@ -2057,12 +2104,32 @@ $(function() {
                 if ($('#sync-success-rate').length) $('#sync-success-rate').text(res.success_rate + '%');
                 if ($('#sync-runs-completed').length) $('#sync-runs-completed').text(res.runs_completed);
                 if ($('#sync-runs-total').length) $('#sync-runs-total').text(res.runs_total);
+
+                scheduleNextSync(10000);
+            },
+            error: function() {
+                syncFailures++;
+                // Exponential backoff up to 2 minutes so a down endpoint
+                // doesn't get hit every 10s indefinitely.
+                var delay = Math.min(120000, 10000 * Math.pow(2, syncFailures));
+                scheduleNextSync(delay);
             }
         });
     }
 
-    // Poll every 10 seconds
-    setInterval(syncDashboardData, 10000);
+    function scheduleNextSync(delay) {
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(syncDashboardData, delay);
+    }
+
+    scheduleNextSync(10000);
+
+    document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible') {
+            clearTimeout(syncTimer);
+            syncDashboardData();
+        }
+    });
 });
 </script>
 @endsection

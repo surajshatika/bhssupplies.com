@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\Http;
 
 class OpenAIProvider implements SeoAiProviderInterface
 {
+    use ResilientProviderHttp;
+
     public function generate($prompt, $systemPrompt = null, array $options = [])
     {
         if (!$this->isConfigured()) {
@@ -14,8 +16,7 @@ class OpenAIProvider implements SeoAiProviderInterface
 
         $apiKey = $this->getApiKey();
         try {
-            $response = Http::timeout(config('seo.provider_failover.request_timeout', 10))
-                ->withOptions(['verify' => config('seo.ssl_verify', true)])
+            $response = $this->providerHttp()
                 ->withToken($apiKey)
                 ->post(config('seo.providers.openai.endpoint'), [
                     'model' => config('seo.providers.openai.model'),

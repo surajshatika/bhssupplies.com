@@ -44,6 +44,24 @@ class AiAutoFixSeoJob implements ShouldQueue
 
     public function handle(AiSeoBoardService $board, SeoBudgetGuard $budget): void
     {
+        // One writer per batch: the cron chunker and a queue worker can both
+        // pick up the same batch; without this lock they would process the
+        // same offsets twice (duplicate AI spend + clobbered counters).
+        $lock = \Illuminate\Support\Facades\Cache::lock('seo:ai-batch:' . $this->batchId, $this->timeout);
+        if (!$lock->get()) {
+            logger()->info('AiAutoFixSeoJob skipped: batch already being processed', ['batch' => $this->batchId]);
+            return;
+        }
+
+        try {
+            $this->processBatch($board, $budget);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    protected function processBatch(AiSeoBoardService $board, SeoBudgetGuard $budget): void
+    {
         $batch = SeoFixBatch::find($this->batchId);
         if (!$batch || $batch->isTerminal()) {
             return;
@@ -89,7 +107,7 @@ class AiAutoFixSeoJob implements ShouldQueue
             $reservedCost = $this->reservedCostForNextEntity($batch);
             if (!$budget->allowsAdditional($reservedCost)) {
                 $this->pauseForBudget($batch, $budget, $reservedCost);
-                $this->runPostOptimizationActions($optimizedUrls, $batch);
+                $this->flushPostOptimizationActions($optimizedUrls, $batch);
                 return;
             }
 
@@ -134,9 +152,8 @@ class AiAutoFixSeoJob implements ShouldQueue
 
         $batch->refresh();
 
-        $this->runPostOptimizationActions($optimizedUrls, $batch);
-
         if ($batch->processed >= $total) {
+            $this->flushPostOptimizationActions($optimizedUrls, $batch);
             $batch->update([
                 'status'        => SeoFixBatch::STATUS_COMPLETED,
                 'current_label' => null,
@@ -145,6 +162,10 @@ class AiAutoFixSeoJob implements ShouldQueue
             return;
         }
 
+        // Mid-batch chunk boundary: defer the heavy post-actions (full sitemap
+        // rebuild + auto-linker) until the batch finishes instead of re-running
+        // them every 5-minute cron chunk. URLs are carried on the batch row.
+        $this->stashOptimizedUrls($optimizedUrls, $batch);
         $batch->update([
             'status'        => SeoFixBatch::STATUS_RUNNING,
             'current_label' => 'Waiting for next scheduled chunk',
@@ -154,13 +175,33 @@ class AiAutoFixSeoJob implements ShouldQueue
     public function failed(Throwable $exception): void
     {
         $batch = SeoFixBatch::find($this->batchId);
-        if ($batch && !$batch->isTerminal()) {
-            $batch->appendError('Job crashed: ' . $exception->getMessage());
-            $batch->update([
-                'status'       => SeoFixBatch::STATUS_FAILED,
-                'completed_at' => Carbon::now(),
-            ]);
+        if (!$batch || $batch->isTerminal()) {
+            return;
         }
+
+        $batch->appendError('Job crashed: ' . $exception->getMessage());
+
+        // A crash mid-batch used to flip the whole batch to FAILED, abandoning
+        // every remaining URL (60/100 processed → 40 orphaned). Leave it
+        // resumable for the cron chunker unless it keeps crashing.
+        $options = $batch->options ?? [];
+        $crashes = (int) ($options['crash_count'] ?? 0) + 1;
+        $options['crash_count'] = $crashes;
+
+        if ($crashes >= 3 || $batch->remainingCount() <= 0) {
+            $batch->update([
+                'status'        => SeoFixBatch::STATUS_FAILED,
+                'options'       => $options,
+                'completed_at'  => Carbon::now(),
+            ]);
+            return;
+        }
+
+        $batch->update([
+            'status'        => SeoFixBatch::STATUS_QUEUED,
+            'options'       => $options,
+            'current_label' => 'Recovering after crash (' . $crashes . '/3) — resumes on next cron chunk',
+        ]);
     }
 
     protected function perEntityCost(SeoFixBatch $batch): float
@@ -273,22 +314,27 @@ class AiAutoFixSeoJob implements ShouldQueue
     {
         $reliability = app(SeoProviderReliability::class);
 
-        return round((float) collect(SeoProviderManager::fallbackOrder($batch->provider))
-            ->sum(function (string $provider) use ($reliability): float {
-                if ($reliability->shouldSkip($provider)) {
-                    return 0.0;
-                }
+        // Reserve the cost of the FIRST healthy configured provider only. The
+        // old sum-of-all-providers reservation assumed every provider in the
+        // failover chain would be billed for every entity, which paused
+        // batches on "budget reached" long before the cap was actually hit.
+        foreach (SeoProviderManager::fallbackOrder($batch->provider) as $provider) {
+            if ($reliability->shouldSkip($provider)) {
+                continue;
+            }
 
-                try {
-                    if (!SeoProviderManager::makeDirect($provider)->isConfigured()) {
-                        return 0.0;
-                    }
-                } catch (Throwable $e) {
-                    return 0.0;
+            try {
+                if (!SeoProviderManager::makeDirect($provider)->isConfigured()) {
+                    continue;
                 }
+            } catch (Throwable $e) {
+                continue;
+            }
 
-                return $reliability->estimateAttemptCost($provider);
-            }), 6);
+            return round($reliability->estimateAttemptCost($provider), 6);
+        }
+
+        return 0.0;
     }
 
     protected function pauseForBudget(SeoFixBatch $batch, SeoBudgetGuard $budget, float $reservedCost): void
@@ -308,6 +354,40 @@ class AiAutoFixSeoJob implements ShouldQueue
             'current_label' => 'Paused: daily AI budget reached',
             'options' => $options,
         ]);
+    }
+
+    /** Carry this chunk's optimized URLs on the batch row for the final flush. */
+    protected function stashOptimizedUrls(array $optimizedUrls, SeoFixBatch $batch): void
+    {
+        if (empty($optimizedUrls)) {
+            return;
+        }
+
+        $options = $batch->options ?? [];
+        $options['pending_post_urls'] = array_values(array_unique(array_merge(
+            $options['pending_post_urls'] ?? [],
+            $optimizedUrls
+        )));
+        $batch->options = $options;
+        $batch->save();
+    }
+
+    /** Run post-actions once, over every URL optimized across all chunks. */
+    protected function flushPostOptimizationActions(array $optimizedUrls, SeoFixBatch $batch): void
+    {
+        $options = $batch->options ?? [];
+        $allUrls = array_values(array_unique(array_merge(
+            $options['pending_post_urls'] ?? [],
+            $optimizedUrls
+        )));
+
+        if (isset($options['pending_post_urls'])) {
+            unset($options['pending_post_urls']);
+            $batch->options = $options;
+            $batch->save();
+        }
+
+        $this->runPostOptimizationActions($allUrls, $batch);
     }
 
     protected function runPostOptimizationActions(array $optimizedUrls, SeoFixBatch $batch): void

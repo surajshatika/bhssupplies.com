@@ -20,6 +20,11 @@
  */
 $mfVersion = '2.2';
 
+// mf-self-updater-disabled
+// Do not self-update library code over the network on autoload; updates must
+// go through composer. (Re-applied by scripts/patch-myfatoorah-autoload.php.)
+return;
+
 if (!in_array('curl', get_loaded_extensions())) {
     trigger_error('Kindly install and enable PHP cURL extension in your server.', E_USER_WARNING);
     return;

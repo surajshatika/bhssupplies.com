@@ -98,15 +98,20 @@ class ImageOptimizerService
 
     public function getStats(): array
     {
-        $total = $converted = $spaceSaved = $backupSize = 0;
+        $total = $converted = $avifConverted = $spaceSaved = $avifSpaceSaved = $backupSize = 0;
         foreach ($this->scanRoots as $root) {
-            $this->walkImages($root, function ($path) use (&$total, &$converted, &$spaceSaved) {
+            $this->walkImages($root, function ($path) use (&$total, &$converted, &$avifConverted, &$spaceSaved, &$avifSpaceSaved) {
                 $total++;
                 $ext  = strtolower(pathinfo($path, PATHINFO_EXTENSION));
                 $webp = preg_replace('/\.' . $ext . '$/i', '.webp', $path);
+                $avif = preg_replace('/\.' . $ext . '$/i', '.avif', $path);
                 if (file_exists($webp)) {
                     $converted++;
                     $spaceSaved += max(0, (@filesize($path) ?: 0) - (@filesize($webp) ?: 0));
+                }
+                if (file_exists($avif)) {
+                    $avifConverted++;
+                    $avifSpaceSaved += max(0, (@filesize($path) ?: 0) - (@filesize($avif) ?: 0));
                 }
             });
         }
@@ -118,6 +123,8 @@ class ImageOptimizerService
             'converted'     => $converted,
             'not_converted' => max(0, $total - $converted),
             'space_saved'   => $this->humanSize($spaceSaved),
+            'avif_converted'=> $avifConverted,
+            'avif_space_saved' => $this->humanSize($avifSpaceSaved),
             'backup_size'   => $this->humanSize($backupSize),
         ];
     }

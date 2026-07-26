@@ -9,6 +9,7 @@ use App\Models\City;
 use App\Models\CityTranslation;
 use App\Models\Country;
 use App\Models\State;
+use Illuminate\Support\Facades\Schema;
 
 class AreaController extends Controller
 {
@@ -33,9 +34,15 @@ class AreaController extends Controller
              });
 
         if ($sort_country) {
-            $area_queries->whereHas('city.country', function ($q) use ($sort_country) {
-                $q->where('id', $sort_country);
-            });
+            if ($this->citiesHaveCountry()) {
+                $area_queries->whereHas('city.country', function ($q) use ($sort_country) {
+                    $q->where('id', $sort_country);
+                });
+            } else {
+                $area_queries->whereHas('city.state', function ($q) use ($sort_country) {
+                    $q->where('country_id', $sort_country);
+                });
+            }
         }
 
         if ($sort_state) {
@@ -60,11 +67,7 @@ class AreaController extends Controller
                 $query->where('status', 1);
             })
             ->get();
-        $countries = Country::where('status', 1)
-            ->whereHas('cities', function ($query) {
-                $query->where('status', 1);
-            })
-            ->get();
+        $countries = $this->countriesWithCities();
         return view('backend.setup_configurations.areas.index', compact(
             'areas', 'cities', 'states', 'countries', 'sort_city', 'sort_state', 'sort_area', 'sort_country'
         ));
@@ -114,18 +117,17 @@ class AreaController extends Controller
         $states = State::where('status', 1)->whereHas('cities', function ($query) {
                 $query->where('status', 1);
             })->get();
-        $countries = Country::where('status', 1)->whereHas('cities', function ($query) {
-                $query->where('status', 1);
-            })->get();
+        $countries = $this->countriesWithCities();
 
         if(get_setting('has_state') == 1) {
             $cities = City::where('state_id', $area->city->state_id ?? null)
                 ->where('status', 1)
                 ->get();
         } else {
-            $cities = City::where('country_id', $area->city->country_id ?? null)
-                ->where('status', 1)
-                ->get();
+            $countryId = $this->citiesHaveCountry()
+                ? ($area->city->country_id ?? null)
+                : ($area->city?->state?->country_id ?? null);
+            $cities = $this->citiesByCountry($countryId);
         }
 
         return view('backend.setup_configurations.areas.edit', compact('area', 'lang', 'states', 'cities', 'countries'));
@@ -158,6 +160,42 @@ class AreaController extends Controller
 
         flash(translate('Area has been updated successfully'))->success();
         return back();
+    }
+
+    protected function citiesHaveCountry(): bool
+    {
+        return Schema::hasColumn('cities', 'country_id');
+    }
+
+    protected function countriesWithCities()
+    {
+        $query = Country::where('status', 1);
+
+        if ($this->citiesHaveCountry()) {
+            return $query->whereHas('cities', function ($cityQuery) {
+                $cityQuery->where('status', 1);
+            })->get();
+        }
+
+        return $query->whereHas('states.cities', function ($cityQuery) {
+            $cityQuery->where('status', 1);
+        })->get();
+    }
+
+    protected function citiesByCountry($countryId)
+    {
+        $query = City::where('status', 1);
+        if (!$countryId) {
+            return collect();
+        }
+
+        if ($this->citiesHaveCountry()) {
+            return $query->where('country_id', $countryId)->get();
+        }
+
+        return $query->whereIn('state_id', function ($subQuery) use ($countryId) {
+            $subQuery->select('id')->from('states')->where('country_id', $countryId);
+        })->get();
     }
 
     /**

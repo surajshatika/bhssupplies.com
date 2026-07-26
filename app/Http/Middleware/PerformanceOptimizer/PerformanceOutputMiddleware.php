@@ -25,6 +25,8 @@ use Illuminate\Http\Request;
  *
  * Runs only when:
  *  - perf_status == 1
+ *  - perf_cms_fast_mode != 1
+ *  - at least one runtime HTML rewrite feature is explicitly enabled
  *  - admin / API / non-HTML responses are skipped
  *  - response is 200 OK and Content-Type is text/html
  */
@@ -57,7 +59,9 @@ class PerformanceOutputMiddleware
 
         $html = $this->injectHead($html, $request, $lcpSrc);
         $html = $this->processImages($html, $lcpSrc);
+        $html = $this->processLocalizedScripts($html);
         $html = $this->processScripts($html);
+        $html = $this->processStylesheets($html);
         $html = $this->processScriptManager($html, $request);
         $html = $this->injectBodyEnd($html);
         $html = $this->minifyHtml($html);
@@ -87,6 +91,8 @@ class PerformanceOutputMiddleware
         }
 
         if ((int) $this->setting('perf_status', 1) !== 1) return false;
+        if ((int) $this->setting('perf_cms_fast_mode', 1) === 1) return false;
+        if (!$this->hasRuntimeFeaturesEnabled()) return false;
 
         // Skip HTML fragments — only process full documents
         $body = (string) $response->getContent();
@@ -102,7 +108,7 @@ class PerformanceOutputMiddleware
         $injects = [];
 
         // LCP hero image preload — inject before anything else so browser discovers it first
-        if ($lcpSrc !== null) {
+        if ($lcpSrc !== null && !$this->hasImagePreload($html)) {
             $injects[] = '<link rel="preload" as="image" href="' . htmlspecialchars($lcpSrc, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '" fetchpriority="high">';
         }
 
@@ -118,8 +124,26 @@ class PerformanceOutputMiddleware
         }
 
         // Force font-display: swap
-        if ((int) $this->setting('perf_fonts_swap_status', 1) === 1) {
+        if ((int) $this->setting('perf_fonts_swap_status', 0) === 1) {
             $injects[] = $this->fonts->renderFontDisplaySwap();
+        }
+
+        // Preconnect and DNS-Prefetch
+        if ($domains = trim($this->setting('perf_preconnect_domains', ''))) {
+            $domainList = array_filter(array_map('trim', explode("\n", $domains)));
+            foreach ($domainList as $domain) {
+                if ($domain !== '') {
+                    $injects[] = '<link rel="preconnect" href="' . htmlspecialchars($domain, ENT_QUOTES, 'UTF-8') . '" crossorigin>';
+                    $injects[] = '<link rel="dns-prefetch" href="' . htmlspecialchars($domain, ENT_QUOTES, 'UTF-8') . '">';
+                }
+            }
+        }
+
+        // Speculation Rules (Prerendering)
+        if ((int) $this->setting('perf_speculation_rules_status', 0) === 1) {
+            $injects[] = '<script type="speculationrules">
+{"prerender":[{"source":"document","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":["/admin/*","/login","/logout","/cart","/checkout","/api/*"]}}]},"eagerness":"moderate"}]}
+</script>';
         }
 
         if (empty($injects)) return $html;
@@ -136,7 +160,7 @@ class PerformanceOutputMiddleware
 
     protected function processImages(string $html, ?string $lcpSrc = null): string
     {
-        $lazy   = (int) $this->setting('perf_image_lazyload', 1) === 1;
+        $lazy   = (int) $this->setting('perf_image_lazyload', 0) === 1;
         $serveWebp = (int) $this->setting('perf_image_serve_webp_auto', 0) === 1;
         $imageCdn  = (int) $this->setting('perf_image_cdn_status', 0) === 1;
         $cdnUrl    = rtrim($this->setting('perf_image_cdn_url', ''), '/');
@@ -231,32 +255,102 @@ class PerformanceOutputMiddleware
         return public_path($path);
     }
 
-    // ── <script> processing (defer) ──────────────────────────────────
+    // ── Localize 3rd-Party Scripts ───────────────────────────────────
+
+    protected function processLocalizedScripts(string $html): string
+    {
+        if ((int) $this->setting('perf_localize_scripts_status', 0) !== 1) return $html;
+
+        $map = [
+            'https://www.google-analytics.com/analytics.js' => asset('perf/scripts/analytics.js'),
+            'https://connect.facebook.net/en_US/fbevents.js' => asset('perf/scripts/fbevents.js'),
+            'https://www.googletagmanager.com/gtm.js' => asset('perf/scripts/gtm.js'),
+        ];
+
+        return preg_replace_callback('/<script\b([^>]*)>/i', function ($m) use ($map) {
+            $attrs = $m[1];
+            if (!preg_match('/\bsrc\s*=\s*(["\'])([^"\']+)\1/i', $attrs, $sm)) return $m[0];
+            
+            $src = $sm[2];
+            foreach ($map as $remote => $local) {
+                if (str_starts_with($src, $remote)) {
+                    $path = public_path('perf/scripts/' . basename(parse_url($remote, PHP_URL_PATH)));
+                    if ($this->cachedFileExists($path)) {
+                        $attrs = str_replace($src, $local, $attrs);
+                        return '<script' . $attrs . '>';
+                    }
+                }
+            }
+            return $m[0];
+        }, $html);
+    }
+
+    // ── <script> processing (defer & delay) ──────────────────────────
 
     protected function processScripts(string $html): string
     {
-        if ((int) $this->setting('perf_js_defer_status', 0) !== 1) return $html;
+        $defer = (int) $this->setting('perf_js_defer_status', 0) === 1;
+        $delay = (int) $this->setting('perf_js_delay_status', 0) === 1;
 
-        // Safety baseline: never defer scripts that ship jQuery or the AIZ core,
+        if (!$defer && !$delay) return $html;
+
+        // Safety baseline: never defer or delay scripts that ship jQuery or the AIZ core,
         // because the layout has inline <script> blocks that call $() / AIZ.* at parse time.
-        // Deferring these breaks home-section AJAX loaders, infinite scroll, modals, etc.
-        $defaultExcludes = ['jquery', 'vendors.js', 'aiz-core.js'];
-        $userExcludes    = array_filter(array_map('trim', explode("\n", $this->setting('perf_js_defer_exclude', ''))));
-        $excludes        = array_values(array_unique(array_merge($defaultExcludes, $userExcludes)));
+        // Delaying these breaks home-section AJAX loaders, infinite scroll, modals, etc.
+        $defaultExcludes = ['jquery', 'vendors.js', 'aiz-core', 'bootstrap', 'slick', 'checkout', 'stripe', 'recaptcha', 'firebase'];
+        
+        $userExcludes = array_filter(array_map('trim', explode("\n", $this->setting('perf_js_defer_exclude', ''))));
+        if ($delay) {
+            $userExcludes = array_merge($userExcludes, array_filter(array_map('trim', explode("\n", $this->setting('perf_delay_js_exclusions', '')))));
+        }
+        
+        $excludes = array_values(array_unique(array_merge($defaultExcludes, $userExcludes)));
 
-        return preg_replace_callback('/<script\b([^>]*)>/i', function ($m) use ($excludes) {
+        return preg_replace_callback('/<script\b([^>]*)>/i', function ($m) use ($excludes, $defer, $delay) {
             $attrs = $m[1];
 
-            // Already has defer / async / module
-            if (preg_match('/\b(defer|async|type\s*=\s*["\']?module)\b/i', $attrs)) return $m[0];
-            // Skip inline (no src) — too risky to defer
+            // Already has type="text/delayed-script" or type="module"
+            if (preg_match('/\btype\s*=\s*["\']?(text\/delayed-script|module)["\']?/i', $attrs)) return $m[0];
+            
+            // Skip inline (no src) — too risky to defer/delay globally
             if (!preg_match('/\bsrc\s*=\s*(["\'])([^"\']+)\1/i', $attrs, $sm)) return $m[0];
 
             $src = $sm[2];
             foreach ($excludes as $ex) {
                 if ($ex !== '' && stripos($src, $ex) !== false) return $m[0];
             }
+            
+            if ($delay) {
+                // Remove existing type if any, and add our delayed type
+                $attrs = preg_replace('/\btype\s*=\s*["\']?[^"\']*["\']?/i', '', $attrs);
+                return '<script type="text/delayed-script"' . $attrs . '>';
+            }
+
+            // Already has defer or async
+            if (preg_match('/\b(defer|async)\b/i', $attrs)) return $m[0];
+            
             return '<script defer' . $attrs . '>';
+        }, $html);
+    }
+
+    // ── <link> processing (defer css) ────────────────────────────────
+
+    protected function processStylesheets(string $html): string
+    {
+        if ((int) $this->setting('perf_defer_css_status', 0) !== 1) return $html;
+
+        return preg_replace_callback('/<link\b([^>]*)>/i', function ($m) {
+            $attrs = $m[1];
+            
+            // Only process stylesheet links
+            if (!preg_match('/\brel\s*=\s*["\']stylesheet["\']/i', $attrs)) return $m[0];
+            
+            // Skip if already deferred or if it's meant to be print media
+            if (preg_match('/\bmedia\s*=\s*["\']print["\']/i', $attrs)) return $m[0];
+            if (preg_match('/\bonload\s*=/i', $attrs)) return $m[0];
+
+            // Add the media="print" onload trick
+            return '<link' . $attrs . ' media="print" onload="this.media=\'all\'"><noscript><link' . $attrs . '></noscript>';
         }, $html);
     }
 
@@ -392,6 +486,27 @@ class PerformanceOutputMiddleware
         return $html;
     }
 
+    protected function hasRuntimeFeaturesEnabled(): bool
+    {
+        if ((int) $this->setting('perf_image_lazyload', 0) === 1) return true;
+        if ((int) $this->setting('perf_image_serve_webp_auto', 0) === 1) return true;
+        if ((int) $this->setting('perf_image_cdn_status', 0) === 1 && trim($this->setting('perf_image_cdn_url', '')) !== '') return true;
+        if ((int) $this->setting('perf_fonts_preload_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_fonts_swap_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_js_defer_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_js_delay_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_defer_css_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_script_manager_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_vitals_collect_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_lcp_preload_status', 0) === 1) return true;
+        if ((int) $this->setting('perf_html_minify_status', 0) === 1) return true;
+        if (trim($this->setting('perf_critical_css', '')) !== '') return true;
+        if ((int) $this->setting('perf_speculation_rules_status', 0) === 1) return true;
+        if (trim($this->setting('perf_preconnect_domains', '')) !== '') return true;
+        if ((int) $this->setting('perf_localize_scripts_status', 0) === 1) return true;
+        return false;
+    }
+
     protected function setting(string $key, $default = null): string
     {
         if (!array_key_exists($key, $this->settings)) {
@@ -406,5 +521,13 @@ class PerformanceOutputMiddleware
             $this->localFileExists[$path] = file_exists($path);
         }
         return $this->localFileExists[$path];
+    }
+
+    protected function hasImagePreload(string $html): bool
+    {
+        return (bool) preg_match(
+            '/<link\b(?=[^>]*\brel\s*=\s*["\']preload["\'])(?=[^>]*\bas\s*=\s*["\']image["\'])[^>]*>/i',
+            $html
+        );
     }
 }

@@ -252,25 +252,39 @@ class CssJsMinifierService
 
     public function getDelayScript(): string
     {
-        $raw = get_setting('perf_js_defer_exclude', "jquery\nfirebase\nrecaptcha");
-        $excludes = array_values(array_filter(array_map('trim', explode("\n", $raw))));
-        $excludesJson = json_encode($excludes);
         return <<<JS
 <script data-perfopt="delay-js">
 (function(){
-    var excluded = {$excludesJson};
-    function isExcluded(s){ if(!s) return false; s=String(s).toLowerCase();
-        for (var i=0;i<excluded.length;i++){ if (s.indexOf(excluded[i].toLowerCase())>-1) return true; } return false; }
     var delayed = [];
     var fired   = false;
+    document.querySelectorAll('script[type="text/delayed-script"]').forEach(function(node){
+        var attrs = [];
+        Array.prototype.forEach.call(node.attributes, function(attr){
+            if (attr.name !== 'type' && attr.name !== 'data-perf-delay' && attr.name !== 'src') {
+                attrs.push([attr.name, attr.value]);
+            }
+        });
+        delayed.push({ src: node.getAttribute('src'), content: node.textContent || '', attrs: attrs });
+        node.parentNode.removeChild(node);
+    });
+    function appendNext(queue){
+        if (!queue.length) return;
+        var d = queue.shift();
+        var s = document.createElement('script');
+        d.attrs.forEach(function(attr){ s.setAttribute(attr[0], attr[1]); });
+        if (d.src) {
+            s.src = d.src;
+            s.async = false;
+            s.onload = s.onerror = function(){ appendNext(queue); };
+        } else {
+            s.textContent = d.content;
+        }
+        (document.body || document.documentElement).appendChild(s);
+        if (!d.src) appendNext(queue);
+    }
     function loadDelayed(){
         if (fired) return; fired = true;
-        delayed.forEach(function(d){
-            var s = document.createElement('script');
-            if (d.src){ s.src = d.src; s.async = true; } else { s.textContent = d.content; }
-            document.body.appendChild(s);
-        });
-        delayed = [];
+        appendNext(delayed);
     }
     ['click','scroll','keydown','touchstart','mousemove'].forEach(function(e){
         window.addEventListener(e, loadDelayed, { once: true, passive: true });

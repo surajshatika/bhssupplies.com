@@ -8,6 +8,7 @@ use App\Models\Area;
 use App\Models\City;
 use App\Models\State;
 use Auth;
+use Illuminate\Support\Facades\Schema;
 
 class AddressController extends Controller
 {
@@ -25,7 +26,9 @@ class AddressController extends Controller
         $address->country_id    = $request->country_id;
         $address->state_id      = $request->state_id ?? null;
         $address->city_id       = $request->city_id;
-        $address->area_id       = $request->area_id ?? null;
+        if ($this->addressesHaveArea()) {
+            $address->area_id   = $request->area_id ?? null;
+        }
         $address->longitude     = $request->longitude;
         $address->latitude      = $request->latitude;
         $address->postal_code   = $request->postal_code;
@@ -72,7 +75,9 @@ class AddressController extends Controller
             $address->state_id = $request->state_id ?? $address->state_id;
         }
         $address->city_id       = $request->city_id;
-        $address->area_id       = $request->area_id ?? null;
+        if ($this->addressesHaveArea()) {
+            $address->area_id   = $request->area_id ?? null;
+        }
         $address->longitude     = $request->longitude;
         $address->latitude      = $request->latitude;
         $address->postal_code   = $request->postal_code;
@@ -133,5 +138,10 @@ class AddressController extends Controller
         $address->save();
 
         return back();
+    }
+
+    protected function addressesHaveArea(): bool
+    {
+        return Schema::hasColumn('addresses', 'area_id');
     }
 }

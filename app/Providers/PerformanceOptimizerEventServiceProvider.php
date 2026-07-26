@@ -27,7 +27,7 @@ class PerformanceOptimizerEventServiceProvider extends ServiceProvider
             return;
         }
 
-        $purge = function ($model) {
+        $purgeAll = function () {
             // 1) Local page cache
             try { app(PageCacheService::class)->clearAll(); } catch (Throwable $e) {}
 
@@ -46,15 +46,32 @@ class PerformanceOptimizerEventServiceProvider extends ServiceProvider
             }
         };
 
+        // Fields whose change justifies a SITE-WIDE cache + CDN purge. High-frequency
+        // bookkeeping writes (current_stock decrement on checkout, num_of_sale, view
+        // counters) must NOT wipe the whole cache and hammer CDN purge APIs — the
+        // targeted EntityCachePurgeObserver already invalidates the single entity page.
+        $significant = [
+            'Product'  => ['name', 'slug', 'unit_price', 'discount', 'discount_type', 'published', 'approved', 'description', 'thumbnail_img', 'photos', 'meta_title', 'meta_description'],
+            'Category' => ['name', 'slug', 'banner', 'icon', 'parent_id', 'meta_title', 'meta_description', 'top_description', 'bottom_description'],
+        ];
+
+        $purgeOnSave = function ($model) use ($purgeAll, $significant) {
+            $fields = $significant[class_basename($model)] ?? [];
+            if (!$model->wasRecentlyCreated && $fields && !$model->wasChanged($fields)) {
+                return;
+            }
+            $purgeAll();
+        };
+
         // Listen to Product + Category lifecycle events. Class checks guard against
         // theme/marketplace variants that may have renamed models.
         if (class_exists(\App\Models\Product::class)) {
-            \App\Models\Product::saved($purge);
-            \App\Models\Product::deleted($purge);
+            \App\Models\Product::saved($purgeOnSave);
+            \App\Models\Product::deleted($purgeAll);
         }
         if (class_exists(\App\Models\Category::class)) {
-            \App\Models\Category::saved($purge);
-            \App\Models\Category::deleted($purge);
+            \App\Models\Category::saved($purgeOnSave);
+            \App\Models\Category::deleted($purgeAll);
         }
 
         // Slow Query analyzer — attach DB::listen on every request (gated inside)

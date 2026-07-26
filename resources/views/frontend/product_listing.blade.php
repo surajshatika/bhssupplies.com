@@ -1,14 +1,22 @@
 @extends('frontend.layouts.app')
 
+@php
+    $listingCategory = isset($category) && is_object($category) ? $category : null;
+    $listingBrand = isset($brand) && is_object($brand) ? $brand : null;
+    $rootCategories = isset($categories) && is_iterable($categories) ? $categories : collect();
+    $filterBrands = isset($filterBrands) && is_iterable($filterBrands) ? $filterBrands : collect();
+    $priceRange = isset($priceRange) && is_array($priceRange) ? $priceRange : ['min' => 0, 'max' => 0];
+@endphp
+
 @if (isset($category_id))
     @php
-        $catObj          = isset($category) && is_object($category) ? $category : \App\Models\Category::find($category_id);
+        $catObj          = $listingCategory ?: \App\Models\Category::find($category_id);
         $meta_title      = $catObj->meta_title;
         $meta_description= $catObj->meta_description;
     @endphp
 @elseif (isset($brand_id))
     @php
-        $brandObj        = isset($brand) && is_object($brand) ? $brand : \App\Models\Brand::find($brand_id);
+        $brandObj        = $listingBrand ?: \App\Models\Brand::find($brand_id);
         $meta_title      = $brandObj->meta_title;
         $meta_description= $brandObj->meta_description;
     @endphp
@@ -36,6 +44,22 @@
     <meta property="og:url" content="{{ url()->current() }}">
     <meta property="og:description" content="{{ $meta_description }}">
     <meta property="og:site_name" content="{{ get_setting('website_name') ?: env('APP_NAME') }}">
+    @php
+        $_listing_og_image = null;
+        if (isset($category_id) && $listingCategory && $listingCategory->banner) {
+            $_listing_og_image = my_asset($listingCategory->banner);
+        } elseif (isset($brand_id) && $listingBrand && $listingBrand->logo) {
+            $_listing_og_image = uploaded_asset($listingBrand->logo);
+        } else {
+            $_listing_og_image = uploaded_asset(get_setting('meta_image'));
+        }
+    @endphp
+    @if($_listing_og_image)
+    <meta property="og:image" content="{{ $_listing_og_image }}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:image" content="{{ $_listing_og_image }}">
+    @endif
 
     {{-- BreadcrumbList Schema --}}
     @php
@@ -43,9 +67,9 @@
             ['@type' => 'ListItem', 'position' => 1, 'name' => 'Home', 'item' => url('/')],
             ['@type' => 'ListItem', 'position' => 2, 'name' => 'All Categories', 'item' => route('search')],
         ];
-        if (isset($category_id) && ($catBc = (isset($category) && is_object($category) ? $category : \App\Models\Category::find($category_id)))) {
+        if (isset($category_id) && ($catBc = $listingCategory)) {
             $breadcrumbItems[] = ['@type' => 'ListItem', 'position' => 3, 'name' => $catBc->getTranslation('name'), 'item' => url()->current()];
-        } elseif (isset($brand_id) && ($brandBc = (isset($brand) && is_object($brand) ? $brand : \App\Models\Brand::find($brand_id)))) {
+        } elseif (isset($brand_id) && ($brandBc = $listingBrand)) {
             $breadcrumbItems[] = ['@type' => 'ListItem', 'position' => 3, 'name' => $brandBc->getTranslation('name'), 'item' => url()->current()];
         } elseif (isset($query) && $query) {
             $breadcrumbItems[] = ['@type' => 'ListItem', 'position' => 3, 'name' => 'Search: ' . $query, 'item' => url()->current()];
@@ -301,10 +325,10 @@
             <a href="{{ route('search') }}">{{ translate('All Categories') }}</a>
             @if(isset($category_id))
                 <span class="sep">/</span>
-                <span>{{ \App\Models\Category::find($category_id)->getTranslation('name') }}</span>
+                <span>{{ $listingCategory ? $listingCategory->getTranslation('name') : '' }}</span>
             @elseif(isset($brand_id))
                 <span class="sep">/</span>
-                <span>{{ \App\Models\Brand::find($brand_id)->getTranslation('name') }}</span>
+                <span>{{ $listingBrand ? $listingBrand->getTranslation('name') : '' }}</span>
             @elseif(isset($query))
                 <span class="sep">/</span>
                 <span>{{ translate('Search') }}</span>
@@ -313,11 +337,11 @@
         <h1 class="cat-hero-title">
             @if(isset($category_id))
                 <i class="las la-th-large" style="font-size:1.2rem; opacity:.6;"></i>
-                {{ \App\Models\Category::find($category_id)->getTranslation('name') }}
+                {{ $listingCategory ? $listingCategory->getTranslation('name') : '' }}
                 <span class="cat-count-chip">{{ $products->total() }} {{ translate('Products') }}</span>
             @elseif(isset($brand_id))
                 <i class="las la-tag" style="font-size:1.2rem; opacity:.6;"></i>
-                {{ \App\Models\Brand::find($brand_id)->getTranslation('name') }}
+                {{ $listingBrand ? $listingBrand->getTranslation('name') : '' }}
                 <span class="cat-count-chip">{{ $products->total() }} {{ translate('Products') }}</span>
             @elseif(isset($query) && $query)
                 <i class="las la-search" style="font-size:1.2rem; opacity:.6;"></i>
@@ -329,18 +353,18 @@
                 <span class="cat-count-chip">{{ $products->total() }} {{ translate('Products') }}</span>
             @endif
         </h1>
-        @if(isset($category_id) && \App\Models\Category::find($category_id)->meta_description)
-            <p class="cat-hero-desc">{{ \App\Models\Category::find($category_id)->meta_description }}</p>
+        @if(isset($category_id) && $listingCategory && $listingCategory->meta_description)
+            <p class="cat-hero-desc">{{ $listingCategory->meta_description }}</p>
         @endif
     </div>
 </div>
 
 {{-- ── Category Top Description ── --}}
-@if(isset($category_id) && \App\Models\Category::find($category_id)->top_description)
+@if(isset($category_id) && $listingCategory && $listingCategory->top_description)
 <section class="mb-3">
     <div class="container">
         <div class="category-description-box category-top-description">
-            {!! \App\Models\Category::find($category_id)->top_description !!}
+            {!! $listingCategory->top_description !!}
         </div>
     </div>
 </section>
@@ -376,7 +400,7 @@
                                 </div>
                                 <div class="fs-body">
                                     @if (!isset($category_id))
-                                        @foreach (\App\Models\Category::where('level', 0)->get() as $category)
+                                        @foreach ($rootCategories as $category)
                                             <a class="fs-cat-link" href="{{ route('products.category', $category->slug) }}">
                                                 <i class="las la-angle-right"></i>{{ $category->getTranslation('name') }}
                                             </a>
@@ -385,18 +409,18 @@
                                         <a class="fs-cat-back" href="{{ route('search') }}">
                                             <i class="las la-arrow-left"></i>{{ translate('All Categories') }}
                                         </a>
-                                        @if (\App\Models\Category::find($category_id)->parent_id != 0)
-                                            @php $parentCat = \App\Models\Category::find(\App\Models\Category::find($category_id)->parent_id); @endphp
+                                        @if ($listingCategory && $listingCategory->parent_id != 0 && $listingCategory->parentCategory)
+                                            @php $parentCat = $listingCategory->parentCategory; @endphp
                                             <a class="fs-cat-back" href="{{ route('products.category', $parentCat->slug) }}">
                                                 <i class="las la-arrow-left"></i>{{ $parentCat->getTranslation('name') }}
                                             </a>
                                         @endif
-                                        <a class="fs-cat-link is-active" href="{{ route('products.category', \App\Models\Category::find($category_id)->slug) }}">
-                                            <i class="las la-folder-open"></i>{{ \App\Models\Category::find($category_id)->getTranslation('name') }}
+                                        <a class="fs-cat-link is-active" href="{{ $listingCategory ? route('products.category', $listingCategory->slug) : '#' }}">
+                                            <i class="las la-folder-open"></i>{{ $listingCategory ? $listingCategory->getTranslation('name') : '' }}
                                         </a>
-                                        @foreach (\App\Utility\CategoryUtility::get_immediate_children_ids($category_id) as $id)
-                                            <a class="fs-cat-link" style="padding-left:14px;" href="{{ route('products.category', \App\Models\Category::find($id)->slug) }}">
-                                                <i class="las la-angle-right"></i>{{ \App\Models\Category::find($id)->getTranslation('name') }}
+                                        @foreach (($listingCategory ? $listingCategory->childrenCategories : collect()) as $childCategory)
+                                            <a class="fs-cat-link" style="padding-left:14px;" href="{{ route('products.category', $childCategory->slug) }}">
+                                                <i class="las la-angle-right"></i>{{ $childCategory->getTranslation('name') }}
                                             </a>
                                         @endforeach
                                     @endif
@@ -411,8 +435,8 @@
                                 <div class="fs-body pt-2">
                                     <div class="aiz-range-slider">
                                         <div id="input-slider-range"
-                                            data-range-value-min="@if(\App\Models\Product::count() < 1) 0 @else{{ \App\Models\Product::min('unit_price') }}@endif"
-                                            data-range-value-max="@if(\App\Models\Product::count() < 1) 0 @else{{ \App\Models\Product::max('unit_price') }}@endif">
+                                            data-range-value-min="{{ $priceRange['min'] ?? 0 }}"
+                                            data-range-value-max="{{ $priceRange['max'] ?? 0 }}">
                                         </div>
                                         <div class="row mt-2">
                                             <div class="col-6">
@@ -503,7 +527,7 @@
                         @if(Route::currentRouteName() != 'products.brand')
                             <select class="toolbar-select aiz-selectpicker" data-live-search="true" name="brand" onchange="filter()" style="max-width:160px;">
                                 <option value="">{{ translate('All Brands') }}</option>
-                                @foreach(\App\Models\Brand::all() as $brand)
+                                @foreach($filterBrands as $brand)
                                     <option value="{{ $brand->slug }}" @isset($brand_id) @if($brand_id == $brand->id) selected @endif @endisset>{{ $brand->getTranslation('name') }}</option>
                                 @endforeach
                             </select>
@@ -553,11 +577,11 @@
 </section>
 
 {{-- ── Category Bottom Description ── --}}
-@if(isset($category_id) && \App\Models\Category::find($category_id)->bottom_description)
+@if(isset($category_id) && $listingCategory && $listingCategory->bottom_description)
 <section class="mb-4">
     <div class="container">
         <div class="category-description-box category-bottom-description">
-            {!! \App\Models\Category::find($category_id)->bottom_description !!}
+            {!! $listingCategory->bottom_description !!}
         </div>
     </div>
 </section>

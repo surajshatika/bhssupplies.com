@@ -13,6 +13,7 @@ class OnPageSeoService extends AbstractSeoService
     public function run($feature, array $payload = [])
     {
         $map = [
+            'local_onpage_blueprint' => 'generateLocalOnPageBlueprint',
             'meta_tags' => 'generateMetaTags',
             'keyword_density' => 'analyzeKeywordDensity',
             'content_writer' => 'writeSeoArticle',
@@ -60,10 +61,47 @@ class OnPageSeoService extends AbstractSeoService
         ];
 
         return $this->askForJson(
-            'Create 3 CTR-focused SEO title and meta description variations. Return JSON with key variations.',
+            'Create 3 CTR-focused SEO title and meta description variations. Prioritize Mississauga, Brampton, Toronto first; then Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington, Trade Account, and Leave a Review intent where natural. Use competitor websites only for keyword gap angles, never copy them. Competitors: '.get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', 'none')).'. Return JSON with key variations.',
             'You are an SEO copywriter. Output JSON only.',
             $fallback
         );
+    }
+
+    public function generateLocalOnPageBlueprint(array $payload)
+    {
+        $url = $this->normalizeUrl(data_get($payload, 'url', url('/')));
+        $topic = trim((string) data_get($payload, 'topic', data_get($payload, 'title', data_get($payload, 'keyword', 'target page'))));
+        $keyword = trim((string) data_get($payload, 'keyword', $topic));
+        $competitors = get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', ''));
+
+        $fallback = [
+            'url' => $url,
+            'focus_keyword' => $keyword,
+            'primary_locations' => ['Mississauga', 'Brampton', 'Toronto'],
+            'secondary_locations' => ['Etobicoke', 'Vaughan', 'Oakville', 'Scarborough', 'Markham', 'North York', 'Burlington'],
+            'recommended_title' => Str::limit($keyword.' in Mississauga, Brampton & Toronto', 60, ''),
+            'recommended_description' => Str::limit('Find '.$keyword.' for Mississauga, Brampton, Toronto and GTA contractors. Trade accounts, local pickup, and trusted support.', 160, ''),
+            'heading_plan' => [
+                'h1' => Str::title($keyword).' for Mississauga, Brampton & Toronto',
+                'h2' => ['Why local contractors choose BHS Supplies', 'Service areas across the GTA', 'Trade account and review signals'],
+            ],
+            'content_sections' => ['Local availability and pickup', 'Applications for trade buyers', 'Trade account CTA', 'Leave a review trust section'],
+            'internal_links' => ['/locations/mississauga', '/locations/brampton', '/locations/toronto', '/locations/trade-account'],
+            'schema_recommendations' => ['Product or CollectionPage', 'LocalBusiness', 'BreadcrumbList', 'FAQPage'],
+            'competitor_gap_angles' => [],
+            'quick_fixes' => [],
+            'provider' => $this->providerName,
+        ];
+
+        $prompt = "Build an advanced local on-page SEO blueprint.\n"
+            . "URL: {$url}\nTopic: {$topic}\nFocus keyword: {$keyword}\n"
+            . "Primary targets: Mississauga, Brampton, Toronto.\n"
+            . "Secondary targets: Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington.\n"
+            . "Intent targets: Trade Account, Leave a Review.\n"
+            . "Competitor websites for gap angles only, no copying: {$competitors}\n"
+            . "Return JSON with recommended_title, recommended_description, heading_plan, content_sections, internal_links, schema_recommendations, competitor_gap_angles, and quick_fixes.";
+
+        return $this->askForJson($prompt, 'You are a senior local SEO strategist. Output valid JSON only.', $fallback);
     }
 
     public function analyzeKeywordDensity(array $payload)

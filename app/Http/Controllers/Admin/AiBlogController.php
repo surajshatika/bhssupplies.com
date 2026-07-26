@@ -91,13 +91,30 @@ class AiBlogController extends Controller
         $request->validate([
             'count'    => 'nullable|integer|min:1|max:10',
             'provider' => 'nullable|in:openai,claude,gemini,grok',
+            'blog_title' => 'nullable|string|max:190',
+            'slug' => 'nullable|string|max:190',
+            'blog_category_id' => 'nullable|integer|exists:blog_categories,id',
+            'category_name' => 'nullable|string|max:190',
+            'banner_upload_id' => 'nullable|integer',
+            'meta_image_upload_id' => 'nullable|integer',
+            'meta_title' => 'nullable|string|max:190',
+            'meta_description' => 'nullable|string|max:500',
+            'meta_keywords' => 'nullable|string|max:1000',
         ]);
 
         $count    = (int)($request->count ?? 1);
         $provider = $request->provider ?? SocialAutomationSetting::get('ai_blog_provider', 'openai');
 
         $options = array_filter([
+            'blog_title'          => $request->blog_title ?: null,
+            'slug'                => $request->slug ?: null,
+            'blog_category_id'    => $request->blog_category_id ? (int)$request->blog_category_id : null,
             'category_name'       => $request->category_name ?: null,
+            'banner_upload_id'    => $request->banner_upload_id ? (int)$request->banner_upload_id : null,
+            'meta_image_upload_id'=> $request->meta_image_upload_id ? (int)$request->meta_image_upload_id : null,
+            'meta_title'          => $request->meta_title ?: null,
+            'meta_description'    => $request->meta_description ?: null,
+            'meta_keywords'       => $request->meta_keywords ?: null,
             'product_category_id' => $request->product_category_id ? (int)$request->product_category_id : null,
             'topic'               => $request->topic ?: null,
             'keywords'            => $request->keywords ?: null,
@@ -166,6 +183,8 @@ class AiBlogController extends Controller
             'ai_blog_auto_publish', 'ai_blog_post_to_social',
             'ai_blog_social_platforms', 'ai_blog_schedule_time',
             'ai_blog_posts_per_day',
+            'ai_blog_primary_locations', 'ai_blog_secondary_locations',
+            'ai_blog_conversion_intents',
         ]);
     }
 }

@@ -20,10 +20,30 @@
 @php
     $_activeDriver = get_setting('perf_page_cache_driver', 'file');
     $_cacheOn      = (int) get_setting('perf_page_cache_status', 0) === 1;
+    $_cmsFastMode  = (int) get_setting('perf_cms_fast_mode', 1) === 1;
     $_driverLabels = ['file' => 'File Cache', 'redis' => 'Redis', 'litespeed' => 'LiteSpeed Cache (LSCache)', 'memcached' => 'Memcached'];
     $_driverIcons  = ['file' => 'la-hdd', 'redis' => 'la-database', 'litespeed' => 'la-server', 'memcached' => 'la-memory'];
 @endphp
 <div class="d-flex flex-wrap align-items-stretch mb-3" style="gap:12px">
+    {{-- CMS safe fast path --}}
+    <div class="flex-fill p-3 rounded" style="border:2px solid {{ $_cmsFastMode ? '#0ea5e9' : '#ffc107' }};background:#fff;min-width:220px">
+        <div class="d-flex align-items-center" style="gap:10px">
+            <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:{{ $_cmsFastMode ? 'rgba(14,165,233,.1)' : 'rgba(255,193,7,.15)' }};font-size:18px;color:{{ $_cmsFastMode ? '#0ea5e9' : '#b8860b' }}">
+                <i class="las la-tachometer-alt"></i>
+            </span>
+            <div>
+                <div class="font-weight-bold" style="font-size:13px">{{ translate('CMS Fast Mode') }}</div>
+                <div style="font-size:15px;font-weight:700;color:{{ $_cmsFastMode ? '#0ea5e9' : '#b8860b' }}">
+                    {{ $_cmsFastMode ? translate('Lightweight') : translate('Advanced rewrites') }}
+                </div>
+            </div>
+            <label class="aiz-switch aiz-switch-success mb-0 ml-auto">
+                <input type="checkbox" onchange="perfToggle(this, 'perf_cms_fast_mode')" @if($_cmsFastMode) checked @endif>
+                <span class="slider round"></span>
+            </label>
+        </div>
+        <small class="text-muted d-block mt-1">{{ translate('Keeps Active eCommerce runtime HTML untouched for smoother loading.') }}</small>
+    </div>
     {{-- Page cache active driver --}}
     <div class="flex-fill p-3 rounded" style="border:2px solid {{ $_cacheOn ? '#28a745' : '#dee2e6' }};background:#fff;min-width:220px">
         <div class="d-flex align-items-center" style="gap:10px">
@@ -296,7 +316,7 @@
                         {{ translate('LiteSpeed server not detected on this host. Select the LiteSpeed driver only when deployed on LiteSpeed Web Server or OpenLiteSpeed.') }}
                     </div>
                 @endif
-                <p class="text-muted small mb-2">{{ translate('Server-level page cache. PHP sets X-LiteSpeed-Cache-Control headers; LiteSpeed serves cached pages directly without invoking PHP on cache hits. No file or Redis storage is used by PHP.') }}</p>
+                <p class="text-muted small mb-2">{{ translate('Server-level page cache. PHP sets X-LiteSpeed-Cache-Control headers so LiteSpeed can serve cache hits directly. A local file safety copy is also kept for hosts where LSCache repeatedly misses.') }}</p>
                 <div class="d-flex flex-wrap mb-2" style="gap:8px">
                     <form action="{{ route('performance_optimizer.cache.purge_litespeed') }}" method="POST"
                           onsubmit="return confirm('{{ translate('Purge all LiteSpeed cached pages?') }}')">

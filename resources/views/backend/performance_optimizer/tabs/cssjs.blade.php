@@ -10,7 +10,7 @@
                 </label>
             </div>
             <div class="perf-section-body">
-                <p>{{ translate('Strips comments and whitespace from CSS files. Saves 20-40% on file size. Generates') }} <code>*.min.css</code> {{ translate('next to source files.') }}</p>
+                <p>{{ translate('Strips comments and whitespace from CSS files. Saves 20-40% on file size. Generates') }} <code>*.min.css</code> {{ translate('next to source files. The storefront uses each generated file while it is fresh.') }}</p>
                 <form action="{{ route('performance_optimizer.cssjs.minify_css') }}" method="POST">
                     @csrf
                     <button class="btn btn-soft-primary btn-sm"><i class="las la-bolt"></i> {{ translate('Minify CSS Now') }}</button>
@@ -60,7 +60,7 @@
                 </label>
             </div>
             <div class="perf-section-body">
-                <p>{{ translate('Loads non-critical scripts only after first user interaction (click, scroll, keydown, touch). Best for chat widgets, analytics, etc.') }}</p>
+                <p>{{ translate('Loads scripts explicitly marked Delay in Script Manager after first user interaction (click, scroll, keydown, touch). Best for chat widgets, analytics, etc.') }}</p>
                 <div class="alert alert-info py-2 mb-0" style="font-size:12px">
                     <i class="las la-info-circle"></i> {{ translate('Use JS Defer Exclude below to protect scripts that must load immediately.') }}
                 </div>
@@ -142,6 +142,14 @@
             <div class="perf-section-body">
                 <form action="{{ route('performance_optimizer.settings.update') }}" method="POST" class="row">
                     @csrf
+                    <div class="col-12 mb-3">
+                        <div class="alert alert-info py-2 mb-0" style="font-size:12px">
+                            <i class="las la-shield-alt"></i>
+                            {{ translate('Always protected from defer/delay:') }}
+                            <code>jquery</code>, <code>vendors.js</code>, <code>aiz-core</code>, <code>bootstrap</code>,
+                            <code>slick</code>, <code>checkout</code>, <code>stripe</code>, <code>recaptcha</code>.
+                        </div>
+                    </div>
                     <div class="col-md-4 mb-3">
                         <label class="small font-weight-bold">{{ translate('CSS minify excludes') }}</label>
                         <textarea name="perf_css_minify_exclude" class="form-control" rows="5" placeholder="custom.css&#10;sweetalert*">{{ get_setting('perf_css_minify_exclude') }}</textarea>

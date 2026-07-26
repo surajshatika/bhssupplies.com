@@ -1,0 +1,6 @@
+# ads.txt for bhssupplies.com — IAB Tech Lab Authorized Digital Sellers
+# BHS Supplies does not sell programmatic display-advertising inventory and
+# does not authorize any third-party advertising system to sell or resell it.
+# This file exists so crawlers and auditors get an explicit, valid response
+# instead of a 404. See https://iabtechlab.com/ads-txt/
+contact=https://www.bhssupplies.com/contact

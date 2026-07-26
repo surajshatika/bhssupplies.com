@@ -43,6 +43,22 @@ class SeoFixBatch extends Model
         return min(100, (int) round(($this->processed / $this->total) * 100));
     }
 
+    public function remainingCount(): int
+    {
+        return max(0, (int) $this->total - (int) $this->processed);
+    }
+
+    public function isStalled(int $minutes = 20): bool
+    {
+        if ($this->isTerminal()) {
+            return false;
+        }
+
+        $heartbeat = $this->updated_at ?: $this->created_at;
+
+        return $heartbeat && $heartbeat->lt(now()->subMinutes(max(5, $minutes)));
+    }
+
     public function appendError(string $message): void
     {
         $log = $this->error_log ?? [];

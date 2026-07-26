@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Category;
 use App\Models\Cart;
+use App\Models\City;
 use App\Models\Order;
 use App\Models\Coupon;
 use App\Models\CouponUsage;
@@ -13,6 +14,7 @@ use App\Models\Carrier;
 use App\Models\CombinedOrder;
 use App\Models\Country;
 use App\Models\Product;
+use App\Models\State;
 use App\Models\User;
 use App\Utility\EmailUtility;
 use App\Utility\NotificationUtility;
@@ -20,6 +22,7 @@ use Session;
 use Auth;
 use Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Schema;
 use Mail;
 
 class CheckoutController extends Controller
@@ -204,60 +207,127 @@ class CheckoutController extends Controller
 
     public function createUser($guest_shipping_info)
     {
+        $sameAsShipping = ($guest_shipping_info['same_as_shipping'] ?? 0) == 1;
+
         $validator = Validator::make($guest_shipping_info, [
             'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users|max:255',
+            'email' => 'required|email|max:255',
             'phone' => 'required|max:12',
             'address' => 'required|max:255',
             'country_id' => 'required|Integer',
             'state_id' => get_setting('has_state') == 1 ? 'required|integer' : 'nullable|integer',
-            'city_id' => 'required|Integer',
-            'area_id'  => 'nullable|integer'
+            'city_id' => 'nullable|integer',
+            'city_name' => 'required_without:city_id|string|max:191',
+            'area_id'  => 'nullable|integer',
+            'billing_country_id' => get_setting('billing_address_required') && !$sameAsShipping ? 'required|integer' : 'nullable|integer',
+            'billing_state_id' => get_setting('billing_address_required') && !$sameAsShipping && get_setting('has_state') == 1 ? 'required|integer' : 'nullable|integer',
+            'billing_city_id' => get_setting('billing_address_required') && !$sameAsShipping ? 'nullable|integer' : 'nullable|integer',
+            'billing_city_name' => get_setting('billing_address_required') && !$sameAsShipping ? 'required_without:billing_city_id|string|max:191' : 'nullable|string|max:191',
         ]);
 
         if ($validator->fails()) {
             return $validator->errors();
         }
 
-        $success = 1;
-        $password = substr(hash('sha512', rand()), 0, 8);
+        $guest_shipping_info['city_id'] = $this->resolveCheckoutCityId(
+            (int) ($guest_shipping_info['country_id'] ?? 0),
+            (int) ($guest_shipping_info['state_id'] ?? 0),
+            $guest_shipping_info['city_id'] ?? null,
+            $guest_shipping_info['city_name'] ?? null
+        );
+
+        if (!$guest_shipping_info['city_id']) {
+            $errors = $validator->errors();
+            $errors->add('city_name', translate('Please enter a valid city.'));
+            return $errors;
+        }
+
+        $guest_shipping_info['state_id'] = $this->resolveCheckoutStateId(
+            $guest_shipping_info['state_id'] ?? null,
+            $guest_shipping_info['city_id']
+        );
+
+        if (!$guest_shipping_info['state_id']) {
+            $errors = $validator->errors();
+            $errors->add('city_name', translate('Please enter a city with a valid state.'));
+            return $errors;
+        }
+
+        if (get_setting('billing_address_required') && !$sameAsShipping) {
+            $guest_shipping_info['billing_city_id'] = $this->resolveCheckoutCityId(
+                (int) ($guest_shipping_info['billing_country_id'] ?? 0),
+                (int) ($guest_shipping_info['billing_state_id'] ?? 0),
+                $guest_shipping_info['billing_city_id'] ?? null,
+                $guest_shipping_info['billing_city_name'] ?? null
+            );
+
+            if (!$guest_shipping_info['billing_city_id']) {
+                $errors = $validator->errors();
+                $errors->add('billing_city_name', translate('Please enter a valid billing city.'));
+                return $errors;
+            }
+
+            $guest_shipping_info['billing_state_id'] = $this->resolveCheckoutStateId(
+                $guest_shipping_info['billing_state_id'] ?? null,
+                $guest_shipping_info['billing_city_id']
+            );
+
+            if (!$guest_shipping_info['billing_state_id']) {
+                $errors = $validator->errors();
+                $errors->add('billing_city_name', translate('Please enter a billing city with a valid state.'));
+                return $errors;
+            }
+        }
+
         $isEmailVerificationEnabled = get_setting('email_verification');
 
-        // User Create
-        $user = new User();
-        $user->name = $guest_shipping_info['name'];
-        $user->email = $guest_shipping_info['email'];
-        $user->phone = addon_is_activated('otp_system') ? '+'.$guest_shipping_info['country_code'].$guest_shipping_info['phone'] : null;
-        $user->password = Hash::make($password);
-        $user->email_verified_at = $isEmailVerificationEnabled != 1 ? date('Y-m-d H:m:s') : null;
-        $user->save();
+        // Returning guest: reuse the existing account (by email, or phone if OTP is on)
+        // instead of failing on a duplicate. New account is only created for first-time guests.
+        $existing_user = addon_is_activated('otp_system')
+            ? User::where('email', $guest_shipping_info['email'])
+                ->orWhere('phone', '+'.$guest_shipping_info['country_code'].$guest_shipping_info['phone'])->first()
+            : User::where('email', $guest_shipping_info['email'])->first();
 
-        // Guest Account Opening and verification(if activated) eamil send
-        try {
-            EmailUtility::customer_registration_email('registration_from_system_email_to_customer', $user, $password);
-        } catch (\Exception $e) {
-            $success = 0;
-            $user->delete();
-        }
+        if ($existing_user != null) {
+            // Existing customer/guest — place the order under their account, no new account or password email.
+            $user = $existing_user;
+        } else {
+            $password = substr(hash('sha512', rand()), 0, 8);
 
-        if($success == 0){
-            return $success;
-        }
+            // User Create
+            $user = new User();
+            $user->name = $guest_shipping_info['name'];
+            $user->email = $guest_shipping_info['email'];
+            $user->phone = addon_is_activated('otp_system') ? '+'.$guest_shipping_info['country_code'].$guest_shipping_info['phone'] : null;
+            $user->password = Hash::make($password);
+            $user->email_verified_at = $isEmailVerificationEnabled != 1 ? date('Y-m-d H:m:s') : null;
+            $user->save();
 
-        // Sending email verification Notification
-        if($isEmailVerificationEnabled == 1){
-            EmailUtility::email_verification($user, 'customer');
-        }
-
-        // Customer Account Opening Email to Admin
-        if ((get_email_template_data('customer_reg_email_to_admin', 'status') == 1)) {
+            // Guest Account Opening and verification(if activated) eamil send
             try {
-                EmailUtility::customer_registration_email('customer_reg_email_to_admin', $user, null);
-            } catch (\Exception $e) {}
+                EmailUtility::customer_registration_email('registration_from_system_email_to_customer', $user, $password);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+
+            // Sending email verification Notification
+            if($isEmailVerificationEnabled == 1){
+                try {
+                    EmailUtility::email_verification($user, 'customer');
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            }
+
+            // Customer Account Opening Email to Admin
+            if ((get_email_template_data('customer_reg_email_to_admin', 'status') == 1)) {
+                try {
+                    EmailUtility::customer_registration_email('customer_reg_email_to_admin', $user, null);
+                } catch (\Exception $e) {}
+            }
         }
 
         // User Address Create
-        $sameAsShipping   = ($guest_shipping_info['same_as_shipping'] ?? 0) == 1;
         $address = new Address;
         $address->user_id       = $user->id;
         $address->address       = $guest_shipping_info['address'];
@@ -265,7 +335,9 @@ class CheckoutController extends Controller
         $address->state_id      = $guest_shipping_info['state_id'] ?? null;
         $address->city_id       = $guest_shipping_info['city_id'];
         $address->postal_code   = $guest_shipping_info['postal_code'];
-        $address->area_id       = $guest_shipping_info['area_id'] ?? null;
+        if ($this->addressesHaveArea()) {
+            $address->area_id   = $guest_shipping_info['area_id'] ?? null;
+        }
         $address->phone         = '+'.$guest_shipping_info['country_code'].$guest_shipping_info['phone'];
         $address->longitude     = isset($guest_shipping_info['longitude']) ? $guest_shipping_info['longitude'] : null;
         $address->latitude      = isset($guest_shipping_info['latitude']) ? $guest_shipping_info['latitude'] : null;
@@ -284,7 +356,9 @@ class CheckoutController extends Controller
         $billing_address->state_id      = $guest_shipping_info['billing_state_id'] ?? null;
         $billing_address->city_id       = $guest_shipping_info['billing_city_id'];
         $billing_address->postal_code   = $guest_shipping_info['billing_postal_code'];
-        $billing_address->area_id       = $guest_shipping_info['billing_area_id'] ?? null;
+        if ($this->addressesHaveArea()) {
+            $billing_address->area_id   = $guest_shipping_info['billing_area_id'] ?? null;
+        }
         $billing_address->phone         = $guest_shipping_info['billing_phone'];
         $address->set_billing           = 1;
         $billing_address->save();
@@ -308,7 +382,7 @@ class CheckoutController extends Controller
         Session::forget('temp_user_id');
         Session::forget('guest_shipping_info');
 
-        return $success;
+        return 1;
     }
 
     //redirects to this method after a successfull checkout
@@ -771,6 +845,84 @@ class CheckoutController extends Controller
             'cart_summary' => view('frontend.partials.cart.cart_summary', compact('carts', 'proceed'))->render(),
             'carrier_count' => count($carrier_list)
         );
+    }
+
+    protected function addressesHaveArea(): bool
+    {
+        return Schema::hasColumn('addresses', 'area_id');
+    }
+
+    protected function resolveCheckoutStateId($stateId, $cityId): ?int
+    {
+        $stateId = (int) $stateId;
+        if ($stateId > 0 && State::where('id', $stateId)->exists()) {
+            return $stateId;
+        }
+
+        $cityId = (int) $cityId;
+        if ($cityId <= 0 || !Schema::hasColumn('cities', 'state_id')) {
+            return null;
+        }
+
+        $cityStateId = (int) City::where('id', $cityId)->value('state_id');
+
+        return $cityStateId > 0 ? $cityStateId : null;
+    }
+
+    protected function resolveCheckoutCityId(int $countryId, int $stateId, $cityId, ?string $cityName): ?int
+    {
+        $cityId = (int) $cityId;
+        if ($cityId > 0 && City::where('id', $cityId)->exists()) {
+            return $cityId;
+        }
+
+        $cityName = trim(preg_replace('/\s+/', ' ', (string) $cityName));
+        if ($cityName === '') {
+            return null;
+        }
+
+        $cityQuery = City::query()
+            ->whereRaw('LOWER(name) = ?', [strtolower($cityName)]);
+
+        if ($stateId > 0 && Schema::hasColumn('cities', 'state_id')) {
+            $cityQuery->where('state_id', $stateId);
+        } elseif ($countryId > 0 && Schema::hasColumn('cities', 'country_id')) {
+            $cityQuery->where('country_id', $countryId);
+        } elseif ($countryId > 0 && Schema::hasColumn('cities', 'state_id')) {
+            $stateIds = State::where('country_id', $countryId)->pluck('id');
+            if ($stateIds->isNotEmpty()) {
+                $cityQuery->whereIn('state_id', $stateIds);
+            }
+        }
+
+        if ($city = $cityQuery->first()) {
+            return $city->id;
+        }
+
+        $city = new City();
+        $city->name = $cityName;
+
+        if (Schema::hasColumn('cities', 'state_id')) {
+            $city->state_id = $stateId > 0
+                ? $stateId
+                : (int) State::where('country_id', $countryId)->where('status', 1)->value('id');
+        }
+
+        if (Schema::hasColumn('cities', 'country_id')) {
+            $city->country_id = $countryId;
+        }
+
+        if (Schema::hasColumn('cities', 'cost')) {
+            $city->cost = 0;
+        }
+
+        if (Schema::hasColumn('cities', 'status')) {
+            $city->status = 1;
+        }
+
+        $city->save();
+
+        return $city->id;
     }
 
     public function updateBillingAddress(Request $request)

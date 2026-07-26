@@ -163,11 +163,11 @@ if (!function_exists('filter_products')) {
 if (!function_exists('get_cached_products')) {
     function get_cached_products($category_id = null, $limit = 12)
     {
-        return Cache::remember('products-category-v2-' . $category_id . '-' . $limit, 86400, function () use ($category_id, $limit) {
+        return Cache::remember('products-category-v3-' . $category_id . '-' . $limit, 86400, function () use ($category_id, $limit) {
             $subIds = \App\Models\Category::where('parent_id', $category_id)->pluck('id')->toArray();
             $allIds = array_merge([$category_id], $subIds);
             return filter_products(Product::whereIn('category_id', $allIds))
-                ->with(['brand', 'stocks'])
+                ->with(['brand', 'stocks', 'taxes', 'thumbnail'])
                 ->latest()
                 ->take($limit)
                 ->get();
@@ -196,7 +196,13 @@ if (!function_exists('verified_sellers_id')) {
 if (!function_exists('get_system_default_currency')) {
     function get_system_default_currency()
     {
-        return Cache::remember('system_default_currency', 86400, function () {
+        static $currency = null;
+
+        if ($currency !== null) {
+            return $currency;
+        }
+
+        return $currency = Cache::remember('system_default_currency', 86400, function () {
             return Currency::findOrFail(get_setting('system_default_currency'));
         });
     }
@@ -928,46 +934,54 @@ if (!function_exists('renderStarRatingLatest')) {
 
 function translate($key, $lang = null, $addslashes = false)
 {
+    static $translations = [];
+
     if ($lang == null) {
         $lang = App::getLocale();
     }
 
     $lang_key = preg_replace('/[^A-Za-z0-9\_]/', '', str_replace(' ', '_', strtolower($key)));
+    $loadTranslations = function ($locale) use (&$translations) {
+        if (!array_key_exists($locale, $translations)) {
+            $translations[$locale] = Cache::rememberForever("translations-{$locale}", function () use ($locale) {
+                return Translation::where('lang', $locale)->pluck('lang_value', 'lang_key')->toArray();
+            });
+        }
 
-    $translations_en = Cache::rememberForever('translations-en', function () {
-        return Translation::where('lang', 'en')->pluck('lang_value', 'lang_key')->toArray();
-    });
+        return $translations[$locale];
+    };
+
+    $translations_en = $loadTranslations('en');
 
     if (!isset($translations_en[$lang_key])) {
+        $translation_value = str_replace(array("\r", "\n", "\r\n"), "", $key);
         $translation_def = new Translation;
         $translation_def->lang = 'en';
         $translation_def->lang_key = $lang_key;
-        $translation_def->lang_value = str_replace(array("\r", "\n", "\r\n"), "", $key);
+        $translation_def->lang_value = $translation_value;
         $translation_def->save();
 
         if (env('DEMO_MODE') != 'On') {
                 $app_translation = new AppTranslation();
                 $app_translation->lang = 'en';
                 $app_translation->lang_key = $lang_key . '_ucf';
-                $app_translation->lang_value = str_replace(array("\r", "\n", "\r\n"), "", $key);
+                $app_translation->lang_value = $translation_value;
                 $app_translation->save();
             }
 
+        $translations_en[$lang_key] = $translation_value;
+        $translations['en'] = $translations_en;
         Cache::forget('translations-en');
     }
 
     // return user session lang
-    $translation_locale = Cache::rememberForever("translations-{$lang}", function () use ($lang) {
-        return Translation::where('lang', $lang)->pluck('lang_value', 'lang_key')->toArray();
-    });
+    $translation_locale = $loadTranslations($lang);
     if (isset($translation_locale[$lang_key])) {
         return $addslashes ? addslashes(trim($translation_locale[$lang_key])) : trim($translation_locale[$lang_key]);
     }
 
     // return default lang if session lang not found
-    $translations_default = Cache::rememberForever('translations-' . env('DEFAULT_LANGUAGE', 'en'), function () {
-        return Translation::where('lang', env('DEFAULT_LANGUAGE', 'en'))->pluck('lang_value', 'lang_key')->toArray();
-    });
+    $translations_default = $loadTranslations(env('DEFAULT_LANGUAGE', 'en'));
     if (isset($translations_default[$lang_key])) {
         return $addslashes ? addslashes(trim($translations_default[$lang_key])) : trim($translations_default[$lang_key]);
     }
@@ -1314,22 +1328,67 @@ if (!function_exists('app_timezone')) {
     }
 }
 
+if (!function_exists('optimized_image_url')) {
+    function optimized_image_url($url)
+    {
+        static $resolved = [];
+
+        if (empty($url) || !is_string($url) || preg_match('/^(data:|blob:)/i', $url)) {
+            return $url;
+        }
+
+        if (array_key_exists($url, $resolved)) {
+            return $resolved[$url];
+        }
+
+        if (!preg_match('/\.(jpe?g|png)(\?.*)?$/i', $url)) {
+            return $resolved[$url] = $url;
+        }
+
+        $webp_url = preg_replace('/\.(jpe?g|png)(\?.*)?$/i', '.webp$2', $url);
+        $path = parse_url($webp_url, PHP_URL_PATH);
+
+        if (!$path) {
+            return $resolved[$url] = $url;
+        }
+
+        $local_path = public_path(ltrim($path, '/'));
+
+        return $resolved[$url] = file_exists($local_path) ? $webp_url : $url;
+    }
+}
+
+if (!function_exists('get_cached_upload')) {
+    function get_cached_upload($id)
+    {
+        static $uploads = [];
+
+        if ($id instanceof Upload) {
+            return $id;
+        }
+        if (!$id || !is_numeric($id)) {
+            return null;
+        }
+
+        $id = (int) $id;
+        if (!array_key_exists($id, $uploads)) {
+            $uploads[$id] = Cache::remember('uploaded_asset_row_' . $id, 86400, function () use ($id) {
+                return Upload::find($id);
+            });
+        }
+
+        return $uploads[$id];
+    }
+}
+
 //return file uploaded via uploader
 if (!function_exists('uploaded_asset')) {
     function uploaded_asset($id)
     {
-        if ($id instanceof Upload) {
-            $asset = $id;
-        } elseif ($id && is_numeric($id)) {
-            $asset = Cache::remember('uploaded_asset_row_' . $id, 86400, function () use ($id) {
-                return Upload::find($id);
-            });
-        } else {
-            $asset = null;
-        }
+        $asset = get_cached_upload($id);
 
         if ($asset != null) {
-            return $asset->external_link == null ? my_asset($asset->file_name) : $asset->external_link;
+            return optimized_image_url($asset->external_link == null ? my_asset($asset->file_name) : $asset->external_link);
         }
         return static_asset('assets/img/placeholder.jpg');
     }
@@ -1421,9 +1480,13 @@ if (!function_exists('isUnique')) {
 if (!function_exists('get_setting')) {
     function get_setting($key, $default = null, $lang = false)
     {
-        $settings = Cache::remember('business_settings', 86400, function () {
-            return BusinessSetting::all();
-        });
+        static $settings = null;
+
+        if ($settings === null) {
+            $settings = Cache::remember('business_settings', 86400, function () {
+                return BusinessSetting::all();
+            });
+        }
 
         if ($lang == false) {
             $setting = $settings->where('type', $key)->first();
@@ -1681,7 +1744,7 @@ if (!function_exists('calculateCommissionAffilationClubPoint')) {
             (new AffiliateController)->processAffiliatePoints($order);
         }
 
-        if (addon_is_activated('club_point')) {
+        if (addon_is_activated('club_point') && class_exists(ClubPointController::class)) {
             if ($order->user != null) {
                 (new ClubPointController)->processClubPoints($order);
             }
@@ -1696,12 +1759,21 @@ if (!function_exists('calculateCommissionAffilationClubPoint')) {
 if (!function_exists('addon_is_activated')) {
     function addon_is_activated($identifier, $default = null)
     {
-        try {
-            $addons = Cache::remember('addons', 86400, function () {
-                return Addon::all();
-            });
-        } catch (\Throwable $e) {
-            \Log::error('addon_is_activated cache failure: ' . $e->getMessage());
+        static $addons = null;
+        static $loaded = false;
+
+        if (!$loaded) {
+            $loaded = true;
+            try {
+                $addons = Cache::remember('addons', 86400, function () {
+                    return Addon::all();
+                });
+            } catch (\Throwable $e) {
+                \Log::error('addon_is_activated cache failure: ' . $e->getMessage());
+            }
+        }
+
+        if ($addons === null) {
             return (bool) $default;
         }
 
@@ -1772,12 +1844,19 @@ if (!function_exists('get_admin')) {
 if (!function_exists('get_slider_images')) {
     function get_slider_images($ids)
     {
-        $slider_query = Upload::query();
-        $sliders = $slider_query->whereIn('id', $ids);
-        foreach ($ids as $id) {
-            $sliders->orderByRaw("id!=?", [$id]);
+        $ids = array_values(array_filter((array) $ids));
+        if (empty($ids)) {
+            return collect();
         }
-        return $sliders->get();
+
+        return Cache::remember('slider_images_' . md5(json_encode($ids)), 86400, function () use ($ids) {
+            $slider_query = Upload::query();
+            $sliders = $slider_query->whereIn('id', $ids);
+            foreach ($ids as $id) {
+                $sliders->orderByRaw("id!=?", [$id]);
+            }
+            return $sliders->get();
+        });
     }
 }
 
@@ -1796,11 +1875,13 @@ if (!function_exists('get_featured_flash_deal')) {
 if (!function_exists('get_flash_deal_products')) {
     function get_flash_deal_products($flash_deal_id)
     {
-        $flash_deal_product_query = FlashDealProduct::query();
-        $flash_deal_product_query->where('flash_deal_id', $flash_deal_id);
-        $flash_deal_products = $flash_deal_product_query->with('product')->orderBy('id', 'desc')->limit(10)->get();
-
-        return $flash_deal_products;
+        return Cache::remember('flash_deal_products_' . $flash_deal_id, 300, function () use ($flash_deal_id) {
+            return FlashDealProduct::where('flash_deal_id', $flash_deal_id)
+                ->with(['product.taxes', 'product.thumbnail', 'product.stocks', 'product.brand'])
+                ->orderBy('id', 'desc')
+                ->limit(10)
+                ->get();
+        });
     }
 }
 
@@ -1846,11 +1927,17 @@ if (!function_exists('get_active_taxes')) {
 if (!function_exists('get_system_language')) {
     function get_system_language()
     {
+        static $languages = [];
+
         $locale = Session::has('locale')
             ? Session::get('locale', Config::get('app.locale'))
             : 'en';
 
-        return Cache::remember('system_language_' . $locale, 86400, function () use ($locale) {
+        if (array_key_exists($locale, $languages)) {
+            return $languages[$locale];
+        }
+
+        return $languages[$locale] = Cache::remember('system_language_' . $locale, 86400, function () use ($locale) {
             return Language::where('code', $locale)->first();
         });
     }
@@ -1859,7 +1946,13 @@ if (!function_exists('get_system_language')) {
 if (!function_exists('get_all_active_language')) {
     function get_all_active_language()
     {
-        return Cache::remember('all_active_languages', 86400, function () {
+        static $languages = null;
+
+        if ($languages !== null) {
+            return $languages;
+        }
+
+        return $languages = Cache::remember('all_active_languages', 86400, function () {
             return Language::where('status', 1)->get();
         });
     }
@@ -1869,8 +1962,14 @@ if (!function_exists('get_all_active_language')) {
 if (!function_exists('get_session_language')) {
     function get_session_language()
     {
+        static $languages = [];
+
         $locale = Session::get('locale', Config::get('app.locale'));
-        return Cache::remember('session_language_' . $locale, 86400, function () use ($locale) {
+        if (array_key_exists($locale, $languages)) {
+            return $languages[$locale];
+        }
+
+        return $languages[$locale] = Cache::remember('session_language_' . $locale, 86400, function () use ($locale) {
             return Language::where('code', $locale)->first();
         });
     }
@@ -1879,11 +1978,17 @@ if (!function_exists('get_session_language')) {
 if (!function_exists('get_system_currency')) {
     function get_system_currency()
     {
+        static $currencies = [];
+
         $code = Session::has('currency_code')
             ? Session::get('currency_code')
             : 'default_' . get_setting('system_default_currency');
 
-        return Cache::remember('system_currency_' . $code, 86400, function () {
+        if (array_key_exists($code, $currencies)) {
+            return $currencies[$code];
+        }
+
+        return $currencies[$code] = Cache::remember('system_currency_' . $code, 86400, function () {
             $query = Currency::query();
             if (Session::has('currency_code')) {
                 $query->where('code', Session::get('currency_code'));
@@ -1898,7 +2003,13 @@ if (!function_exists('get_system_currency')) {
 if (!function_exists('get_all_active_currency')) {
     function get_all_active_currency()
     {
-        return Cache::remember('all_active_currencies', 86400, function () {
+        static $currencies = null;
+
+        if ($currencies !== null) {
+            return $currencies;
+        }
+
+        return $currencies = Cache::remember('all_active_currencies', 86400, function () {
             return Currency::where('status', 1)->get();
         });
     }
@@ -1960,10 +2071,10 @@ if (!function_exists('get_product_max_unit_price')) {
 if (!function_exists('get_featured_products')) {
     function get_featured_products()
     {
-        return Cache::remember('featured_products_v2', 3600, function () {
+        return Cache::remember('featured_products_v3', 3600, function () {
             $product_query = Product::query();
             return filter_products($product_query->where('featured', '1'))
-                ->with(['brand', 'stocks'])
+                ->with(['brand', 'stocks', 'taxes', 'thumbnail'])
                 ->latest()
                 ->limit(12)
                 ->get();
@@ -1974,14 +2085,18 @@ if (!function_exists('get_featured_products')) {
 if (!function_exists('get_best_selling_products')) {
     function get_best_selling_products($limit, $user_id = null)
     {
-        $product_query = Product::query();
-        if ($user_id) {
-            $product_query = $product_query->where('user_id', $user_id);
-        }
-        return filter_products($product_query->orderBy('num_of_sale', 'desc'))
-            ->with(['brand', 'stocks'])
-            ->limit($limit)
-            ->get();
+        $cacheKey = 'best_selling_products_v4_' . ((int) $limit) . '_' . ($user_id ?: 'all');
+
+        return Cache::remember($cacheKey, 3600, function () use ($limit, $user_id) {
+            $product_query = Product::query();
+            if ($user_id) {
+                $product_query = $product_query->where('user_id', $user_id);
+            }
+            return filter_products($product_query->orderBy('num_of_sale', 'desc'))
+                ->with(['brand', 'stocks', 'taxes', 'thumbnail'])
+                ->limit($limit)
+                ->get();
+        });
     }
 }
 
@@ -1990,15 +2105,19 @@ if (!function_exists('get_best_selling_products')) {
 if (!function_exists('get_todays_deal_products')) {
     function get_todays_deal_products($limit, $user_id = null)
     {
-        $product_query = Product::query();
-        if ($user_id) {
-            $product_query = $product_query->where('user_id', $user_id);
-        }
-        return filter_products($product_query->where('todays_deal', '1'))
-            ->with(['brand', 'stocks'])
-            ->orderBy('id', 'desc')
-            ->limit($limit)
-            ->get();
+        $cacheKey = 'todays_deal_products_v4_' . ((int) $limit) . '_' . ($user_id ?: 'all');
+
+        return Cache::remember($cacheKey, 1800, function () use ($limit, $user_id) {
+            $product_query = Product::query();
+            if ($user_id) {
+                $product_query = $product_query->where('user_id', $user_id);
+            }
+            return filter_products($product_query->where('todays_deal', '1'))
+                ->with(['brand', 'stocks', 'taxes', 'thumbnail'])
+                ->orderBy('id', 'desc')
+                ->limit($limit)
+                ->get();
+        });
     }
 }
 
@@ -2073,13 +2192,15 @@ if (!function_exists('get_similiar_classified_products')) {
 if (!function_exists('get_home_page_classified_products')) {
     function get_home_page_classified_products($limit = '')
     {
-        $classified_product_query = CustomerProduct::query()->with('user', 'thumbnail');
-        $classified_product_query->isActiveAndApproval();
-        if ($limit) {
-            $classified_product_query->take($limit);
-        }
+        return Cache::remember('home_page_classified_products_v2_' . ($limit ?: 'all'), 3600, function () use ($limit) {
+            $classified_product_query = CustomerProduct::query()->with('user', 'thumbnail');
+            $classified_product_query->isActiveAndApproval();
+            if ($limit) {
+                $classified_product_query->take($limit);
+            }
 
-        return $classified_product_query->get();
+            return $classified_product_query->get();
+        });
     }
 }
 
@@ -2173,9 +2294,14 @@ if (!function_exists('get_all_brands')) {
 if (!function_exists('get_brands')) {
     function get_brands($brand_ids)
     {
-        $brand_query = Brand::query();
-        $brands = $brand_query->whereIn('id', $brand_ids)->get();
-        return $brands;
+        $brand_ids = array_values(array_filter((array) $brand_ids));
+        if (empty($brand_ids)) {
+            return collect();
+        }
+
+        return Cache::remember('frontend_brands_' . md5(json_encode($brand_ids)), 86400, function () use ($brand_ids) {
+            return Brand::whereIn('id', $brand_ids)->get();
+        });
     }
 }
 
@@ -2204,13 +2330,14 @@ if (!function_exists('get_brands_by_products')) {
 if (!function_exists('get_category')) {
     function get_category($category_ids)
     {
-        $category_query = Category::query();
-        $category_query->with('coverImage');
+        $category_ids = array_values(array_filter((array) $category_ids));
+        if (empty($category_ids)) {
+            return collect();
+        }
 
-        $category_query->whereIn('id', $category_ids);
-
-        $categories = $category_query->get();
-        return $categories;
+        return Cache::remember('frontend_categories_v3_' . md5(json_encode($category_ids)), 86400, function () use ($category_ids) {
+            return Category::with('coverImage')->whereIn('id', $category_ids)->get();
+        });
     }
 }
 
@@ -2227,8 +2354,12 @@ if (!function_exists('get_single_category')) {
 if (!function_exists('get_level_zero_categories')) {
     function get_level_zero_categories()
     {
-        $categories_query = Category::query()->with(['coverImage', 'catIcon']);
-        return $categories_query->where('level', 0)->orderBy('order_level', 'desc')->get();
+        return Cache::remember('level_zero_categories_v3', 86400, function () {
+            return Category::with(['coverImage', 'catIcon'])
+                ->where('level', 0)
+                ->orderBy('order_level', 'desc')
+                ->get();
+        });
     }
 }
 
@@ -2308,8 +2439,12 @@ if (!function_exists('get_user_wishlist')) {
 if (!function_exists('get_best_sellers')) {
     function get_best_sellers($limit = '')
     {
-        return Cache::remember('best_selers', 86400, function () use ($limit) {
-            return Shop::where('verification_status', 1)->orderBy('num_of_sale', 'desc')->take($limit)->get();
+        return Cache::remember('best_sellers_v2_' . ($limit ?: 'all'), 86400, function () use ($limit) {
+            $query = Shop::where('verification_status', 1)->orderBy('num_of_sale', 'desc');
+            if ($limit) {
+                $query->take($limit);
+            }
+            return $query->get();
         });
     }
 }
@@ -2661,7 +2796,7 @@ if (!function_exists('get_image')) {
         if ($image != null) {
             $image_url = $image->external_link == null ? my_asset($image->file_name) : $image->external_link;
         }
-        return $image_url;
+        return optimized_image_url($image_url);
     }
 }
 
@@ -2682,14 +2817,10 @@ if (!function_exists('get_first_product_image')) {
         $firstPhotoId = reset($photos);
         $image = null;
         if (!empty($firstPhotoId)) {
-            $image = Cache::remember('uploaded_asset_row_' . $firstPhotoId, 86400, function () use ($firstPhotoId) {
-                return Upload::find($firstPhotoId);
-            });
+            $image = get_cached_upload($firstPhotoId);
         }
         if ($image == null && $thumbnail != null) {
-            $image = Cache::remember('uploaded_asset_row_' . $thumbnail, 86400, function () use ($thumbnail) {
-                return Upload::find($thumbnail);
-            });
+            $image = get_cached_upload($thumbnail);
         }
         if ($image instanceof \Illuminate\Database\Eloquent\Collection) {
             $image = $image->first();
@@ -2697,7 +2828,7 @@ if (!function_exists('get_first_product_image')) {
         if ($image != null) {
             $image_url = $image->external_link == null ? my_asset($image->file_name) : $image->external_link;
         }
-        return $image_url;
+        return optimized_image_url($image_url);
     }
 }
 
@@ -3329,28 +3460,34 @@ function youtubeVideoId($url)
 
 if (!function_exists('get_all_sale_alert_products')) {
     function get_all_sale_alert_products() {
-        return CustomSaleAlert::with('product')->get()->map(function($alert) {
-            if (!$alert->product) return null; 
+        return Cache::remember('custom_sale_alert_products_frontend', 1800, function () {
+            return CustomSaleAlert::with('product')->get()->map(function($alert) {
+                if (!$alert->product) return null;
 
-            return [
-                'id' => $alert->product->id,
-                'title' => $alert->product->getTranslation('name'),
-                'image' => uploaded_asset($alert->product->thumbnail_img),
-                'url'  => route('product',  $alert->product->slug),
-            ];
-        })->filter();
+                return [
+                    'id' => $alert->product->id,
+                    'title' => $alert->product->getTranslation('name'),
+                    'image' => uploaded_asset($alert->product->thumbnail_img),
+                    'url'  => route('product',  $alert->product->slug),
+                ];
+            })->filter()->values();
+        });
     }
 }
 
 //get products label
 if (!function_exists('get_custom_labels')) {
     function get_custom_labels($labels) {
+        static $allLabels = null;
+
         $labels_array = [];
         if($labels){
             $labels = explode(',',$labels);
-            $allLabels = Cache::remember('custom_labels_frontend', 86400, function () {
-                return CustomLabel::all()->keyBy('id');
-            });
+            if ($allLabels === null) {
+                $allLabels = Cache::remember('custom_labels_frontend', 86400, function () {
+                    return CustomLabel::all()->keyBy('id');
+                });
+            }
             foreach($labels as $label){
                 $label_data = $allLabels->get((int) $label);
                 if($label_data){
@@ -3718,12 +3855,14 @@ if (!function_exists('get_same_seller_products')) {
 if (!function_exists('get_related_products_by_category')) {
     function get_related_products_by_category($category_id, $limit = 20)
     {
-        $products = Product::isApprovedPublished()->whereHas('categories', function ($query) use ($category_id) {
-                        $query->where('category_id', $category_id);
-                    })
-                    ->take($limit)
-                    ->get();
-        return $products;
+        return Cache::remember('related_products_by_category_v2_' . $category_id . '_' . $limit, 1800, function () use ($category_id, $limit) {
+            return Product::isApprovedPublished()->whereHas('categories', function ($query) use ($category_id) {
+                    $query->where('category_id', $category_id);
+                })
+                ->with(['brand', 'stocks', 'taxes', 'thumbnail'])
+                ->take($limit)
+                ->get();
+        });
     }
 }
 

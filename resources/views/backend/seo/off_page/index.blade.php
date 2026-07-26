@@ -12,19 +12,32 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 @if($setupRequired)
     <div class="alert alert-warning">
         {{ translate('SEO suite database tables are missing. Run the four SEO migrations to activate task history, score tracking, and redirects.') }}
     </div>
 @endif
 
+<div class="alert alert-info py-2">
+    <i class="las la-link mr-1"></i>
+    {{ translate('AI backlink automation creates white-hat prospect lists, outreach emails, citation targets, guest post angles, and anchor plans. It does not auto-post spam links on third-party websites.') }}
+</div>
+
 <div class="row gutters-16 mb-4">
     @foreach($features as $key => $label)
     <div class="col-xl-4 col-lg-4 col-md-6 mb-3">
-        <div class="card h-100 shadow-sm border-0 tool-card" onclick="openToolModal('{{ $key }}', '{{ addslashes($label) }}')" style="cursor: pointer; transition: transform 0.2s;">
-            <div class="card-body text-center d-flex flex-column justify-content-center">
-                <i class="las la-bullhorn las-3x text-success mb-2"></i>
-                <h6 class="font-weight-600 mb-0">{{ $label }}</h6>
+        <div class="card h-100 tool-card seo-tool-tile" onclick="openToolModal('{{ $key }}', '{{ addslashes($label) }}')" style="cursor: pointer;">
+            <div class="card-body d-flex align-items-center px-3 py-3">
+                <div class="seo-tool-icon success mr-3">
+                    <i class="las la-bullhorn la-lg text-success"></i>
+                </div>
+                <div class="flex-grow-1" style="min-width: 0;">
+                    <h6 class="font-weight-600 mb-1">{{ $label }}</h6>
+                    <span class="small text-muted">{{ translate('Configure and run') }}</span>
+                </div>
+                <i class="las la-angle-right text-muted ml-2"></i>
             </div>
         </div>
     </div>
@@ -93,15 +106,21 @@
 
                     <div id="dynamicFields">
                         <!-- Topic Field -->
-                        <div class="form-group tool-field" data-tools="guest_post_topics,guest_post_article,social_signal_posts,press_release">
+                        <div class="form-group tool-field" data-tools="ai_backlink_campaign,guest_post_topics,guest_post_article,social_signal_posts,press_release">
                             <label>{{ translate('Topic or Subject') }}</label>
                             <input type="text" class="form-control" name="topic" placeholder="e.g. New Product Launch: Safety Helmet X-200">
                         </div>
 
                         <!-- Target URL -->
-                        <div class="form-group tool-field" data-tools="backlink_outreach,social_signal_posts,guest_post_article" style="display:none">
+                        <div class="form-group tool-field" data-tools="ai_backlink_campaign,backlink_outreach,social_signal_posts,guest_post_article" style="display:none">
                             <label>{{ translate('Target URL to Promote') }}</label>
                             <input type="url" class="form-control" name="url" placeholder="https://example.com/product/xyz">
+                        </div>
+
+                        <div class="form-group tool-field" data-tools="ai_backlink_campaign" style="display:none">
+                            <label>{{ translate('Focus Keyword') }}</label>
+                            <input type="text" class="form-control" name="keyword" placeholder="HVAC supplies Mississauga">
+                            <small class="text-muted">{{ translate('The campaign will prioritize Mississauga, Brampton, Toronto, nearby GTA cities, Trade Account, and Leave a Review intent.') }}</small>
                         </div>
 
                         <!-- Anchor Text -->
@@ -129,12 +148,6 @@
 
 @section('script')
 <script>
-    $('.tool-card').on('mouseenter', function() {
-        $(this).addClass('shadow-lg').css('transform', 'translateY(-3px)');
-    }).on('mouseleave', function() {
-        $(this).removeClass('shadow-lg').css('transform', 'translateY(0)');
-    });
-
     function openToolModal(featureKey, sectionLabel) {
         $('#toolFeatureInput').val(featureKey);
         $('#toolModalLabel').text(sectionLabel);
@@ -146,6 +159,10 @@
                 $(this).show();
             }
         });
+
+        if (featureKey === 'ai_backlink_campaign') {
+            $('[data-tools*="ai_backlink_campaign"]').show();
+        }
 
         if ($('.tool-field:visible').length === 0) {
             $('[data-tools*="guest_post_topics"]').show();

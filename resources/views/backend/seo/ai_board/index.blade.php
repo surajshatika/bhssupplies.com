@@ -19,8 +19,8 @@
 .score-ring.warning { background: #f6c23e; }
 .score-ring.danger  { background: #e74a3b; }
 .score-ring.secondary { background: #b0b4bc; }
-.tab-pill { padding: .4rem .85rem; border-radius: 20px; background: #f3f4f6; color: #374151; font-weight: 500; font-size: .85rem; margin-right: .35rem; display: inline-block; }
-.tab-pill.active { background: #4e73df; color: #fff; }
+.tab-pill { padding: .4rem .7rem; border-radius: 6px; background: #f3f4f6; color: #374151; font-weight: 600; font-size: .8rem; margin-right: .25rem; display: inline-block; }
+.tab-pill.active { background: #146c7e; color: #fff; }
 .badge-soft-success { background: rgba(28,200,138,.15); color: #1cc88a; }
 .badge-soft-danger  { background: rgba(231,74,59,.15); color: #e74a3b; }
 .fix-drawer { position: fixed; top: 0; right: -560px; bottom: 0; width: 560px; max-width: 100%; background: #fff; box-shadow: -8px 0 24px rgba(0,0,0,.12); z-index: 1080; transition: right .25s ease; overflow-y: auto; }
@@ -49,20 +49,32 @@
     <div class="row align-items-center">
         <div class="col-md-7">
             <h1 class="h3 mb-0">{{ translate('AI SEO Board') }}</h1>
-            <p class="text-muted mb-0 small">{{ translate('Scan every product, category, page and blog post — see what is missing and let AI fill the gaps.') }}</p>
+            <p class="text-muted mb-0 small">{{ translate('Scan every product, category, page and blog post - see what is missing and let AI fill the gaps.') }}</p>
         </div>
-        <div class="col-md-5 text-md-right mt-3 mt-md-0">
-            <button type="button" class="btn btn-success btn-sm js-bulk-trigger" data-mode="filtered">
-                <i class="las la-magic"></i> {{ translate('AI Fix All Filtered') }}
-            </button>
-            <a href="{{ route('admin.seo.ai_board.index', ['type' => $type]) }}" class="btn btn-soft-secondary btn-sm ml-1">
-                <i class="las la-sync"></i> {{ translate('Refresh') }}
-            </a>
-            <a href="{{ route('admin.seo-suite.settings.view') }}" class="btn btn-soft-primary btn-sm ml-1">
-                <i class="las la-cog"></i> {{ translate('Settings') }}
-            </a>
+        <div class="col-md-5">
+            <div class="seo-board-actions">
+                <select id="bulkLimit" class="form-control form-control-sm" style="width:auto;" title="{{ translate('How many matching URLs to fix in this run') }}">
+                    <option value="10" selected>10 {{ translate('per run') }}</option>
+                </select>
+                <button type="button" class="btn btn-success btn-sm js-bulk-trigger" data-mode="filtered">
+                    <i class="las la-magic"></i> {{ translate('AI Fix All Filtered') }}
+                </button>
+                <a href="{{ route('admin.seo.ai_board.index', ['type' => $type]) }}" class="btn btn-soft-secondary btn-sm">
+                    <i class="las la-sync"></i> {{ translate('Refresh') }}
+                </a>
+                <a href="{{ route('admin.seo-suite.settings.view') }}" class="btn btn-soft-primary btn-sm">
+                    <i class="las la-cog"></i> {{ translate('Settings') }}
+                </a>
+            </div>
         </div>
     </div>
+</div>
+
+@include('backend.seo.partials.suite_nav')
+
+<div class="alert alert-info py-2 small">
+    <i class="las la-shield-alt mr-1"></i>
+    {{ translate('Protection active: completed SEO URLs are not selected by autopilot. Use filters or selected rows only when you intentionally want to review specific URLs.') }}
 </div>
 
 {{-- Stat row --}}
@@ -88,7 +100,7 @@
     <div class="col-6 col-md-3 col-xl mb-2">
         <div class="ai-board-stat">
             <div class="stat-num text-warning">{{ number_format($summary['warning']) }}</div>
-            <div class="stat-label">{{ translate('Warning (50–79)') }}</div>
+            <div class="stat-label">{{ translate('Warning (50-79)') }}</div>
         </div>
     </div>
     <div class="col-6 col-md-3 col-xl mb-2">
@@ -117,7 +129,7 @@
         <div class="row gutters-8 align-items-end">
             <div class="col-md-3">
                 <label class="small mb-1">{{ translate('Search') }}</label>
-                <input type="text" name="search" value="{{ $filters['search'] }}" class="form-control form-control-sm" placeholder="{{ translate('Name or title…') }}">
+                <input type="text" name="search" value="{{ $filters['search'] }}" class="form-control form-control-sm" placeholder="{{ translate('Name or title...') }}">
             </div>
             <div class="col-md-2">
                 <label class="small mb-1">{{ translate('Missing') }}</label>
@@ -215,11 +227,19 @@
                                     <span class="text-success small">{{ translate('No critical issues') }}</span>
                                 @endif
                             </td>
-                            <td class="text-right">
+                            <td class="text-right text-nowrap">
+                                <button class="btn btn-soft-primary btn-sm js-preview-btn"
+                                        data-type="{{ $row['type'] }}"
+                                        data-id="{{ $row['id'] }}"
+                                        data-title="{{ $row['title'] }}"
+                                        title="{{ translate('Preview & edit AI suggestions before applying') }}">
+                                    <i class="las la-eye"></i> {{ translate('Preview') }}
+                                </button>
                                 <button class="btn btn-primary btn-sm js-fix-btn"
                                         data-type="{{ $row['type'] }}"
                                         data-id="{{ $row['id'] }}"
-                                        data-title="{{ $row['title'] }}">
+                                        data-title="{{ $row['title'] }}"
+                                        title="{{ translate('Generate and apply in one click') }}">
                                     <i class="las la-magic"></i> {{ translate('AI Fix') }}
                                 </button>
                             </td>
@@ -272,7 +292,7 @@
                     <div class="modal-cost-row"><span class="key">{{ translate('Estimated cost') }}</span><span class="val text-primary" id="bcCost">—</span></div>
                     <div class="alert alert-warning small mb-0 mt-3 d-none" id="bcSyncWarn">
                         <i class="las la-exclamation-triangle"></i>
-                        {{ translate('Queue is set to "sync" — this run will block your browser tab until it finishes. For large runs, configure a queue worker.') }}
+                        {{ translate('Queue is set to sync, so large bulk fixes will be processed by cron in small chunks. Keep the scheduler cron active.') }}
                     </div>
                 </div>
             </div>
@@ -344,9 +364,88 @@
                 </span>
             </div>
             <div id="fixDrawerApplied"></div>
+
+            {{-- Live SERP + social previews (pure client-side, no extra API call) --}}
+            <div id="fixDrawerPreviews" class="mt-4 d-none">
+                <div class="preview-label"><i class="lab la-google mr-1"></i>{{ translate('Google preview') }}</div>
+                <div class="serp-card">
+                    <div class="serp-url" id="pvSerpUrl"></div>
+                    <div class="serp-title" id="pvSerpTitle"></div>
+                    <div class="serp-desc" id="pvSerpDesc"></div>
+                </div>
+
+                <div class="preview-label mt-3"><i class="lab la-facebook mr-1"></i>{{ translate('Social share preview') }}</div>
+                <div class="social-card">
+                    <div class="social-img" id="pvSocialImg"></div>
+                    <div class="social-meta">
+                        <div class="social-host" id="pvSocialHost"></div>
+                        <div class="social-title" id="pvSocialTitle"></div>
+                        <div class="social-desc" id="pvSocialDesc"></div>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <a href="#" id="pvGoogleTest" target="_blank" rel="noopener" class="btn btn-sm btn-soft-info">
+                        <i class="las la-vial mr-1"></i>{{ translate('Test rich results with Google') }}
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        {{-- Preview & Edit form (shown for the Preview flow) --}}
+        <div id="previewForm" class="d-none">
+            <p class="mb-1"><strong id="previewTitle"></strong></p>
+            <div class="mb-3">
+                <span class="badge badge-soft-secondary mr-1" id="previewSource"></span>
+                <span class="badge badge-soft-info">{{ translate('Current score') }}: <span id="previewScore"></span></span>
+            </div>
+            <div class="alert alert-soft-info small py-2">
+                <i class="las la-info-circle mr-1"></i>{{ translate('Edit any suggestion below, then Apply. Only empty fields are written — curated values are never overwritten.') }}
+            </div>
+
+            <div class="form-group" id="pf-title-group">
+                <label class="field-label mb-1">{{ translate('Meta title') }} <small class="text-muted">(<span id="pf-title-count">0</span>/60)</small></label>
+                <input type="text" id="pf-title" class="form-control form-control-sm" maxlength="70">
+            </div>
+            <div class="form-group" id="pf-desc-group">
+                <label class="field-label mb-1">{{ translate('Meta description') }} <small class="text-muted">(<span id="pf-desc-count">0</span>/160)</small></label>
+                <textarea id="pf-desc" class="form-control form-control-sm" rows="3" maxlength="320"></textarea>
+            </div>
+            <div class="form-group" id="pf-focus-group">
+                <label class="field-label mb-1">{{ translate('Focus keyword') }}</label>
+                <input type="text" id="pf-focus" class="form-control form-control-sm">
+            </div>
+            <div class="form-group" id="pf-secondary-group">
+                <label class="field-label mb-1">{{ translate('Secondary keywords') }} <small class="text-muted">{{ translate('(comma separated)') }}</small></label>
+                <textarea id="pf-secondary" class="form-control form-control-sm" rows="2"></textarea>
+            </div>
+            <div class="form-check mb-3" id="pf-schema-group">
+                <input class="form-check-input" type="checkbox" id="pf-schema" checked>
+                <label class="form-check-label small" for="pf-schema">{{ translate('Generate structured data (schema) for this page') }}</label>
+            </div>
+
+            <button type="button" class="btn btn-success btn-block" id="pf-apply">
+                <i class="las la-check mr-1"></i>{{ translate('Apply approved values') }}
+                <span id="pf-apply-spinner" class="spinner-border spinner-border-sm ml-1 d-none"></span>
+            </button>
         </div>
     </div>
 </div>
+
+<style>
+.preview-label { font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; font-weight:600; margin-bottom:.35rem; }
+.serp-card { border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; background:#fff; font-family:Arial,sans-serif; }
+.serp-url { color:#202124; font-size:12px; line-height:1.3; }
+.serp-title { color:#1a0dab; font-size:18px; line-height:1.3; margin:2px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.serp-desc { color:#4d5156; font-size:13px; line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.social-card { border:1px solid #dadde1; border-radius:8px; overflow:hidden; background:#fff; }
+.social-img { height:140px; background:#eceff3 center/cover no-repeat; display:flex; align-items:center; justify-content:center; color:#9aa0a6; font-size:12px; }
+.social-meta { padding:10px 12px; background:#f2f3f5; }
+.social-host { color:#606770; font-size:11px; text-transform:uppercase; letter-spacing:.03em; }
+.social-title { color:#1d2129; font-size:15px; font-weight:600; line-height:1.3; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.social-desc { color:#606770; font-size:12px; line-height:1.4; margin-top:2px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.serp-title.too-long, .social-title.too-long { color:#b91c1c; }
+</style>
 
 @endsection
 
@@ -355,6 +454,38 @@
 (function () {
     const csrf = '{{ csrf_token() }}';
     const fixEndpoint = '{{ route("admin.seo.ai_board.fix") }}';
+    const previewEndpoint = '{{ route("admin.seo.ai_board.preview") }}';
+    const applyApprovedEndpoint = '{{ route("admin.seo.ai_board.apply_approved") }}';
+    let previewCtx = null; // {type, id}
+
+    function safeHttpUrl(value) {
+        const raw = String(value == null ? '' : value).trim();
+        if (!raw) return '';
+        try {
+            const url = new URL(raw, window.location.href);
+            return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function readJsonResponse(response) {
+        return response.text().then(function (text) {
+            let payload = null;
+            try {
+                payload = text ? JSON.parse(text) : {};
+            } catch (e) {
+                const clean = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240);
+                throw new Error(clean || ('Server returned non-JSON response (' + response.status + ')'));
+            }
+
+            if (!response.ok || payload.success === false) {
+                throw new Error(payload.error || payload.message || ('Request failed (' + response.status + ')'));
+            }
+
+            return payload;
+        });
+    }
 
     function openDrawer() {
         document.getElementById('fixDrawer').classList.add('open');
@@ -366,6 +497,7 @@
         document.querySelector('.fix-drawer-backdrop').classList.remove('open');
         document.getElementById('fixDrawerError').classList.add('d-none');
         document.getElementById('fixDrawerResult').classList.add('d-none');
+        document.getElementById('previewForm').classList.add('d-none');
     }
 
     function showLoading(title) {
@@ -373,6 +505,8 @@
         document.getElementById('fixDrawerLoading').classList.remove('d-none');
         document.getElementById('fixDrawerError').classList.add('d-none');
         document.getElementById('fixDrawerResult').classList.add('d-none');
+        document.getElementById('fixDrawerPreviews').classList.add('d-none');
+        document.getElementById('previewForm').classList.add('d-none');
     }
 
     function showError(msg) {
@@ -389,12 +523,17 @@
         document.getElementById('fixScoreBefore').textContent = data.score_before;
         document.getElementById('fixScoreAfter').textContent  = data.score_after;
 
+        renderPreviews(data.row || {});
+
         const apEl = document.getElementById('fixDrawerApplied');
-        apEl.innerHTML = '';
+        apEl.replaceChildren();
 
         const applied = data.applied || {};
         if (Object.keys(applied).length === 0) {
-            apEl.innerHTML = '<p class="text-muted">{{ translate("Nothing to fix — this entity already has complete SEO data.") }}</p>';
+            const empty = document.createElement('p');
+            empty.className = 'text-muted';
+            empty.textContent = '{{ translate("Nothing to fix — this entity already has complete SEO data.") }}';
+            apEl.appendChild(empty);
             return;
         }
 
@@ -403,15 +542,96 @@
         for (const [field, value] of Object.entries(applied)) {
             const row = document.createElement('div');
             row.className = 'mb-2';
-            row.innerHTML = '<div class="field-label">' + field + '</div><div class="field-value">' + (value || '').toString() + '</div>';
+            const label = document.createElement('div');
+            label.className = 'field-label';
+            label.textContent = field;
+            const fieldValue = document.createElement('div');
+            fieldValue.className = 'field-value';
+            fieldValue.textContent = value == null ? '' : String(value);
+            row.append(label, fieldValue);
             panel.appendChild(row);
         }
         apEl.appendChild(panel);
     }
 
+    function renderPreviews(row) {
+        const wrap = document.getElementById('fixDrawerPreviews');
+        if (!row || (!row.meta_title && !row.title)) { wrap.classList.add('d-none'); return; }
+        wrap.classList.remove('d-none');
+
+        const title = row.meta_title || row.title || '';
+        const desc  = row.meta_description || '{{ translate('Add a meta description to improve click-through from search results.') }}';
+        const url   = row.url || '{{ url('/') }}';
+        let host = url, path = '';
+        try { const u = new URL(url); host = u.hostname.replace(/^www\./, ''); path = u.pathname.replace(/\//g, ' › ').replace(/\s›\s$/, ''); } catch (e) {}
+
+        // Google SERP
+        document.getElementById('pvSerpUrl').textContent   = host + path;
+        const st = document.getElementById('pvSerpTitle');
+        st.textContent = title;
+        st.classList.toggle('too-long', title.length > 60);
+        document.getElementById('pvSerpDesc').textContent  = desc;
+
+        // Social card
+        const img = document.getElementById('pvSocialImg');
+        const ogImageUrl = safeHttpUrl(row.og_image);
+        if (ogImageUrl) { img.style.backgroundImage = 'url(' + JSON.stringify(ogImageUrl) + ')'; img.textContent = ''; }
+        else { img.style.backgroundImage = 'none'; img.textContent = '{{ translate('No OG image set') }}'; }
+        document.getElementById('pvSocialHost').textContent = host;
+        const st2 = document.getElementById('pvSocialTitle');
+        st2.textContent = title;
+        st2.classList.toggle('too-long', title.length > 70);
+        document.getElementById('pvSocialDesc').textContent = desc;
+
+        // Test-with-Google deep link
+        document.getElementById('pvGoogleTest').href = 'https://search.google.com/test/rich-results?url=' + encodeURIComponent(url);
+    }
+
+    function showPreviewForm(data) {
+        document.getElementById('fixDrawerLoading').classList.add('d-none');
+        document.getElementById('fixDrawerResult').classList.add('d-none');
+        document.getElementById('fixDrawerError').classList.add('d-none');
+        document.getElementById('previewForm').classList.remove('d-none');
+
+        previewCtx = { type: data.type, id: data.id };
+        const s = data.suggestions || {};
+        const cur = data.current || {};
+
+        document.getElementById('previewTitle').textContent = data.title || '';
+        document.getElementById('previewSource').textContent = data.source === 'ai' ? 'AI generated' : 'Template fallback';
+        document.getElementById('previewScore').textContent = data.score_before;
+
+        // Show a field only when a suggestion exists (i.e. the field is empty/missing).
+        toggleField('pf-title-group', 'pf-title', s.meta_title, cur.meta_title);
+        toggleField('pf-desc-group', 'pf-desc', s.meta_description, cur.meta_description);
+        toggleField('pf-focus-group', 'pf-focus', s.focus_keyword, cur.focus_keyword);
+        toggleField('pf-secondary-group', 'pf-secondary', s.secondary_keywords, null);
+
+        document.getElementById('pf-schema-group').classList.toggle('d-none', !('schema' in s));
+        document.getElementById('pf-schema').checked = !!s.schema;
+
+        updateCount('pf-title', 'pf-title-count');
+        updateCount('pf-desc', 'pf-desc-count');
+    }
+
+    function toggleField(groupId, inputId, suggestion, current) {
+        const group = document.getElementById(groupId);
+        const has = suggestion !== undefined && suggestion !== null && suggestion !== '';
+        group.classList.toggle('d-none', !has);
+        if (has) {
+            document.getElementById(inputId).value = suggestion;
+        }
+    }
+
+    function updateCount(inputId, countId) {
+        const el = document.getElementById(countId);
+        if (el) el.textContent = (document.getElementById(inputId).value || '').length;
+    }
+
     function refreshRow(row) {
         if (!row || !row.id || !row.type) return;
-        const tr = document.querySelector('tr[data-row-id="' + row.type + '-' + row.id + '"]');
+        const rowId = String(row.type) + '-' + String(row.id);
+        const tr = Array.from(document.querySelectorAll('tr[data-row-id]')).find(el => el.dataset.rowId === rowId);
         if (!tr) return;
         const ring = tr.querySelector('.score-ring');
         if (ring) {
@@ -427,13 +647,75 @@
                 { ok: row.has_schema,   label: 'S',  title: 'Schema' },
                 { ok: row.has_focus_kw, label: 'K',  title: 'Focus keyword' },
             ];
-            signals.innerHTML = flags.map(f =>
-                '<span class="badge ' + (f.ok ? 'badge-soft-success' : 'badge-soft-danger') + '" title="' + f.title + '">' + f.label + '</span>'
-            ).join(' ');
+            signals.replaceChildren();
+            flags.forEach(function(flag, index) {
+                if (index > 0) signals.appendChild(document.createTextNode(' '));
+                const badge = document.createElement('span');
+                badge.className = 'badge ' + (flag.ok ? 'badge-soft-success' : 'badge-soft-danger');
+                badge.title = flag.title;
+                badge.textContent = flag.label;
+                signals.appendChild(badge);
+            });
         }
     }
 
     document.querySelectorAll('.js-close-drawer').forEach(el => el.addEventListener('click', closeDrawer));
+
+    // ── PREVIEW & EDIT FLOW ───────────────────────────────────────────────────
+    document.querySelectorAll('.js-preview-btn').forEach(btn => btn.addEventListener('click', function () {
+        showLoading(this.dataset.title);
+        document.getElementById('fixDrawerLoading').querySelector('p').textContent = '{{ translate("Generating AI suggestions to review…") }}';
+        openDrawer();
+
+        fetch(previewEndpoint, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+            body: JSON.stringify({ type: this.dataset.type, id: this.dataset.id })
+        })
+        .then(r => r.json().then(j => ({ status: r.status, json: j })))
+        .then(({ status, json }) => {
+            if (!json.success) { showError(json.error || 'Preview failed (HTTP ' + status + ')'); return; }
+            showPreviewForm(json.data);
+        })
+        .catch(err => showError(err.message || 'Network error'));
+    }));
+
+    document.getElementById('pf-title').addEventListener('input', () => updateCount('pf-title', 'pf-title-count'));
+    document.getElementById('pf-desc').addEventListener('input', () => updateCount('pf-desc', 'pf-desc-count'));
+
+    document.getElementById('pf-apply').addEventListener('click', function () {
+        if (!previewCtx) return;
+        const spinner = document.getElementById('pf-apply-spinner');
+        this.disabled = true; spinner.classList.remove('d-none');
+
+        const payload = {
+            type: previewCtx.type,
+            id: previewCtx.id,
+            meta_title: document.getElementById('pf-title').value,
+            meta_description: document.getElementById('pf-desc').value,
+            focus_keyword: document.getElementById('pf-focus').value,
+            secondary_keywords: document.getElementById('pf-secondary').value,
+            schema: document.getElementById('pf-schema').checked ? 1 : 0,
+        };
+
+        fetch(applyApprovedEndpoint, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json().then(j => ({ status: r.status, json: j })))
+        .then(({ status, json }) => {
+            this.disabled = false; spinner.classList.add('d-none');
+            if (!json.success) { showError(json.error || 'Apply failed (HTTP ' + status + ')'); return; }
+            document.getElementById('previewForm').classList.add('d-none');
+            document.getElementById('fixDrawerResult').classList.remove('d-none');
+            showResult(json.data);
+            refreshRow(json.data.row);
+        })
+        .catch(err => { this.disabled = false; spinner.classList.add('d-none'); showError(err.message || 'Network error'); });
+    });
 
     document.querySelectorAll('.js-fix-btn').forEach(btn => btn.addEventListener('click', function () {
         const type = this.dataset.type;
@@ -473,11 +755,11 @@
 
     const currentFilters = {
         type:      '{{ $type }}',
-        search:    {!! json_encode($filters['search']) !!},
-        missing:   {!! json_encode($filters['missing']) !!},
-        min_score: {!! json_encode($filters['min_score']) !!},
-        max_score: {!! json_encode($filters['max_score']) !!},
-        sort:      {!! json_encode($filters['sort']) !!},
+        search:    {!! json_encode($filters['search'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!},
+        missing:   {!! json_encode($filters['missing'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!},
+        min_score: {!! json_encode($filters['min_score'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!},
+        max_score: {!! json_encode($filters['max_score'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!},
+        sort:      {!! json_encode($filters['sort'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!},
     };
 
     function selectedTargets() {
@@ -521,9 +803,15 @@
                 alert('{{ translate("Select at least one row first.") }}');
                 return;
             }
+            if (targets.length > 10) {
+                alert('{{ translate("Select a maximum of 10 rows per manual bulk fix.") }}');
+                return;
+            }
             pendingPayload = { mode: 'selected', targets: targets };
         } else {
-            pendingPayload = Object.assign({ mode: 'filtered' }, currentFilters);
+            const limitEl = document.getElementById('bulkLimit');
+            const limit = limitEl ? parseInt(limitEl.value, 10) : 10;
+            pendingPayload = Object.assign({ mode: 'filtered', limit: limit }, currentFilters);
         }
 
         openCostModal(pendingPayload);
@@ -541,12 +829,12 @@
             headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
             body: JSON.stringify(payload)
         })
-        .then(r => r.json())
+        .then(readJsonResponse)
         .then(j => {
             document.getElementById('bulkCostLoading').classList.add('d-none');
             document.getElementById('bulkCostBody').classList.remove('d-none');
             document.getElementById('bcCount').textContent    = j.count;
-            document.getElementById('bcProvider').textContent = j.provider + (j.ai_call ? ' (AI mode)' : ' — no API key, template fallback');
+            document.getElementById('bcProvider').textContent = j.provider + (j.ai_call ? ' (AI mode)' : ' - no API key, template fallback');
             document.getElementById('bcMode').textContent     = payload.mode === 'selected' ? 'Selected rows' : 'All matching filters';
             document.getElementById('bcCost').textContent     = j.ai_call ? ('$' + (j.estimated_usd || 0).toFixed(4)) : '$0 (free)';
             document.getElementById('bcSyncWarn').classList.toggle('d-none', !j.sync_warning);
@@ -554,8 +842,12 @@
         })
         .catch(err => {
             document.getElementById('bulkCostLoading').classList.add('d-none');
-            document.getElementById('bulkCostBody').classList.remove('d-none');
-            document.getElementById('bulkCostBody').innerHTML = '<div class="alert alert-danger mb-0">' + (err.message || 'Estimate failed') + '</div>';
+            const body = document.getElementById('bulkCostBody');
+            const error = document.createElement('div');
+            error.className = 'alert alert-danger mb-0';
+            error.textContent = err.message || 'Estimate failed';
+            body.replaceChildren(error);
+            body.classList.remove('d-none');
         });
     }
 
@@ -587,14 +879,8 @@
             headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
             body: JSON.stringify(pendingPayload)
         })
-        .then(r => r.json())
+        .then(readJsonResponse)
         .then(j => {
-            if (!j.success) {
-                document.getElementById('bpErrors').textContent = j.error || 'Failed to start batch';
-                document.getElementById('bpErrors').classList.remove('d-none');
-                document.getElementById('bpCloseBtn').classList.remove('d-none');
-                return;
-            }
             activeBatchId = j.batch_id;
             applySnapshot(j.snapshot);
             startProgressPolling();
@@ -615,9 +901,8 @@
     function pollProgress() {
         if (!activeBatchId) return;
         fetch(bulkProgressUrlTpl + activeBatchId, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
-            .then(r => r.json())
+            .then(readJsonResponse)
             .then(j => {
-                if (!j.success) return;
                 applySnapshot(j.snapshot);
                 if (j.snapshot.is_terminal) {
                     clearInterval(progressTimer);
@@ -648,8 +933,16 @@
         if ((s.recent_errors || []).length > 0) {
             const el = document.getElementById('bpErrors');
             el.classList.remove('d-none');
-            el.innerHTML = '<strong>{{ translate("Recent errors") }}:</strong><br>' +
-                s.recent_errors.map(e => '<code>' + (e.msg || '') + '</code>').join('<br>');
+            el.replaceChildren();
+            const label = document.createElement('strong');
+            label.textContent = '{{ translate("Recent errors") }}:';
+            el.append(label, document.createElement('br'));
+            s.recent_errors.forEach(function(error, index) {
+                if (index > 0) el.appendChild(document.createElement('br'));
+                const code = document.createElement('code');
+                code.textContent = error.msg || '';
+                el.appendChild(code);
+            });
         }
     }
 
@@ -660,11 +953,7 @@
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' }
-        }).then(r => r.json()).then(j => {
-            if (j.success) {
-                applySnapshot(j.snapshot);
-            }
-        });
+        }).then(readJsonResponse).then(j => applySnapshot(j.snapshot));
     });
 
     updateBulkBar();

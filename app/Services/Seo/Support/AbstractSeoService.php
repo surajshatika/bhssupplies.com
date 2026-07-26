@@ -26,25 +26,37 @@ abstract class AbstractSeoService
 
     protected function askForJson($prompt, $systemPrompt, array $fallback)
     {
-        $response = $this->provider->generate($prompt, $systemPrompt);
+        $response = $this->provider->generate($prompt, $systemPrompt, ['expect_json' => true]);
+        $this->refreshProviderName();
         $parsed = $this->parseJson($response);
 
         if (!is_array($parsed) || empty($parsed)) {
             return $fallback;
         }
 
-        return array_replace_recursive($fallback, $parsed);
+        $result = array_replace_recursive($fallback, $parsed);
+        if (array_key_exists('provider', $result)) {
+            $result['provider'] = $this->providerName;
+        }
+
+        return $result;
     }
 
     protected function askForText($prompt, $systemPrompt, $fallback)
     {
         $response = $this->provider->generate($prompt, $systemPrompt);
+        $this->refreshProviderName();
 
         if (!is_string($response) || trim($response) === '') {
             return $fallback;
         }
 
         return trim($response);
+    }
+
+    protected function refreshProviderName(): void
+    {
+        $this->providerName = $this->provider->getName();
     }
 
     protected function parseJson($content)
@@ -118,21 +130,16 @@ abstract class AbstractSeoService
         return max(0, min(100, $score));
     }
 
-    protected function gradeFromScore($score)
+    protected function gradeFromScore($score): string
     {
-        if ($score >= 90) {
-            return 'A';
-        }
-        if ($score >= 80) {
-            return 'B';
-        }
-        if ($score >= 70) {
-            return 'C';
-        }
-        if ($score >= 60) {
-            return 'D';
-        }
-        return 'F';
+        return match (true) {
+            (int) $score >= 90 => 'A+',
+            (int) $score >= 80 => 'A',
+            (int) $score >= 70 => 'B',
+            (int) $score >= 60 => 'C',
+            (int) $score >= 50 => 'D',
+            default            => 'F',
+        };
     }
 
     protected function normalizeUrl($url)

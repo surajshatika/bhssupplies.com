@@ -3,7 +3,15 @@
 @section('content')
 @include('backend.partials.modern_module_styles')
 @php
-    $providers = ['openai' => 'OpenAI (ChatGPT)', 'claude' => 'Claude (Anthropic)', 'gemini' => 'Gemini (Google)', 'grok' => 'Grok (xAI)'];
+    $providers = [
+        'openai' => 'OpenAI (ChatGPT)',
+        'claude' => 'Claude (Anthropic)',
+        'gemini' => 'Gemini (Google)',
+        'grok' => 'Grok (xAI)',
+        'perplexity' => 'Perplexity AI (Live Web Search)',
+        'mistral' => 'Mistral AI',
+        'deepseek' => 'DeepSeek (Cost-Effective Bulk SEO)',
+    ];
 @endphp
 
 <div class="mm-hero mm-hero--seo">
@@ -33,6 +41,14 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
+@if(!empty($settings['gsc_connected_email']))
+<form id="seo-google-disconnect-form" action="{{ route('admin.seo.oauth.google.disconnect') }}" method="POST" class="d-none">
+    @csrf
+</form>
+@endif
+
 <form action="{{ route('admin.seo-suite.settings') }}" method="POST">
 @csrf
 
@@ -51,6 +67,55 @@
                             <option value="{{ $val }}" @if(($settings['default_provider'] ?? 'openai') === $val) selected @endif>{{ $label }}</option>
                         @endforeach
                     </select>
+                </div>
+
+                <div class="border rounded p-3 mb-3 bg-light">
+                    <div class="custom-control custom-switch mb-2">
+                        <input type="checkbox" class="custom-control-input" id="ai-failover-enabled" name="ai_failover_enabled" value="1" {{ !empty($settings['ai_failover_enabled']) ? 'checked' : '' }}>
+                        <label class="custom-control-label font-weight-bold" for="ai-failover-enabled">{{ translate('Automatic AI provider failover') }}</label>
+                    </div>
+                    <small class="text-muted d-block mb-3">{{ translate('If the selected AI is unavailable, times out, or returns unusable JSON, SEO automation tries the next configured provider.') }}</small>
+                    <div class="form-group">
+                        <label>{{ translate('Fallback quality order') }}</label>
+                        <input type="text" class="form-control" name="ai_failover_order" value="{{ $settings['ai_failover_order'] ?? 'claude,openai,gemini,grok,perplexity,mistral,deepseek' }}" placeholder="claude,openai,gemini,grok,perplexity,mistral,deepseek">
+                        <small class="text-muted">{{ translate('The selected default provider is always attempted first. Use comma-separated provider names.') }}</small>
+                    </div>
+                    <div class="form-group mb-0">
+                        <label>{{ translate('Maximum AI attempts per request') }}</label>
+                        <select class="form-control" name="ai_failover_max_attempts">
+                            @foreach([1, 2, 3, 4] as $attempts)
+                                <option value="{{ $attempts }}" {{ (int) ($settings['ai_failover_max_attempts'] ?? 4) === $attempts ? 'selected' : '' }}>{{ $attempts }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <hr>
+                    <div class="custom-control custom-switch mb-3">
+                        <input type="checkbox" class="custom-control-input" id="ai-provider-cooldown-enabled" name="ai_provider_cooldown_enabled" value="1" {{ !empty($settings['ai_provider_cooldown_enabled']) ? 'checked' : '' }}>
+                        <label class="custom-control-label font-weight-bold" for="ai-provider-cooldown-enabled">{{ translate('Cool down unhealthy AI providers') }}</label>
+                        <small class="text-muted d-block mt-1">{{ translate('Temporarily skips a provider after repeated unusable responses so scheduled SEO can continue with a healthy fallback.') }}</small>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-6">
+                            <div class="form-group mb-0">
+                                <label>{{ translate('Failures before cooldown') }}</label>
+                                <select class="form-control" name="ai_provider_failure_threshold">
+                                    @foreach([2, 3, 4, 5, 10] as $threshold)
+                                        <option value="{{ $threshold }}" {{ (int) ($settings['ai_provider_failure_threshold'] ?? 3) === $threshold ? 'selected' : '' }}>{{ $threshold }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-sm-6">
+                            <div class="form-group mb-0">
+                                <label>{{ translate('Cooldown duration') }}</label>
+                                <select class="form-control" name="ai_provider_cooldown_minutes">
+                                    @foreach([5, 10, 15, 30, 60] as $minutes)
+                                        <option value="{{ $minutes }}" {{ (int) ($settings['ai_provider_cooldown_minutes'] ?? 15) === $minutes ? 'selected' : '' }}>{{ $minutes }} {{ translate('minutes') }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -83,7 +148,7 @@
                     <small class="text-muted">{{ translate('Used for: Multimodal content, structured data') }}</small>
                 </div>
 
-                <div class="form-group mb-0">
+                <div class="form-group">
                     <label>
                         <span class="badge badge-warning mr-1">Grok</span>
                         {{ translate('Grok API Key (xAI)') }}
@@ -91,6 +156,36 @@
                     <input type="password" class="form-control" name="grok_api_key"
                         value="{{ $settings['grok_api_key'] ?? '' }}" placeholder="xai-...">
                     <small class="text-muted">{{ translate('Used for: Real-time SEO insights, competitive analysis') }}</small>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <span class="badge badge-secondary mr-1">Perplexity</span>
+                        {{ translate('Perplexity API Key') }}
+                    </label>
+                    <input type="password" class="form-control" name="perplexity_api_key"
+                        value="{{ $settings['perplexity_api_key'] ?? '' }}" placeholder="pplx-...">
+                    <small class="text-muted">{{ translate('Used for: Live-web-search-backed semantic gap analysis and competitor research') }}</small>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <span class="badge badge-dark mr-1">Mistral</span>
+                        {{ translate('Mistral API Key') }}
+                    </label>
+                    <input type="password" class="form-control" name="mistral_api_key"
+                        value="{{ $settings['mistral_api_key'] ?? '' }}" placeholder="...">
+                    <small class="text-muted">{{ translate('Used for: General-purpose SEO content generation') }}</small>
+                </div>
+
+                <div class="form-group mb-0">
+                    <label>
+                        <span class="badge badge-light border mr-1">DeepSeek</span>
+                        {{ translate('DeepSeek API Key') }}
+                    </label>
+                    <input type="password" class="form-control" name="deepseek_api_key"
+                        value="{{ $settings['deepseek_api_key'] ?? '' }}" placeholder="sk-...">
+                    <small class="text-muted">{{ translate('Used for: High-volume/bulk SEO tasks at low cost') }}</small>
                 </div>
             </div>
         </div>
@@ -145,12 +240,9 @@
                         {{ translate('Connected as') }} <strong>{{ $settings['gsc_connected_email'] }}</strong>
                         — {{ translate('clicks/impressions/CTR/position sync every day at 04:00.') }}
                     </div>
-                    <form action="{{ route('admin.seo.oauth.google.disconnect') }}" method="POST" class="d-inline">
-                        @csrf
-                        <button class="btn btn-soft-danger btn-sm" onclick="return confirm('{{ translate('Disconnect Google Search Console?') }}');">
-                            <i class="las la-unlink mr-1"></i> {{ translate('Disconnect Google') }}
-                        </button>
-                    </form>
+                    <button type="submit" form="seo-google-disconnect-form" class="btn btn-soft-danger btn-sm" onclick="return confirm('{{ translate('Disconnect Google Search Console?') }}');">
+                        <i class="las la-unlink mr-1"></i> {{ translate('Disconnect Google') }}
+                    </button>
                 @elseif ($hasGoogleClient)
                     @if (!empty($settings['gsc_expected_email']))
                         <div class="alert alert-info py-2 mb-3 small">
@@ -370,6 +462,18 @@
             <div class="card-header"><h6 class="mb-0"><i class="las la-shield-alt mr-1 text-danger"></i>{{ translate('Auto Actions & Safety Caps') }}</h6></div>
             <div class="card-body">
                 <div class="form-group row mb-2">
+                    <label class="col-9 col-form-label small">
+                        {{ translate('Master hourly SEO automation command') }}
+                        <span class="d-block text-muted">{{ translate('Runs protected pending on-page SEO every hour, white-hat off-page planning, and interval-gated technical, index coverage, rank, PageSpeed, and link checks.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="master_automation_enabled" value="1" @if(!empty($settings['master_automation_enabled'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group row mb-2">
                     <label class="col-9 col-form-label small">{{ translate('Auto-ping IndexNow on entity save') }}</label>
                     <div class="col-3 text-right">
                         <label class="aiz-switch aiz-switch-success mb-0">
@@ -377,6 +481,131 @@
                             <span></span>
                         </label>
                     </div>
+                </div>
+                <div class="form-group row mb-2">
+                    <label class="col-9 col-form-label small">
+                        {{ translate('Automated Google index coverage verification') }}
+                        <span class="d-block text-muted">{{ translate('Checks protected SEO-ready URLs through Google Custom Search API and optionally resubmits confirmed gaps through IndexNow.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="auto_index_coverage_enabled" value="1" @if(!empty($settings['auto_index_coverage_enabled'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Index Coverage URLs Per Check') }}</label>
+                    <input type="number" min="1" max="50" class="form-control" name="auto_index_coverage_limit"
+                        value="{{ $settings['auto_index_coverage_limit'] ?? '20' }}">
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Index Coverage Interval (hours)') }}</label>
+                    <input type="number" min="1" max="168" class="form-control" name="auto_index_coverage_interval_hours"
+                        value="{{ $settings['auto_index_coverage_interval_hours'] ?? '24' }}">
+                    <small class="text-muted">{{ translate('Recommended: 24 hours. Requires the Google Custom Search API key and CX configured above.') }}</small>
+                </div>
+                <div class="form-group row mb-2">
+                    <label class="col-9 col-form-label small">
+                        {{ translate('Automated technical optimization refresh') }}
+                        <span class="d-block text-muted">{{ translate('Refreshes smart, video, and news sitemaps; robots.txt; llms.txt; RSS; SEO scores; local, canonical, redirect, and webmaster audits; plus optional IndexNow pings.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="auto_optimization_enabled" value="1" @if(!empty($settings['auto_optimization_enabled'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group row mb-2">
+                    <label class="col-9 col-form-label small">
+                        {{ translate('Fully automated Canada SEO for pending URLs') }}
+                        <span class="d-block text-muted">{{ translate('Runs hourly through the master command and skips already-done Product, Category, and Page SEO.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="auto_seo_enabled" value="1" @if(!empty($settings['auto_seo_enabled'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Auto SEO URLs Per Run') }}</label>
+                    <div class="input-group">
+                        <input type="number" min="1" max="100" step="1" class="form-control" name="auto_seo_batch_size"
+                            value="{{ $settings['auto_seo_batch_size'] ?? '10' }}" list="autoSeoBatchPresets">
+                        <datalist id="autoSeoBatchPresets">
+                            <option value="10"><option value="20"><option value="50"><option value="100">
+                        </datalist>
+                        <div class="input-group-append">
+                            <span class="input-group-text">{{ translate('URLs / run') }}</span>
+                        </div>
+                    </div>
+                    <small class="text-muted">
+                        {{ translate('Controls automated SEO queue creation and cron processing. Choose 10, 20, 50, or up to 100 URLs per automated run. Only one configured-size batch is processed at a time.') }}
+                        {{ translate('Manual AI Fix All Filtered runs are always capped at 10 URLs.') }}
+                    </small>
+                </div>
+                <div class="form-group row mb-2">
+                    <label class="col-9 col-form-label small">
+                        {{ translate('Fully automated AI off-page backlink campaigns') }}
+                        <span class="d-block text-muted">{{ translate('Creates white-hat backlink prospect, citation, guest post, outreach, and anchor text plans.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="auto_offpage_enabled" value="1" @if(!empty($settings['auto_offpage_enabled'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Off-Page Campaigns Per Run') }}</label>
+                    <input type="number" min="1" max="10" class="form-control" name="auto_offpage_batch_size"
+                        value="{{ $settings['auto_offpage_batch_size'] ?? '3' }}">
+                    <small class="text-muted">{{ translate('Recommended: 2-3. These are AI campaign plans and outreach templates, not spam auto-posted links.') }}</small>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Off-Page Campaign Interval (hours)') }}</label>
+                    <input type="number" min="1" max="24" class="form-control" name="auto_offpage_interval_hours"
+                        value="{{ $settings['auto_offpage_interval_hours'] ?? '6' }}">
+                    <small class="text-muted">{{ translate('How often the hourly master command prepares white-hat off-page campaigns for SEO-ready protected URLs. Recommended: 6-12.') }}</small>
+                </div>
+
+                <hr>
+                <div class="form-group row align-items-center mb-2">
+                    <label class="col-9 mb-0">{{ translate('Real-Time Sitemap Refresh') }}
+                        <span class="d-block text-muted">{{ translate('Regenerate XML sitemaps (with image tags + score-based priority) within ~5 min of publishing/updating a page. Off by default; the scheduler still refreshes them regularly.') }}</span>
+                    </label>
+                    <div class="col-3 text-right">
+                        <label class="aiz-switch aiz-switch-success mb-0">
+                            <input type="checkbox" name="auto_sitemap_realtime" value="1" @if(!empty($settings['auto_sitemap_realtime'])) checked @endif>
+                            <span></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Scheduled Sitemap Refresh Interval (hours)') }}</label>
+                    <input type="number" min="1" max="24" class="form-control" name="auto_sitemap_interval_hours"
+                        value="{{ $settings['auto_sitemap_interval_hours'] ?? '3' }}">
+                    <small class="text-muted">{{ translate('How often the hourly automation rebuilds the on-disk sitemaps. Recommended: 3-6.') }}</small>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Competitor Websites to Outrank') }}</label>
+                    <textarea class="form-control" name="competitor_urls" rows="4"
+                        placeholder="https://competitor1.ca&#10;https://competitor2.ca">{{ $settings['competitor_urls'] ?? '' }}</textarea>
+                    <small class="text-muted">{{ translate('One URL per line or comma-separated. Autopilot uses these only for keyword gaps, content angles, and positioning. It will not copy competitor content or mention competitor brand names.') }}</small>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Related Keywords to Target') }}</label>
+                    <textarea class="form-control" name="related_keywords" rows="4"
+                        placeholder="hvac supplies canada&#10;wholesale plumbing parts&#10;electrical distributor mississauga">{{ $settings['related_keywords'] ?? '' }}</textarea>
+                    <small class="text-muted">{{ translate('One keyword/phrase per line or comma-separated. The autopilot weaves these site-wide related keywords into generated titles, descriptions, content and secondary keywords.') }}</small>
+                </div>
+                <div class="form-group">
+                    <label>{{ translate('Competitor Keywords to Outrank') }}</label>
+                    <textarea class="form-control" name="competitor_keywords" rows="4"
+                        placeholder="hvac parts near me&#10;plumbing supply store toronto&#10;ac wholesale gta">{{ $settings['competitor_keywords'] ?? '' }}</textarea>
+                    <small class="text-muted">{{ translate('Keywords your competitors rank for that you want to compete on. The autopilot targets these naturally in generated SEO — never keyword-stuffed.') }}</small>
                 </div>
                 <div class="form-group">
                     <label>{{ translate('Daily AI Budget Cap (USD)') }}</label>
@@ -434,10 +663,13 @@ function generateIndexNowKey() {
             'X-CSRF-TOKEN': '{{ csrf_token() }}',
             'Accept': 'application/json',
         },
-    }).then(function() {
+    }).then(function(response) {
+        if (!response.ok) {
+            throw new Error('IndexNow key generation failed');
+        }
         window.location.reload();
     }).catch(function() {
-        window.location.href = '{{ route('admin.seo-suite.indexnow.generate_key') }}';
+        alert('{{ translate('Unable to generate the IndexNow key. Please refresh and try again.') }}');
     });
 }
 </script>

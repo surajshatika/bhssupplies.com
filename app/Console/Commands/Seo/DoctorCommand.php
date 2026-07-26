@@ -76,17 +76,21 @@ class DoctorCommand extends Command
         $configured = [];
         foreach ($providers as $name) {
             try {
-                $p = SeoProviderManager::make($name);
+                $p = SeoProviderManager::makeDirect($name);
                 if (method_exists($p, 'isConfigured') && $p->isConfigured()) {
                     $configured[] = $name;
                 }
             } catch (Throwable $e) {}
         }
 
+        $failover = SeoProviderManager::failoverEnabled()
+            ? ' | failover=' . implode(' -> ', SeoProviderManager::fallbackOrder(config('seo.default_provider', 'openai')))
+            : ' | failover=off';
+
         $this->result('ai_providers',
             empty($configured) ? 'warn' : 'ok',
             empty($configured) ? 'No AI provider keys configured — Board will use template fallback'
-                : 'Configured: ' . implode(', ', $configured)
+                : 'Configured: ' . implode(', ', $configured) . $failover
         );
     }
 
@@ -96,8 +100,10 @@ class DoctorCommand extends Command
         $isSync = $driver === 'sync';
 
         $this->result('queue',
-            $isSync ? 'warn' : 'ok',
-            'Driver=' . $driver . ($isSync ? ' (bulk fixes block the browser — set up queue worker for async)' : '')
+            'ok',
+            'Driver=' . $driver . ($isSync
+                ? ' (SEO bulk fixes are queued for the five-minute cron chunk processor)'
+                : ' (queue worker dispatch enabled)')
         );
     }
 

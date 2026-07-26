@@ -1,6 +1,8 @@
 @extends('backend.layouts.app')
 
 @section('content')
+@include('backend.partials.modern_module_styles')
+
 <div class="aiz-titlebar mt-2 mb-4">
     <div class="row align-items-center">
         <div class="col">
@@ -12,6 +14,14 @@
                 <i class="las la-arrow-left mr-1"></i>{{ translate('Back') }}
             </a>
         </div>
+    </div>
+</div>
+
+<div class="alert alert-info d-flex align-items-start">
+    <i class="las la-info-circle la-2x mr-2"></i>
+    <div>
+        <strong>{{ translate('Full Blog Blueprint') }}</strong>
+        <div class="small">{{ translate('AI blogs now generate full blog records: title, category, slug, 1300x650 banner, short description, full HTML description, and SEO metadata.') }}</div>
     </div>
 </div>
 
@@ -79,6 +89,45 @@
                             placeholder="Canada">
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- Full Blog Blueprint --}}
+    <div class="card mb-4">
+        <div class="card-header"><h6 class="mb-0"><i class="las la-layer-group mr-1"></i>{{ translate('Full Blog SEO Blueprint') }}</h6></div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="form-group">
+                        <label>{{ translate('Primary Locations') }}</label>
+                        <input type="text" name="ai_blog_primary_locations" class="form-control"
+                            value="{{ $settings['ai_blog_primary_locations'] ?: 'Mississauga, Brampton, Toronto' }}">
+                    </div>
+                </div>
+                <div class="col-md-5">
+                    <div class="form-group">
+                        <label>{{ translate('Secondary Locations') }}</label>
+                        <input type="text" name="ai_blog_secondary_locations" class="form-control"
+                            value="{{ $settings['ai_blog_secondary_locations'] ?: 'Etobicoke, Vaughan, Oakville, Scarborough, Markham, North York, Burlington' }}">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label>{{ translate('Conversion Intents') }}</label>
+                        <input type="text" name="ai_blog_conversion_intents" class="form-control"
+                            value="{{ $settings['ai_blog_conversion_intents'] ?: 'Trade Account, Leave a Review' }}">
+                    </div>
+                </div>
+            </div>
+            <div class="row gutters-16">
+                @foreach(['Blog Title','Category/Create New','Slug','Banner 1300x650','Short Description','Description','Meta Title','Meta Image','Meta Description','Meta Keywords'] as $item)
+                    <div class="col-sm-6 col-md-3 mb-2">
+                        <div class="border rounded px-3 py-2 small bg-light">
+                            <i class="las la-check-circle text-success mr-1"></i>{{ translate($item) }}
+                        </div>
+                    </div>
+                @endforeach
             </div>
         </div>
     </div>

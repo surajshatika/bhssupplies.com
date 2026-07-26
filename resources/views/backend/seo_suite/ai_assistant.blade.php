@@ -27,6 +27,8 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 <div class="row">
     {{-- Sidebar --}}
     <div class="col-lg-3">

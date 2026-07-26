@@ -28,6 +28,8 @@
 .mini-table td { padding: .35rem .5rem; font-size: .82rem; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
 .mini-table tr:last-child td { border-bottom: 0; }
 .text-truncate-cell { max-width: 220px; }
+.queue-health-strip { display:flex; flex-wrap:wrap; gap:.45rem 1rem; margin-top:.75rem; padding-top:.65rem; border-top:1px solid #eef0f4; font-size:.8rem; }
+.coverage-num { font-size:1.45rem; font-weight:700; line-height:1.1; }
 </style>
 
 <div class="aiz-titlebar mt-2 mb-3">
@@ -49,6 +51,8 @@
         </div>
     </div>
 </div>
+
+@include('backend.seo.partials.suite_nav')
 
 {{-- Top stats --}}
 <div class="row gutters-8 mb-3">
@@ -90,6 +94,127 @@
     </div>
 </div>
 
+{{-- Autopilot health --}}
+@php $auto = $data['autopilot'] ?? []; @endphp
+<div class="mon-card mb-3">
+    <div class="mon-card-head">
+        <span><i class="las la-bolt mr-1"></i>{{ translate('Autopilot Health') }}</span>
+        <div>
+            <a href="{{ route('admin.seo-suite.index') }}#seo-autopilot" class="btn btn-xs btn-soft-primary">{{ translate('Queue Controls') }}</a>
+            <a href="{{ route('admin.seo.ai_board.index', ['missing' => 'meta', 'sort' => 'score_asc']) }}" class="btn btn-xs btn-soft-danger ml-1">{{ translate('Pending Board') }}</a>
+        </div>
+    </div>
+    <div class="mon-card-body">
+        <div class="row gutters-8">
+            <div class="col-md-3 mb-2 mb-md-0">
+                <div class="kv-row"><span class="k">{{ translate('Status') }}</span><span class="{{ !empty($auto['enabled']) ? 'text-success' : 'text-warning' }}">{{ !empty($auto['enabled']) ? translate('Enabled') : translate('Disabled') }}</span></div>
+                <div class="kv-row"><span class="k">{{ translate('Batch size') }}</span><span>{{ $auto['batch_size'] ?? 10 }}</span></div>
+            </div>
+            <div class="col-md-3 mb-2 mb-md-0">
+                <div class="kv-row"><span class="k">{{ translate('Pending') }}</span><span class="text-danger font-weight-600">{{ $auto['pending_total'] ?? 0 }}</span></div>
+                <div class="kv-row"><span class="k">{{ translate('Forecast') }}</span><span>{{ $auto['days_to_completion'] ?? '-' }} {{ translate('days') }}</span></div>
+            </div>
+            <div class="col-md-3 mb-2 mb-md-0">
+                <div class="kv-row"><span class="k">{{ translate('Recovery backlog') }}</span><span class="{{ ($auto['active_backlog_urls'] ?? 0) > 0 ? 'text-warning' : 'text-success' }} font-weight-600">{{ number_format($auto['active_backlog_urls'] ?? 0) }}</span></div>
+                <div class="kv-row"><span class="k">{{ translate('Drain estimate') }}</span><span>{{ number_format($auto['queue_drain_minutes'] ?? 0) }} {{ translate('min') }}</span></div>
+            </div>
+            <div class="col-md-3">
+                <div class="kv-row"><span class="k">{{ translate('Budget spent') }}</span><span>${{ number_format($auto['spent_today'] ?? 0, 4) }}</span></div>
+                <div class="kv-row"><span class="k">{{ translate('Daily cap') }}</span><span>{{ ($auto['budget_cap'] ?? 0) > 0 ? '$'.number_format($auto['budget_cap'], 2) : translate('No cap') }}</span></div>
+            </div>
+        </div>
+        <div class="queue-health-strip">
+            <span>
+                <span class="text-muted">{{ translate('Active batches') }}:</span>
+                <strong>{{ $auto['active_batch_count'] ?? 0 }}</strong>
+            </span>
+            <span>
+                <span class="text-muted">{{ translate('Stalled') }}:</span>
+                <strong class="{{ ($auto['stalled_batch_count'] ?? 0) > 0 ? 'text-danger' : 'text-success' }}">{{ $auto['stalled_batch_count'] ?? 0 }}</strong>
+            </span>
+            <span>
+                <span class="text-muted">{{ translate('Oldest active') }}:</span>
+                @if(!empty($auto['active_batch']))
+                    <strong>#{{ $auto['active_batch']['id'] }}</strong>
+                    {{ $auto['active_batch']['status'] }} {{ $auto['active_batch']['percent'] }}%
+                    <span class="text-muted">({{ $auto['active_batch']['remaining'] }} {{ translate('remaining') }}, {{ $auto['active_batch']['heartbeat'] ?? '-' }})</span>
+                @else
+                    <strong class="text-success">{{ translate('None') }}</strong>
+                @endif
+            </span>
+            <span>
+                <span class="text-muted">{{ translate('7d failed/cancelled') }}:</span>
+                <strong>{{ $auto['recent_failure_count'] ?? 0 }}</strong>
+            </span>
+        </div>
+    </div>
+</div>
+
+{{-- Integration readiness + index coverage --}}
+@php
+    $readiness = $data['integration_readiness'] ?? ['score' => 0, 'ready_count' => 0, 'total_count' => 0, 'items' => []];
+    $indexCoverage = $data['latest_index_coverage'] ?? null;
+    $readinessTone = ($readiness['score'] ?? 0) >= 80 ? 'success' : (($readiness['score'] ?? 0) >= 50 ? 'warning' : 'danger');
+@endphp
+<div class="row gutters-16">
+    <div class="col-lg-7 mb-3">
+        <div class="mon-card h-100">
+            <div class="mon-card-head">
+                <span><i class="las la-plug mr-1"></i>{{ translate('Automation Integration Readiness') }}</span>
+                <span class="badge badge-{{ $readinessTone }}">{{ $readiness['score'] ?? 0 }}%</span>
+            </div>
+            <div class="mon-card-body">
+                <div class="d-flex flex-wrap justify-content-between mb-2 small text-muted">
+                    <span>{{ $readiness['ready_count'] ?? 0 }}/{{ $readiness['total_count'] ?? 0 }} {{ translate('integrations ready') }}</span>
+                    <span>{{ $readiness['automatic_controls'] ?? 0 }} {{ translate('automatic controls active') }}</span>
+                </div>
+                <div class="row gutters-8">
+                    @foreach(($readiness['items'] ?? []) as $item)
+                        <div class="col-md-6">
+                            <div class="kv-row align-items-start">
+                                <span>
+                                    <strong class="d-block">{{ translate($item['label']) }}</strong>
+                                    <small class="text-muted">{{ translate($item['detail']) }}</small>
+                                </span>
+                                <span class="badge badge-{{ !empty($item['ready']) ? 'success' : 'warning' }} ml-2">
+                                    {{ !empty($item['ready']) ? translate('Ready') : translate('Setup') }}
+                                </span>
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5 mb-3">
+        <div class="mon-card h-100">
+            <div class="mon-card-head">
+                <span><i class="las la-search mr-1"></i>{{ translate('Latest Google Index Coverage') }}</span>
+                <a href="{{ route('admin.seo-suite.index_status') }}" class="btn btn-xs btn-soft-primary">{{ translate('Open Checker') }}</a>
+            </div>
+            <div class="mon-card-body">
+                @if($indexCoverage)
+                    <div class="row gutters-8 text-center">
+                        <div class="col-3"><div class="coverage-num text-primary">{{ $indexCoverage['checked'] }}</div><small class="text-muted">{{ translate('checked') }}</small></div>
+                        <div class="col-3"><div class="coverage-num text-success">{{ $indexCoverage['indexed'] }}</div><small class="text-muted">{{ translate('indexed') }}</small></div>
+                        <div class="col-3"><div class="coverage-num text-danger">{{ $indexCoverage['not_indexed'] }}</div><small class="text-muted">{{ translate('gaps') }}</small></div>
+                        <div class="col-3"><div class="coverage-num text-warning">{{ $indexCoverage['errors'] }}</div><small class="text-muted">{{ translate('errors') }}</small></div>
+                    </div>
+                    <div class="queue-health-strip">
+                        <span><span class="text-muted">{{ translate('Last run') }}:</span> <strong>{{ $indexCoverage['completed_at'] ?? '-' }}</strong></span>
+                        <span><span class="text-muted">{{ translate('IndexNow resubmitted') }}:</span> <strong>{{ $indexCoverage['indexnow_submitted'] ?? 0 }}</strong></span>
+                    </div>
+                    @if(!empty($indexCoverage['message']))
+                        <div class="alert alert-warning py-2 px-3 mt-3 mb-0 small">{{ $indexCoverage['message'] }}</div>
+                    @endif
+                @else
+                    <div class="text-muted small py-3">{{ translate('No automated index coverage check has run yet. The hourly master command runs it on the configured interval once the Google Custom Search API key and CX are ready.') }}</div>
+                @endif
+            </div>
+        </div>
+    </div>
+</div>
+
 {{-- Charts row --}}
 <div class="row gutters-16">
     <div class="col-lg-6 mb-3">
@@ -126,10 +251,10 @@
                 @php
                     $bucketTotal = max(1, array_sum($buckets));
                 @endphp
-                <div class="kv-row"><span class="k"><span class="badge badge-soft-danger mr-1">●</span>{{ translate('Critical (<50)') }}</span><span>{{ $buckets['critical'] }}</span></div>
-                <div class="kv-row"><span class="k"><span class="badge badge-soft-warning mr-1">●</span>{{ translate('Warning (50–79)') }}</span><span>{{ $buckets['warning'] }}</span></div>
-                <div class="kv-row"><span class="k"><span class="badge badge-soft-success mr-1">●</span>{{ translate('Good (80+)') }}</span><span>{{ $buckets['good'] }}</span></div>
-                <div class="kv-row"><span class="k"><span class="badge badge-soft-secondary mr-1">●</span>{{ translate('Unrated') }}</span><span>{{ $buckets['unrated'] }}</span></div>
+                <div class="kv-row"><span class="k"><span class="text-danger mr-1">&#9679;</span>{{ translate('Critical (<50)') }}</span><span>{{ $buckets['critical'] }}</span></div>
+                <div class="kv-row"><span class="k"><span class="text-warning mr-1">&#9679;</span>{{ translate('Warning (50-79)') }}</span><span>{{ $buckets['warning'] }}</span></div>
+                <div class="kv-row"><span class="k"><span class="text-success mr-1">&#9679;</span>{{ translate('Good (80+)') }}</span><span>{{ $buckets['good'] }}</span></div>
+                <div class="kv-row"><span class="k"><span class="text-secondary mr-1">&#9679;</span>{{ translate('Unrated') }}</span><span>{{ $buckets['unrated'] }}</span></div>
                 <div class="bucket-bar">
                     <div style="background:#e74a3b; width:{{ round($buckets['critical']/$bucketTotal*100, 1) }}%"></div>
                     <div style="background:#f6c23e; width:{{ round($buckets['warning']/$bucketTotal*100, 1) }}%"></div>
@@ -160,6 +285,9 @@
                                 @elseif ($b['status'] === 'cancelled') <span class="badge badge-soft-warning">{{ $b['status'] }}</span>
                                 @elseif ($b['status'] === 'failed') <span class="badge badge-soft-danger">{{ $b['status'] }}</span>
                                 @else <span class="badge badge-soft-secondary">{{ $b['status'] }}</span>
+                                @endif
+                                @if($b['status'] === 'failed' && !empty($b['latest_error']))
+                                    <span class="d-block text-danger small text-truncate" style="max-width:180px;" title="{{ $b['latest_error'] }}">{{ $b['latest_error'] }}</span>
                                 @endif
                             </td>
                             <td>{{ $b['succeeded'] }}/{{ $b['total'] }} <span class="text-muted small">({{ $b['failed'] }} fail)</span></td>

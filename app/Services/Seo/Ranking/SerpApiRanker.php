@@ -24,6 +24,42 @@ class SerpApiRanker implements SerpRankerInterface
         return !empty($this->apiKey());
     }
 
+    public function search(string $keyword, string $country = 'us', int $limit = 10): array
+    {
+        if (!$this->isConfigured()) {
+            return [];
+        }
+
+        try {
+            $resp = null;
+            for ($attempt = 1; $attempt <= 3; $attempt++) {
+                $resp = Http::timeout(30)
+                    ->withOptions(['verify' => config('seo.ssl_verify', true)])
+                    ->get('https://serpapi.com/search.json', [
+                        'engine'  => 'google',
+                        'q'       => $keyword,
+                        'gl'      => $country,
+                        'hl'      => 'en',
+                        'num'     => $limit,
+                        'api_key' => $this->apiKey(),
+                    ]);
+
+                if ($resp->status() !== 429 || $attempt === 3) {
+                    break;
+                }
+                usleep(1_200_000 * $attempt);
+            }
+
+            if (!$resp->successful()) {
+                return [];
+            }
+
+            return (array) ($resp->json('organic_results') ?? []);
+        } catch (Throwable $e) {
+            return [];
+        }
+    }
+
     public function rank(string $keyword, string $targetDomainOrUrl, string $country = 'us', string $device = 'desktop'): array
     {
         if (!$this->isConfigured()) {
@@ -36,23 +72,36 @@ class SerpApiRanker implements SerpRankerInterface
         }
 
         try {
-            $resp = Http::timeout(30)
-                ->withOptions(['verify' => config('seo.ssl_verify', true)])
-                ->get('https://serpapi.com/search.json', [
-                    'engine'  => 'google',
-                    'q'       => $keyword,
-                    'gl'      => $country,
-                    'hl'      => 'en',
-                    'device'  => $device,
-                    'num'     => 100,
-                    'api_key' => $this->apiKey(),
-                ]);
+            // SerpAPI is rate-limited; a burst of keyword checks often trips HTTP 429.
+            // Retry a couple of times with backoff so a transient limit doesn't get
+            // mis-recorded as "not found".
+            $resp = null;
+            for ($attempt = 1; $attempt <= 3; $attempt++) {
+                $resp = Http::timeout(30)
+                    ->withOptions(['verify' => config('seo.ssl_verify', true)])
+                    ->get('https://serpapi.com/search.json', [
+                        'engine'  => 'google',
+                        'q'       => $keyword,
+                        'gl'      => $country,
+                        'hl'      => 'en',
+                        'device'  => $device,
+                        'num'     => 100,
+                        'api_key' => $this->apiKey(),
+                    ]);
+
+                if ($resp->status() !== 429 || $attempt === 3) {
+                    break;
+                }
+                usleep(1_200_000 * $attempt); // 1.2s, 2.4s backoff
+            }
 
             if (!$resp->successful()) {
                 return ['rank' => null, 'found_url' => null, 'raw' => null, 'error' => 'HTTP ' . $resp->status()];
             }
 
             $results = (array) ($resp->json('organic_results') ?? []);
+            $rawJson = $resp->json();
+            
             foreach ($results as $row) {
                 $link = (string) ($row['link'] ?? '');
                 $position = (int) ($row['position'] ?? 0);
@@ -60,11 +109,11 @@ class SerpApiRanker implements SerpRankerInterface
                     continue;
                 }
                 if (stripos($link, $target) !== false) {
-                    return ['rank' => $position, 'found_url' => $link, 'raw' => null, 'error' => null];
+                    return ['rank' => $position, 'found_url' => $link, 'raw' => $rawJson, 'error' => null];
                 }
             }
 
-            return ['rank' => 0, 'found_url' => null, 'raw' => null, 'error' => null];
+            return ['rank' => 0, 'found_url' => null, 'raw' => $rawJson, 'error' => null];
         } catch (Throwable $e) {
             return ['rank' => null, 'found_url' => null, 'raw' => null, 'error' => $e->getMessage()];
         }

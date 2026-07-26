@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\Http;
 
 class ClaudeProvider implements SeoAiProviderInterface
 {
+    use ResilientProviderHttp;
+
     public function generate($prompt, $systemPrompt = null, array $options = [])
     {
         if (!$this->isConfigured()) {
@@ -14,8 +16,7 @@ class ClaudeProvider implements SeoAiProviderInterface
 
         $apiKey = $this->getApiKey();
         try {
-            $response = Http::timeout(60)
-                ->withOptions(['verify' => config('seo.ssl_verify', true)])
+            $response = $this->providerHttp()
                 ->withHeaders([
                     'x-api-key' => $apiKey,
                     'anthropic-version' => '2023-06-01',
@@ -33,11 +34,15 @@ class ClaudeProvider implements SeoAiProviderInterface
                 ]);
 
             if (!$response->successful()) {
+                $errMsg = data_get($response->json(), 'error.message', substr($response->body(), 0, 200));
+                \Illuminate\Support\Facades\Log::warning('[SEO] ClaudeProvider HTTP error', ['status' => $response->status(), 'error' => $errMsg]);
+                \Illuminate\Support\Facades\Cache::put('seo:provider-last-error:claude', ['status' => $response->status(), 'error' => $errMsg], now()->addHours(12));
                 return null;
             }
 
             return data_get($response->json(), 'content.0.text');
         } catch (\Throwable $exception) {
+            \Illuminate\Support\Facades\Log::warning('[SEO] ClaudeProvider exception', ['error' => $exception->getMessage()]);
             return null;
         }
     }

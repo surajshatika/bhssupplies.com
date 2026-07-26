@@ -21,7 +21,7 @@ use App\Http\Controllers\SellerPackagePaymentController;
 
 //Admin
 Route::group(['prefix' =>'admin', 'middleware' => ['auth', 'admin']], function(){
-    Route::resource('manual_payment_methods', ManualPaymentMethodController::class);
+    Route::resource('manual_payment_methods', ManualPaymentMethodController::class)->except(['destroy']);
     Route::get('/manual_payment_methods/destroy/{id}', [ManualPaymentMethodController::class, 'destroy'])->name('manual_payment_methods.destroy');
     
     // Offile Orders

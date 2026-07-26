@@ -9,8 +9,13 @@ class OTPController extends Controller
 {
     public function __construct() {
         // Staff Permission Check
-        $this->middleware(['permission:otp_configurations'])->only('configure_index');
+        $this->middleware(['permission:otp_configurations'])->only('configure_index', 'loginConfigure');
         $this->middleware(['permission:sms_providers_configurations'])->only('credentials_index');
+    }
+
+    public function loginConfigure()
+    {
+        return view('backend.otp.login_configuration');
     }
 
     /**

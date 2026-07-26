@@ -30,6 +30,13 @@ trait SeoPayloadTrait
             'link' => $request->input('link'),
             'contact_name' => $request->input('contact_name'),
             'target_site' => $request->input('target_site'),
+            'business_name' => $request->input('business_name'),
+            'business_type' => $request->input('business_type'),
+            'city' => $request->input('city'),
+            'address' => $request->input('address'),
+            'phone' => $request->input('phone'),
+            'website' => $request->input('website'),
+            'niche' => $request->input('niche'),
         ];
 
         if ($request->filled('extra_payload')) {

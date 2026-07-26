@@ -34,6 +34,7 @@ class CheckKeywordRanksCommand extends Command
         $defaultDomain = parse_url(url('/'), PHP_URL_HOST) ?: '';
 
         $keywords = SeoKeyword::query()
+            ->with('competitors')
             ->where('is_active', true)
             ->orderByRaw('last_checked_at IS NULL DESC, last_checked_at ASC')
             ->limit($limit)
@@ -58,6 +59,46 @@ class CheckKeywordRanksCommand extends Command
                 if ($result['error']) {
                     $errors++;
                 } else {
+                    if (!empty($result['found_url'])) {
+                        $kw->target_url = $result['found_url'];
+                    }
+                    
+                    // Extract advanced data from raw JSON if available
+                    if (!empty($result['raw'])) {
+                        $raw = $result['raw'];
+                        
+                        // Extract SERP Features
+                        $features = [];
+                        if (isset($raw['answer_box'])) $features[] = 'Featured Snippet';
+                        if (isset($raw['local_results'])) $features[] = 'Local Pack';
+                        if (isset($raw['related_questions'])) $features[] = 'People Also Ask';
+                        if (isset($raw['knowledge_graph'])) $features[] = 'Knowledge Panel';
+                        if (isset($raw['top_stories'])) $features[] = 'Top Stories';
+                        if (isset($raw['shopping_results'])) $features[] = 'Shopping';
+                        if (isset($raw['inline_videos'])) $features[] = 'Videos';
+                        if (isset($raw['inline_images'])) $features[] = 'Images';
+                        
+                        $kw->serp_features = $features;
+                        
+                        // Check Competitors
+                        if ($kw->competitors && $kw->competitors->isNotEmpty()) {
+                            $organicResults = $raw['organic_results'] ?? [];
+                            foreach ($kw->competitors as $competitor) {
+                                $compDomain = preg_replace('/^www\./i', '', parse_url('http://' . $competitor->domain, PHP_URL_HOST) ?: $competitor->domain);
+                                $compRank = 0;
+                                
+                                foreach ($organicResults as $orgResult) {
+                                    $link = $orgResult['link'] ?? '';
+                                    if ($link && stripos($link, $compDomain) !== false) {
+                                        $compRank = (int) ($orgResult['position'] ?? 0);
+                                        break;
+                                    }
+                                }
+                                $competitor->recordRank($compRank);
+                            }
+                        }
+                    }
+
                     $kw->recordRank((int) ($result['rank'] ?? 0));
                     $checked++;
                 }

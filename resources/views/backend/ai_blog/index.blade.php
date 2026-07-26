@@ -169,9 +169,9 @@
             <div class="card-body">
                 <ul class="list-unstyled mb-0" style="font-size:13px;">
                     <li class="mb-2"><span class="badge badge-primary mr-2">1</span>{{ translate('Picks product category & grabs 4-5 product images') }}</li>
-                    <li class="mb-2"><span class="badge badge-primary mr-2">2</span>{{ translate('AI creates collage banner from product photos') }}</li>
+                    <li class="mb-2"><span class="badge badge-primary mr-2">2</span>{{ translate('AI creates 1300x650 banner and meta image') }}</li>
                     <li class="mb-2"><span class="badge badge-primary mr-2">3</span>{{ translate('Researches competitor keywords for top ranking') }}</li>
-                    <li class="mb-2"><span class="badge badge-primary mr-2">4</span>{{ translate('Generates full SEO blog with H2/H3/FAQ/CTA') }}</li>
+                    <li class="mb-2"><span class="badge badge-primary mr-2">4</span>{{ translate('Generates title, slug, short description, full HTML, and complete SEO meta') }}</li>
                     <li class="mb-0"><span class="badge badge-success mr-2">5</span>{{ translate('Auto-posts to social media platforms') }}</li>
                 </ul>
             </div>
@@ -217,6 +217,20 @@
                             </select>
                         </div>
                     </div>
+                    <div class="col-md-8">
+                        <div class="form-group">
+                            <label>{{ translate('Blog Title') }}</label>
+                            <input type="text" id="genBlogTitle" class="form-control"
+                                placeholder="{{ translate('Exact blog title. Leave blank for AI title.') }}">
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-group">
+                            <label>{{ translate('Slug') }}</label>
+                            <input type="text" id="genSlug" class="form-control"
+                                placeholder="{{ translate('auto-from-title') }}">
+                        </div>
+                    </div>
                     <div class="col-md-6">
                         <div class="form-group">
                             <label>{{ translate('Product Category (for images)') }}</label>
@@ -230,7 +244,18 @@
                     </div>
                     <div class="col-md-6">
                         <div class="form-group">
-                            <label>{{ translate('Blog Category') }} <small class="text-muted">({{ translate('auto-created if new') }})</small></label>
+                            <label>{{ translate('Choose Blog Category') }}</label>
+                            <select id="genBlogCategoryId" class="form-control aiz-selectpicker" data-live-search="true">
+                                <option value="">{{ translate('Auto / create from new name') }}</option>
+                                @foreach($blogCategories as $cat)
+                                    <option value="{{ $cat->id }}">{{ $cat->category_name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label>{{ translate('Create New Blog Category') }} <small class="text-muted">({{ translate('if not exist') }})</small></label>
                             <input type="text" id="genBlogCat" class="form-control"
                                 placeholder="{{ translate('e.g. Safety Equipment Tips') }}">
                         </div>
@@ -262,6 +287,50 @@
                             <input type="text" id="genCompetitors" class="form-control"
                                 value="{{ $displayUrls }}"
                                 placeholder="https://competitor1.com, https://competitor2.com">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label>{{ translate('Banner') }} <small class="text-muted">(1300x650)</small></label>
+                            <div class="input-group" data-toggle="aizuploader" data-type="image">
+                                <div class="input-group-prepend">
+                                    <div class="input-group-text bg-soft-secondary font-weight-medium">{{ translate('Browse') }}</div>
+                                </div>
+                                <div class="form-control file-amount">{{ translate('AI auto-generates if empty') }}</div>
+                                <input type="hidden" id="genBanner" class="selected-files">
+                            </div>
+                            <div class="file-preview box sm"></div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label>{{ translate('Meta Image') }} <small class="text-muted">{{ translate('uses banner if empty') }}</small></label>
+                            <div class="input-group" data-toggle="aizuploader" data-type="image">
+                                <div class="input-group-prepend">
+                                    <div class="input-group-text bg-soft-secondary font-weight-medium">{{ translate('Browse') }}</div>
+                                </div>
+                                <div class="form-control file-amount">{{ translate('Choose File') }}</div>
+                                <input type="hidden" id="genMetaImage" class="selected-files">
+                            </div>
+                            <div class="file-preview box sm"></div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label>{{ translate('Meta Title') }} <small class="text-muted">{{ translate('AI fills if empty') }}</small></label>
+                            <input type="text" id="genMetaTitle" class="form-control" maxlength="190">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label>{{ translate('Meta Keywords') }} <small class="text-muted">{{ translate('comma-separated') }}</small></label>
+                            <input type="text" id="genMetaKeywords" class="form-control" placeholder="hvac supplies Mississauga, plumbing supplies Toronto">
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-group">
+                            <label>{{ translate('Meta Description') }} <small class="text-muted">{{ translate('AI fills if empty') }}</small></label>
+                            <textarea id="genMetaDescription" class="form-control" rows="2" maxlength="500"></textarea>
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -300,6 +369,23 @@
 @section('script')
 <script>
 $(document).ready(function() {
+    function slugify(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+    }
+
+    $('#genBlogTitle').on('input', function() {
+        if (!$('#genSlug').data('dirty')) {
+            $('#genSlug').val(slugify($(this).val()));
+        }
+    });
+
+    $('#genSlug').on('input', function() {
+        $(this).data('dirty', true).val(slugify($(this).val()));
+    });
+
     $('#generateSubmitBtn').on('click', function(){
         var btn = $(this);
         btn.prop('disabled', true).html('<i class="las la-spinner la-spin mr-1"></i>Generating (may take 30-60s)...');
@@ -309,8 +395,16 @@ $(document).ready(function() {
             count:               $('#genCount').val(),
             provider:            $('#genProvider').val(),
             tone:                $('#genTone').val(),
+            blog_title:          $('#genBlogTitle').val() || null,
+            slug:                $('#genSlug').val() || null,
+            blog_category_id:    $('#genBlogCategoryId').val() || null,
             product_category_id: $('#genProductCat').val() || null,
             category_name:       $('#genBlogCat').val() || null,
+            banner_upload_id:    $('#genBanner').val() || null,
+            meta_image_upload_id: $('#genMetaImage').val() || null,
+            meta_title:          $('#genMetaTitle').val() || null,
+            meta_description:    $('#genMetaDescription').val() || null,
+            meta_keywords:       $('#genMetaKeywords').val() || null,
             topic:               $('#genTopic').val() || null,
             keywords:            $('#genKeywords').val() || null,
             competitor_urls:     $('#genCompetitors').val() || null,

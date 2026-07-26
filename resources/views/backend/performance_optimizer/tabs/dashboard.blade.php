@@ -1,11 +1,16 @@
 <div class="perf-layout-2col">
     <div>
+        @php $_cmsFastMode = (int) get_setting('perf_cms_fast_mode', 1) === 1; @endphp
         <div class="perf-section">
             <div class="perf-section-header">
                 <h5><span class="perf-section-icon"><i class="las la-bolt"></i></span>{{ translate('Quick Actions') }}</h5>
+                @if($_cmsFastMode)
+                    <span class="badge badge-info">{{ translate('CMS Fast Mode') }}</span>
+                @endif
             </div>
             <div class="perf-section-body">
                 <div class="perf-action-grid">
+                    @if(!$_cmsFastMode)
                     <form action="{{ route('performance_optimizer.images.webp') }}" method="POST" class="perf-action">
                         @csrf<input type="hidden" name="limit" value="100">
                         <button class="btn btn-soft-primary" type="submit"><i class="las la-image"></i> {{ translate('Convert 100 to WebP') }}</button>
@@ -18,6 +23,7 @@
                         @csrf
                         <button class="btn btn-soft-success" type="submit"><i class="las la-code"></i> {{ translate('Minify all JS') }}</button>
                     </form>
+                    @endif
                     <form action="{{ route('performance_optimizer.cache.clear') }}" method="POST" class="perf-action">
                         @csrf
                         <button class="btn btn-soft-warning" type="submit"><i class="las la-broom"></i> {{ translate('Clear page cache') }}</button>
@@ -32,6 +38,9 @@
                         <button class="btn btn-soft-danger" type="submit"><i class="las la-redo"></i> {{ translate('Clear Laravel cache') }}</button>
                     </form>
                 </div>
+                @if($_cmsFastMode)
+                    <small class="text-muted d-block mt-2">{{ translate('Hard file minify and bulk image actions are hidden while CMS Fast Mode is active.') }}</small>
+                @endif
             </div>
         </div>
 

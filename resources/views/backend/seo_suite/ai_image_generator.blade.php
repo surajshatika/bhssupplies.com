@@ -15,6 +15,8 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 <div class="row">
     <div class="col-lg-4">
         <div class="card">
@@ -34,23 +36,29 @@
                         <option value="infographic">{{ translate('Infographic') }}</option>
                     </select>
                 </div>
-                <div class="form-group">
-                    <label>{{ translate('Image Size') }}</label>
-                    <select id="img-size" class="form-control">
-                        <option value="1024x1024">1024×1024 (Square)</option>
-                        <option value="1792x1024">1792×1024 (Landscape)</option>
-                        <option value="1024x1792">1024×1792 (Portrait)</option>
-                    </select>
+                <div class="row">
+                    <div class="col-7 form-group">
+                        <label>{{ translate('Layout / Size') }}</label>
+                        <select id="img-size" class="form-control">
+                            <option value="1024x1024">1024x1024 (Square)</option>
+                            <option value="1792x1024">1792x1024 (Landscape)</option>
+                            <option value="1024x1792">1024x1792 (Portrait)</option>
+                        </select>
+                    </div>
+                    <div class="col-5 form-group">
+                        <label>{{ translate('Quality') }}</label>
+                        <select id="img-quality" class="form-control">
+                            <option value="standard">{{ translate('Standard') }}</option>
+                            <option value="hd">{{ translate('HD (2x cost)') }}</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>{{ translate('Style') }}</label>
                     <select id="img-style" class="form-control">
-                        <option value="professional product photo">Professional Product Photo</option>
-                        <option value="minimalist white background">Minimalist White Background</option>
-                        <option value="lifestyle photography">Lifestyle Photography</option>
-                        <option value="flat design illustration">Flat Design Illustration</option>
-                        <option value="3D render">3D Render</option>
-                        <option value="photorealistic">Photorealistic</option>
+                        @foreach(($styles ?? []) as $val => $label)
+                            <option value="{{ $val }}">{{ $label }}</option>
+                        @endforeach
                     </select>
                 </div>
                 <div class="form-group">
@@ -58,8 +66,8 @@
                     <textarea id="img-custom-prompt" class="form-control" rows="3" placeholder="{{ translate('Describe exactly what you want...') }}"></textarea>
                 </div>
                 <div class="form-check mb-3">
-                    <input class="form-check-input" type="checkbox" id="img-save-local" value="1">
-                    <label class="form-check-label small" for="img-save-local">{{ translate('Save to server (storage/public/seo/images)') }}</label>
+                    <input class="form-check-input" type="checkbox" id="img-save-local" value="1" checked>
+                    <label class="form-check-label small" for="img-save-local">{{ translate('Save to media library (reusable + permanent URL)') }}</label>
                 </div>
                 <button id="img-generate-btn" class="btn btn-primary w-100">
                     <i class="las la-magic mr-1"></i>{{ translate('Generate Image') }}
@@ -121,6 +129,25 @@
                 </div>
             </div>
         </div>
+
+        {{-- Revision history --}}
+        @if(($history ?? collect())->isNotEmpty())
+        <div class="card mt-3">
+            <div class="card-header"><h6 class="mb-0"><i class="las la-history mr-1"></i>{{ translate('Recent Generations') }}</h6></div>
+            <div class="card-body">
+                <div class="row gutters-5">
+                    @foreach($history as $h)
+                        <div class="col-3 col-md-2 mb-2">
+                            <a href="{{ $h->local_url ?: $h->source_url }}" target="_blank" rel="noopener" title="{{ $h->keyword }} · {{ $h->quality }} · {{ $h->size }}">
+                                <img src="{{ $h->local_url ?: $h->source_url }}" class="img-fluid rounded border" style="aspect-ratio:1; object-fit:cover;" alt="{{ $h->alt_text }}">
+                            </a>
+                        </div>
+                    @endforeach
+                </div>
+                <p class="small text-muted mb-0">{{ translate('Provider image URLs expire after ~1 hour. Images saved to the media library keep a permanent URL.') }}</p>
+            </div>
+        </div>
+        @endif
     </div>
 </div>
 @endsection
@@ -128,6 +155,30 @@
 @section('script')
 <script>
 $(function() {
+    function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function(char) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
+        });
+    }
+
+    function safeUrl(value) {
+        var raw = String(value == null ? '' : value).trim();
+        if (!raw) return '';
+        try {
+            var url = new URL(raw, window.location.href);
+            return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function setOgStatus($status, className, text, iconClass) {
+        var $span = $('<span>').addClass(className);
+        if (iconClass) $span.append($('<i>').addClass(iconClass), document.createTextNode(' '));
+        $span.append(document.createTextNode(String(text == null ? '' : text)));
+        $status.empty().append($span);
+    }
+
     $('#img-generate-btn').on('click', function() {
         var keyword = $('#img-keyword').val().trim();
         if (!keyword) { alert('Please enter a keyword.'); return; }
@@ -144,6 +195,7 @@ $(function() {
                 keyword: keyword,
                 purpose: $('#img-purpose').val(),
                 size: $('#img-size').val(),
+                quality: $('#img-quality').val(),
                 style: $('#img-style').val(),
                 custom_prompt: $('#img-custom-prompt').val(),
                 save_local: $('#img-save-local').is(':checked') ? 1 : 0
@@ -153,19 +205,35 @@ $(function() {
                 $('#img-generate-btn').prop('disabled', false);
 
                 if (res.error) {
-                    $('#img-results').html('<div class="alert alert-danger"><i class="las la-exclamation-circle mr-1"></i>' + res.error + '</div><div class="text-muted small mt-2">Prompt used: ' + (res.prompt || '') + '</div>');
+                    $('#img-results').html('<div class="alert alert-danger"><i class="las la-exclamation-circle mr-1"></i>' + escapeHtml(res.error) + '</div><div class="text-muted small mt-2">Prompt used: ' + escapeHtml(res.prompt) + '</div>');
                     return;
                 }
 
                 var html = '';
                 if (res.images && res.images.length > 0) {
                     res.images.forEach(function(img) {
-                        html += '<div class="mb-3">';
-                        html += '<img src="' + img.url + '" class="img-fluid rounded shadow-sm mb-2" style="max-height:500px; width:auto;" alt="' + img.alt_text + '">';
-                        html += '<div class="d-flex mt-1">';
-                        html += '<a href="' + img.url + '" target="_blank" class="btn btn-sm btn-soft-primary mr-2"><i class="las la-external-link-alt mr-1"></i>Open Full Size</a>';
-                        html += '<a href="' + img.url + '" download="' + img.filename + '" class="btn btn-sm btn-soft-success"><i class="las la-download mr-1"></i>Download</a>';
+                        var displayUrl = safeUrl(img.local_url || img.url);
+                        var providerUrl = safeUrl(img.url);
+                        html += '<div class="mb-3 border rounded p-2">';
+                        html += '<img src="' + escapeHtml(displayUrl) + '" class="img-fluid rounded shadow-sm mb-2" style="max-height:480px; width:auto;" alt="' + escapeHtml(img.alt_text) + '">';
+                        html += '<div class="d-flex flex-wrap mt-1" style="gap:.4rem;">';
+                        html += '<a href="' + escapeHtml(displayUrl) + '" target="_blank" rel="noopener" class="btn btn-sm btn-soft-primary"><i class="las la-external-link-alt mr-1"></i>Open</a>';
+                        html += '<a href="' + escapeHtml(displayUrl) + '" download="' + escapeHtml(img.filename) + '" class="btn btn-sm btn-soft-success"><i class="las la-download mr-1"></i>Download</a>';
+                        if (img.local_url) {
+                            html += '<span class="btn btn-sm btn-soft-info disabled"><i class="las la-check mr-1"></i>In media library</span>';
+                        }
+                        html += '</div>';
+
+                        // Set-as-OG mini form
+                        html += '<div class="bg-light rounded p-2 mt-2">';
+                        html += '<div class="small font-weight-bold mb-1"><i class="las la-share-alt mr-1"></i>{{ translate('Set as OG / social image for') }}</div>';
+                        html += '<div class="d-flex flex-wrap align-items-center" style="gap:.35rem;">';
+                        html += '<select class="form-control form-control-sm og-type" style="width:auto;"><option value="product">Product</option><option value="category">Category</option><option value="page">Page</option><option value="blog">Blog</option></select>';
+                        html += '<input type="number" class="form-control form-control-sm og-id" placeholder="ID" style="width:90px;">';
+                        html += '<button class="btn btn-sm btn-primary og-apply" data-upload="' + escapeHtml(img.upload_id) + '" data-url="' + escapeHtml(providerUrl) + '">{{ translate('Apply') }}</button>';
+                        html += '<span class="og-status small ml-1"></span>';
                         html += '</div></div>';
+                        html += '</div>';
 
                         // Fill meta box
                         $('#img-alt-text').val(img.alt_text);
@@ -181,7 +249,44 @@ $(function() {
             error: function(xhr) {
                 $('#img-loading-indicator').addClass('d-none');
                 $('#img-generate-btn').prop('disabled', false);
-                $('#img-results').html('<div class="alert alert-danger">Error: ' + (xhr.responseJSON?.message || 'Request failed') + '</div>');
+                $('#img-results').html('<div class="alert alert-danger">Error: ' + escapeHtml(xhr.responseJSON?.message || 'Request failed') + '</div>');
+            }
+        });
+    });
+
+    // Apply a generated image as an entity's OG / social image.
+    $('#img-results').on('click', '.og-apply', function() {
+        var $btn = $(this);
+        var $wrap = $btn.closest('.d-flex');
+        var type = $wrap.find('.og-type').val();
+        var id   = $wrap.find('.og-id').val();
+        var $status = $wrap.find('.og-status');
+        if (!id) { setOgStatus($status, 'text-danger', '{{ translate('Enter an ID') }}'); return; }
+
+        $btn.prop('disabled', true);
+        setOgStatus($status, 'text-muted', '…');
+
+        $.ajax({
+            url: '{{ route('admin.seo-suite.ai_images.apply_og') }}',
+            method: 'POST',
+            data: {
+                _token: '{{ csrf_token() }}',
+                type: type,
+                id: id,
+                upload_id: $btn.data('upload') || '',
+                image_url: $btn.data('url') || ''
+            },
+            success: function(res) {
+                $btn.prop('disabled', false);
+                if (res.success) {
+                    setOgStatus($status, 'text-success', '{{ translate('Applied') }}', 'las la-check');
+                } else {
+                    setOgStatus($status, 'text-danger', res.error || 'Failed');
+                }
+            },
+            error: function(xhr) {
+                $btn.prop('disabled', false);
+                setOgStatus($status, 'text-danger', xhr.responseJSON?.error || xhr.responseJSON?.message || 'Failed');
             }
         });
     });

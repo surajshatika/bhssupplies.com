@@ -252,7 +252,9 @@ Route::group(['prefix' => 'v2', 'middleware' => ['app_language']], function () {
 
     Route::get('brands/top', 'App\Http\Controllers\Api\V2\BrandController@top');
     Route::get('all-brands', [ProductController::class, 'getBrands'])->name('allBrands');
-    Route::apiResource('brands', 'App\Http\Controllers\Api\V2\BrandController')->only('index');
+    Route::apiResource('brands', 'App\Http\Controllers\Api\V2\BrandController')
+        ->only('index')
+        ->names(['index' => 'api.brands.index']);
 
     Route::apiResource('business-settings', 'App\Http\Controllers\Api\V2\BusinessSettingController')->only('index');
 
@@ -409,7 +411,7 @@ Route::group(['prefix' => 'v2', 'middleware' => ['app_language']], function () {
 
     Route::withoutMiddleware([EnsureSystemKey::class])->group(function () {
         Route::controller(WholesaleProductController::class)->group(function () {
-            Route::get('/wholesale/all-products', 'all_wholesale_products')->name('wholesale_products.all');
+            Route::get('/wholesale/all-products', 'all_wholesale_products')->name('api.wholesale_products.all');
             Route::get('/wholesale/product-details/{id}', 'wholesale_product_details')->name('wholesale_products.show');
         });
 
@@ -444,10 +446,10 @@ Route::group(['prefix' => 'v2', 'middleware' => ['app_language']], function () {
         Route::get('instamojo/failed', 'App\Http\Controllers\Api\V2\InstamojoController@failed');
 
         // Cybersource
-        Route::post('cyber-source/payment/pay', 'App\Http\Controllers\Api\V2\CybersourceController@pay')->name('cybersource.pay');
-        Route::any('cyber-source/payment/process', 'App\Http\Controllers\Api\V2\CybersourceController@process')->name('cybersource.process');
-        Route::any('cyber-source/payment/callback', 'App\Http\Controllers\Api\V2\CybersourceController@callback')->name('cybersource.callback');
-        Route::any('cyber-source/payment/webhook', 'App\Http\Controllers\Api\V2\CybersourceController@webhook')->name('cybersource.webhook');
+        Route::post('cyber-source/payment/pay', 'App\Http\Controllers\Api\V2\CybersourceController@pay')->name('api.cybersource.pay');
+        Route::any('cyber-source/payment/process', 'App\Http\Controllers\Api\V2\CybersourceController@process')->name('api.cybersource.process');
+        Route::any('cyber-source/payment/callback', 'App\Http\Controllers\Api\V2\CybersourceController@callback')->name('api.cybersource.callback');
+        Route::any('cyber-source/payment/webhook', 'App\Http\Controllers\Api\V2\CybersourceController@webhook')->name('api.cybersource.webhook');
         
         //Payfast routes <starts>
         Route::controller(PayfastController::class)->group(function () {

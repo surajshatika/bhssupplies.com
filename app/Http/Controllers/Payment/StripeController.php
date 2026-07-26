@@ -78,7 +78,7 @@ class StripeController extends Controller
             'cancel_url' => route('stripe.cancel'),
         ]);
 
-        return response()->json(['id' => $session->id, 'status' => 200]);
+        return response()->json(['id' => $session->id, 'url' => $session->url, 'status' => 200]);
     }
 
     public function checkout_payment_detail()

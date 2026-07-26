@@ -15,6 +15,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
 
+    <meta name="google-site-verification" content="kcvKrK_03vGE3b9Y68sdG1fiEovBpbb4AveAMRsOw68">
+    <meta name="msvalidate.01" content="630730ADB45FC089DA82D9A345A8C413">
+    <meta name="yandex-verification" content="6181917dfa2e4741">
+
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="app-url" content="{{ getBaseURL() }}">
     <meta name="file-base-url" content="{{ getFileBaseURL() }}">
@@ -28,6 +32,18 @@
             : $_full_title;
         $_base_color  = get_setting('base_color', '#d43533');
         $_canonical   = url()->current();
+
+        // Per-page robots & canonical sourced from the SEO Suite (seo_meta) for the
+        // current entity. Falls back to the site default for non-entity pages.
+        $_seo_robots    = 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1';
+        $_seo_canonical = $_canonical;
+        try {
+            $_seo_bundle    = app('seo.resolver')->resolveForRequest();
+            $_seo_robots    = $_seo_bundle['robots']    ?? $_seo_robots;
+            $_seo_canonical = $_seo_bundle['canonical'] ?? $_seo_canonical;
+        } catch (\Throwable $e) {
+            // SEO resolver unavailable — keep the safe defaults above.
+        }
     @endphp
     @php
         $_rendered_title = $__env->yieldContent('meta_title', $_page_title);
@@ -38,12 +54,14 @@
     @endphp
     <title>{{ $_rendered_title }}</title>
 
-    <meta name="robots" content="@yield('meta_robots', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1')">
+    <meta name="robots" content="@yield('meta_robots', $_seo_robots)">
     <meta name="description" content="@yield('meta_description', get_setting('meta_description'))">
     <meta name="keywords" content="@yield('meta_keywords', get_setting('meta_keywords'))">
     <meta name="theme-color" content="{{ $_base_color }}">
 
-    <link rel="canonical" href="@yield('canonical', $_canonical)">
+    <meta name="p:domain_verify" content="6e7f92e7df32bab4506a3f8e6704422d"/>
+
+    <link rel="canonical" href="@yield('canonical', $_seo_canonical)">
 
     @yield('pagination_links')
 
@@ -63,12 +81,59 @@
     @yield('lcp_preload')
     @yield('preload_assets')
 
-    <!-- Preload critical scripts so the browser fetches them in parallel with HTML parsing -->
-    <link rel="preload" href="{{ static_asset('assets/js/vendors.js?v=') }}{{ get_setting('current_version') }}" as="script">
-    <link rel="preload" href="{{ static_asset('assets/js/aiz-core.min.js?v=') }}{{ get_setting('current_version') }}" as="script">
+    {{-- ── Critical inline CSS ────────────────────────────────────────────────
+         Renders synchronously before ANY external CSS is downloaded.
+         Covers the above-fold layout so there is no blank-white flash while
+         vendors.css (468 KB) and aiz-core.css (219 KB) are fetching.
+         Rules here are a strict subset of what those files provide — no conflicts.
+    ── --}}
+    <style>
+        *,::after,::before{box-sizing:border-box}
+        html{-webkit-text-size-adjust:100%;line-height:1.15}
+        body{margin:0;font-family:'Public Sans',sans-serif;font-weight:400;background:#fff;color:#292933;-webkit-font-smoothing:antialiased}
+        img{border-style:none;max-width:100%;vertical-align:middle}
+        a{background-color:transparent}
+        /* Bootstrap 4 container */
+        .container{width:100%;padding-right:15px;padding-left:15px;margin-right:auto;margin-left:auto}
+        @media(min-width:576px){.container{max-width:540px}}
+        @media(min-width:768px){.container{max-width:720px}}
+        @media(min-width:992px){.container{max-width:960px}}
+        @media(min-width:1200px){.container{max-width:1170px}}
+        /* Bootstrap 4 row */
+        .row{display:flex;flex-wrap:wrap;margin-right:-15px;margin-left:-15px}
+        /* Shared column base */
+        [class*=col-]{position:relative;width:100%;padding-right:15px;padding-left:15px}
+        /* Columns used above the fold */
+        .col-6{flex:0 0 50%;max-width:50%}
+        .col-12{flex:0 0 100%;max-width:100%}
+        @media(min-width:768px){.col-md-5{flex:0 0 41.666667%;max-width:41.666667%}.col-md-7{flex:0 0 58.333333%;max-width:58.333333%}}
+        @media(min-width:992px){.col-lg-5{flex:0 0 41.666667%;max-width:41.666667%}.col-lg-7{flex:0 0 58.333333%;max-width:58.333333%}}
+        @media(min-width:1200px){.col-xl-4{flex:0 0 33.333333%;max-width:33.333333%}.col-xl-8{flex:0 0 66.666667%;max-width:66.666667%}}
+        /* Bootstrap 4 display utilities */
+        .d-none{display:none!important}.d-block{display:block!important}.d-flex{display:flex!important}.d-inline-block{display:inline-block!important}
+        @media(min-width:1200px){.d-xl-block{display:block!important}.d-xl-none{display:none!important}}
+        /* Bootstrap 4 flex utilities */
+        .flex-wrap{flex-wrap:wrap!important}.flex-column{flex-direction:column!important}
+        .align-items-center{align-items:center!important}.align-items-baseline{align-items:baseline!important}
+        .justify-content-between{justify-content:space-between!important}.justify-content-center{justify-content:center!important}
+        /* Bootstrap 4 position utilities */
+        .position-relative{position:relative!important}.position-absolute{position:absolute!important}.position-static{position:static!important}
+        /* Bootstrap 4 sizing */
+        .w-100{width:100%!important}.h-100{height:100%!important}.mw-100{max-width:100%!important}
+        .overflow-hidden{overflow:hidden!important}
+        /* Nav/wrapper skeleton */
+        .aiz-main-wrapper{display:flex;flex-direction:column;min-height:100vh;background:#fff}
+        .bg-white{background-color:#fff!important}
+        .z-1035{z-index:1035!important}
+    </style>
 
-    <!-- DNS Prefetch for third-party origins -->
+    <!-- Preconnect for highest-priority third-party origins (DNS + TCP + TLS upfront) -->
+    <link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+    <link rel="preconnect" href="https://www.google-analytics.com" crossorigin>
+
+    <!-- DNS Prefetch for other third-party origins -->
     <link rel="dns-prefetch" href="//www.googletagmanager.com">
+    <link rel="dns-prefetch" href="//www.google-analytics.com">
     <link rel="dns-prefetch" href="//connect.facebook.net">
     <link rel="dns-prefetch" href="//fonts.googleapis.com">
     <link rel="dns-prefetch" href="//fonts.gstatic.com">
@@ -85,15 +150,40 @@
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap"></noscript>
 
     <!-- CSS — critical files load synchronously (instant render), non-critical async -->
-    @php $_cv = get_setting('current_version'); @endphp
-    <link rel="stylesheet" href="{{ static_asset('assets/css/vendors.css?v=') }}{{ $_cv }}">
+    @php
+        $_cv = get_setting('current_version');
+        $_cssAsset = static function (string $relativePath): array {
+            $sourcePath = public_path($relativePath);
+            $selectedPath = $relativePath;
+
+            if ((int) get_setting('perf_css_minify_status', 0) === 1) {
+                $minifiedPath = preg_replace('/\.css$/i', '.min.css', $relativePath);
+                $minifiedAbsolutePath = public_path($minifiedPath);
+                if (is_file($minifiedAbsolutePath)
+                    && (!is_file($sourcePath) || filemtime($minifiedAbsolutePath) >= filemtime($sourcePath))
+                ) {
+                    $selectedPath = $minifiedPath;
+                }
+            }
+
+            $selectedAbsolutePath = public_path($selectedPath);
+            return [
+                'path' => $selectedPath,
+                'version' => is_file($selectedAbsolutePath) ? filemtime($selectedAbsolutePath) : null,
+            ];
+        };
+        $_vendorsCss = $_cssAsset('assets/css/vendors.css');
+        $_coreCss = $_cssAsset('assets/css/aiz-core.css');
+        $_customCss = $_cssAsset('assets/css/custom-style.css');
+    @endphp
+    <link rel="stylesheet" href="{{ static_asset($_vendorsCss['path'] . '?v=') }}{{ $_vendorsCss['version'] ?: $_cv }}">
     @if ($rtl == 1)
         <link rel="stylesheet" href="{{ static_asset('assets/css/bootstrap-rtl.min.css') }}">
     @endif
-    <link rel="stylesheet" href="{{ static_asset('assets/css/aiz-core.css?v=') }}{{ $_cv }}">
+    <link rel="stylesheet" href="{{ static_asset($_coreCss['path'] . '?v=') }}{{ $_coreCss['version'] ?: $_cv }}">
     {{-- Non-critical overrides load async — no layout impact --}}
-    <link rel="preload" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_cv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/custom-style.css?v=') }}{{ $_cv }}"></noscript>
+    <link rel="preload" href="{{ static_asset($_customCss['path'] . '?v=') }}{{ $_customCss['version'] ?: $_cv }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="{{ static_asset($_customCss['path'] . '?v=') }}{{ $_customCss['version'] ?: $_cv }}"></noscript>
     @if(get_setting('homepage_select') == 'thecore')
     <link rel="preload" href="{{ static_asset('assets/css/thecore.css') }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="{{ static_asset('assets/css/thecore.css') }}"></noscript>
@@ -175,6 +265,70 @@
         .home-category-banner::after {
             content: "{{ translate('View All') }}";
         }
+
+        /* ── Product hover-image — inline so it works even when custom-style.css
+           is async-loaded and blocked by LiteSpeed PageSpeed / LSPS  ── */
+
+        /* Default state: hover image hidden, positioned over main image */
+        .bhs-product-img-hover {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            opacity: 0;
+            transition: opacity 0.35s ease;
+            pointer-events: none;
+        }
+        /* On hover: show hover image */
+        .bhs-product-img-link.has-hover-image:hover .bhs-product-img-hover { opacity: 1 !important; }
+        /* On hover: keep main image fully visible underneath */
+        .bhs-product-img-link.has-hover-image:hover .bhs-product-img:first-child { opacity: 1 !important; }
+
+        /* pc-card variant */
+        .pc-img-hover {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            opacity: 0;
+            transition: opacity 0.35s ease;
+            pointer-events: none;
+        }
+        .pc-card:hover .pc-img-link.has-hover-image .pc-img-hover { opacity: 1 !important; }
+        .pc-card:hover .pc-img-link.has-hover-image .pc-img:not(.pc-img-hover) { opacity: 1 !important; }
+
+        /* image-hover-effect variant (flash deal, older cards) */
+        .product-hover-image {
+            position: absolute;
+            top: 0; left: 0;
+            opacity: 0;
+            transition: opacity 0.35s ease;
+            pointer-events: none;
+        }
+        .image-hover-effect.has-hover-image:hover .product-hover-image { opacity: 1 !important; }
+        .image-hover-effect:not(.has-hover-image):hover .product-hover-image { opacity: 0 !important; }
+        .image-hover-effect:not(.has-hover-image):hover .product-main-image { opacity: 1 !important; }
+
+        @supports (content-visibility: auto) {
+            #section_featured,
+            #section_featured_preorder_products,
+            #todays_deal,
+            #section_best_selling,
+            #section_newest,
+            #auction_products,
+            #section_home_categories,
+            .home-banner-area ~ section,
+            #product-listing-row > .col:nth-child(n+9),
+            .bhs-product-card,
+            .pc-card {
+                content-visibility: auto;
+                contain-intrinsic-size: 1px 360px;
+            }
+
+            .home-banner-area,
+            .cat-hero,
+            #product-listing-row > .col:nth-child(-n+8) {
+                content-visibility: visible;
+            }
+        }
     </style>
 
 @php
@@ -186,30 +340,56 @@
 {{-- GDPR consent — must load BEFORE any analytics/marketing tags so Consent Mode v2 defaults apply --}}
 @include('frontend.partials.consent_banner')
 
+<script>
+    window.perfThirdParty = window.perfThirdParty || function (callback) {
+        var done = false;
+        function run() {
+            if (done) return;
+            done = true;
+            try { callback(); } catch (e) {}
+        }
+        ['click', 'keydown', 'touchstart', 'scroll'].forEach(function (eventName) {
+            window.addEventListener(eventName, run, {once: true, passive: true});
+        });
+        if ('requestIdleCallback' in window) {
+            requestIdleCallback(run, {timeout: 3500});
+        } else {
+            setTimeout(run, 2800);
+        }
+    };
+</script>
+
 @if (get_setting('google_analytics') == 1 && !empty($gaTrackingId))
     <!-- Global site tag (gtag.js) - Google Analytics -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id={{ $gaTrackingId }}"></script>
     <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag(){dataLayer.push(arguments);}
-        gtag('js', new Date());
-        gtag('config', '{{ $gaTrackingId }}', { 'anonymize_ip': true });
+        window.perfThirdParty(function () {
+            var gtagScript = document.createElement('script');
+            gtagScript.async = true;
+            gtagScript.src = 'https://www.googletagmanager.com/gtag/js?id={{ $gaTrackingId }}';
+            document.head.appendChild(gtagScript);
+            window.dataLayer = window.dataLayer || [];
+            window.gtag = window.gtag || function(){dataLayer.push(arguments);};
+            gtag('js', new Date());
+            gtag('config', '{{ $gaTrackingId }}', { 'anonymize_ip': true });
+        });
     </script>
 @endif
 
 @if (get_setting('facebook_pixel') == 1 && !empty($fbPixelId))
     <!-- Facebook Pixel Code -->
     <script>
-        !function(f,b,e,v,n,t,s)
-        {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
-        n.callMethod.apply(n,arguments):n.queue.push(arguments)};
-        if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
-        n.queue=[];t=b.createElement(e);t.async=!0;
-        t.src=v;s=b.getElementsByTagName(e)[0];
-        s.parentNode.insertBefore(t,s)}(window, document,'script',
-        'https://connect.facebook.net/en_US/fbevents.js');
-        fbq('init', '{{ $fbPixelId }}');
-        fbq('track', 'PageView');
+        window.perfThirdParty(function () {
+            !function(f,b,e,v,n,t,s)
+            {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+            n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+            if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+            n.queue=[];t=b.createElement(e);t.async=!0;
+            t.src=v;s=b.getElementsByTagName(e)[0];
+            s.parentNode.insertBefore(t,s)}(window, document,'script',
+            'https://connect.facebook.net/en_US/fbevents.js');
+            fbq('init', '{{ $fbPixelId }}');
+            fbq('track', 'PageView');
+        });
     </script>
     <noscript>
         <img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id={{ $fbPixelId }}&ev=PageView&noscript=1"/>
@@ -1607,7 +1787,7 @@
     <script type="text/javascript">
         if ($('input[name=country_code]').length > 0){
             // Country Code
-            var isPhoneShown = true,
+            var isPhoneShown = false,
                 countryData = window.intlTelInputGlobals.getCountryData(),
                 input = document.querySelector("#phone-code");
 

@@ -2306,6 +2306,18 @@
                                     </a>
                                 </li>
                             @endcan
+                            <li class="aiz-side-nav-item">
+                                <a href="{{ route('store_promotions.settings') }}"
+                                    class="aiz-side-nav-link {{ areActiveRoutes(['store_promotions.settings'])}}">
+                                    <span class="aiz-side-nav-text">{{translate('Store Page Settings')}}</span>
+                                </a>
+                            </li>
+                            <li class="aiz-side-nav-item">
+                                <a href="{{ route('store_promotions.index') }}"
+                                    class="aiz-side-nav-link {{ areActiveRoutes(['store_promotions.index', 'store_promotions.create', 'store_promotions.edit'])}}">
+                                    <span class="aiz-side-nav-text">{{translate('Store Promotions')}}</span>
+                                </a>
+                            </li>
                             @can('select_font_family')
                                 <li class="aiz-side-nav-item">
                                     <a href="{{ route('website.select-font-family') }}" class="aiz-side-nav-link {{ areActiveRoutes(['website.select-font-family'])}}">

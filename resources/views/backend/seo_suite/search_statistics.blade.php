@@ -15,6 +15,8 @@
     </div>
 </div>
 
+@include('backend.seo.partials.suite_nav')
+
 @php
     $localStats = $result['local_stats'] ?? [];
     $gscData    = $result['gsc_data'] ?? [];

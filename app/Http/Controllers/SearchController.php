@@ -37,31 +37,22 @@ class SearchController extends Controller
 
         $conditions = [];
 
-        [$attributes, $colors] = \Cache::remember('frontend_listing_filter_counts_v2', 3600, function () {
-            $attributes = Attribute::with('attribute_values')->get();
+        [$attributes, $colors] = \Cache::remember('frontend_listing_filters_v3', 3600, function () {
+            return [
+                Attribute::with('attribute_values')->get(),
+                Color::all(),
+            ];
+        });
 
-            foreach ($attributes as $attribute) {
-                $attribute->product_count = filter_products(
-                    Product::whereJsonContains('attributes', (string) $attribute->id)
-                )->count();
+        $filterBrands = \Cache::remember('frontend_listing_brands_v3', 3600, function () {
+            return Brand::orderBy('name')->get();
+        });
 
-                foreach ($attribute->attribute_values as $value) {
-                    $value->product_count = filter_products(
-                        Product::query()
-                            ->where('choice_options', 'like', '%"attribute_id":"' . $attribute->id . '"%')
-                            ->where('choice_options', 'like', '%"' . $value->value . '"%')
-                    )->count();
-                }
-            }
-
-            $colors = Color::all();
-            foreach ($colors as $color) {
-                $color->product_count = filter_products(
-                    Product::where('colors', 'like', '%' . $color->code . '%')
-                )->count();
-            }
-
-            return [$attributes, $colors];
+        $priceRange = \Cache::remember('frontend_listing_price_range_v3', 3600, function () {
+            return [
+                'min' => (float) (Product::min('unit_price') ?: 0),
+                'max' => (float) (Product::max('unit_price') ?: 0),
+            ];
         });
 
         // return $colors;
@@ -72,7 +63,7 @@ class SearchController extends Controller
             $products = filter_preorder_product($products);
             if ($category_id != null) {
                 $category_ids[] = $category_id;
-                $category = Category::with('childrenCategories')->find($category_id);
+                $category = Category::with(['childrenCategories', 'parentCategory'])->find($category_id);
 
                 $products = $category->preorderProducts();
             } else {
@@ -150,15 +141,18 @@ class SearchController extends Controller
             if ($request->ajax()) {
                 return view('frontend.product_listing_products', compact('products'));
             }
-            return view('frontend.product_listing', compact('products', 'query', 'category', 'categories', 'category_id', 'brand_id', 'sort_by', 'seller_id', 'min_price', 'max_price', 'attributes', 'selected_attribute_values', 'colors', 'selected_color', 'product_type', 'is_available'));
+            return view('frontend.product_listing', compact('products', 'query', 'category', 'categories', 'category_id', 'brand_id', 'sort_by', 'seller_id', 'min_price', 'max_price', 'attributes', 'selected_attribute_values', 'colors', 'selected_color', 'product_type', 'is_available', 'filterBrands', 'priceRange'));
         }
 
 
         if ($brand_id != null) {
             $conditions = array_merge($conditions, ['brand_id' => $brand_id]);
-            $brand = Brand::where('slug', $request->brand)->first();
+            $brand = Brand::find($brand_id);
         } elseif ($request->brand != null) {
-            $brand = Brand::where('slug', $request->brand)->first();
+            $brandSlug = (string) $request->brand;
+            $brand = \Cache::remember('frontend_brand_by_slug_' . md5($brandSlug), 86400, function () use ($brandSlug) {
+                return Brand::where('slug', $brandSlug)->first();
+            });
             $brand_id = ($brand != null) ? $brand->id : null;
             $conditions = array_merge($conditions, ['brand_id' => $brand_id]);
         }
@@ -170,7 +164,9 @@ class SearchController extends Controller
         if ($category_id != null) {
             $category_ids = CategoryUtility::children_ids($category_id);
             $category_ids[] = $category_id;
-            $category = Category::with('childrenCategories')->find($category_id);
+            $category = \Cache::remember('frontend_listing_category_' . $category_id, 86400, function () use ($category_id) {
+                return Category::with(['childrenCategories', 'parentCategory'])->find($category_id);
+            });
             $products = Product::where(function ($q) use ($category_ids) {
                 $q->whereIn('category_id', $category_ids)
                   ->orWhereHas('categories', function ($q2) use ($category_ids) {
@@ -180,23 +176,11 @@ class SearchController extends Controller
         }
         //------------------- category product count start here ----------------------
 
-        $categories = \Cache::remember('frontend_listing_categories_with_counts_v2', 3600, function () {
-            $productCountsSubCategory = ProductCategory::select('category_id')
-                ->selectRaw('COUNT(product_id) as count')
-                ->whereIn('product_id', filter_products(Product::query())->select('id'))
-                ->groupBy('category_id')
-                ->pluck('count', 'category_id');
-
-            $allCategories = Category::with('childrenCategories', 'coverImage')
+        $categories = \Cache::remember('frontend_listing_categories_basic_v3', 3600, function () {
+            return Category::with('childrenCategories')
                 ->orderBy('order_level', 'desc')
                 ->where('level', 0)
                 ->get();
-
-            foreach ($allCategories as $category1) {
-                $this->categoryProductCount($category1, $productCountsSubCategory);
-            }
-
-            return $allCategories;
         });
         // return $categories;
         
@@ -204,25 +188,11 @@ class SearchController extends Controller
        if (addon_is_activated('preorder')) {
             // ################# preorder category start here #################
 
-            $preorder_categories = \Cache::remember('frontend_listing_preorder_categories_with_counts_v2', 3600, function () {
-                $preorder_products = PreorderProduct::where('is_published', 1);
-
-                $preorder_productCountsSubCategory = PreorderProductCategory::select('category_id')
-                    ->selectRaw('COUNT(preorder_product_id) as count')
-                    ->whereIn('preorder_product_id', filter_preorder_product($preorder_products)->select('id'))
-                    ->groupBy('category_id')
-                    ->pluck('count', 'category_id');
-
-                $preorder_allCategories = Category::with('childrenCategories', 'coverImage')
+            $preorder_categories = \Cache::remember('frontend_listing_preorder_categories_basic_v3', 3600, function () {
+                return Category::with('childrenCategories')
                     ->orderBy('order_level', 'desc')
                     ->where('level', 0)
                     ->get();
-
-                foreach ($preorder_allCategories as $category1) {
-                    $this->categoryProductCount($category1, $preorder_productCountsSubCategory);
-                }
-
-                return $preorder_allCategories;
             });
 
             // return $preorder_categories;
@@ -297,11 +267,11 @@ class SearchController extends Controller
             });
         }
 
-        $products = filter_products($products)->with(['taxes', 'brand', 'stocks'])->paginate(36)->appends(request()->query());
+        $products = filter_products($products)->with(['taxes', 'brand', 'stocks', 'thumbnail'])->paginate(24)->appends(request()->query());
         if ($request->ajax()) {
             return view('frontend.product_listing_products', compact('products'));
         }
-        return view('frontend.product_listing', compact('products', 'query', 'category', 'categories', 'category_id', 'brand_id', 'brand', 'sort_by', 'seller_id', 'min_price', 'max_price', 'attributes', 'selected_attribute_values', 'colors', 'selected_color', 'product_type', 'is_available', 'preorder_categories'));
+        return view('frontend.product_listing', compact('products', 'query', 'category', 'categories', 'category_id', 'brand_id', 'brand', 'sort_by', 'seller_id', 'min_price', 'max_price', 'attributes', 'selected_attribute_values', 'colors', 'selected_color', 'product_type', 'is_available', 'preorder_categories', 'filterBrands', 'priceRange'));
     }
 
     public function index2(Request $request, $category_id = null, $brand_id = null)
@@ -492,7 +462,11 @@ class SearchController extends Controller
         if ($brand_id != null) {
             $conditions = array_merge($conditions, ['brand_id' => $brand_id]);
         } elseif ($request->brand != null) {
-            $brand_id = (Brand::where('slug', $request->brand)->first() != null) ? Brand::where('slug', $request->brand)->first()->id : null;
+            $brandSlug = (string) $request->brand;
+            $brand = \Cache::remember('frontend_brand_by_slug_' . md5($brandSlug), 86400, function () use ($brandSlug) {
+                return Brand::where('slug', $brandSlug)->first();
+            });
+            $brand_id = ($brand != null) ? $brand->id : null;
             $conditions = array_merge($conditions, ['brand_id' => $brand_id]);
         }
 
@@ -577,7 +551,7 @@ class SearchController extends Controller
             });
         }
 
-        $products = filter_products($products)->with('taxes')->paginate(12)->appends(request()->query());
+        $products = filter_products($products)->with(['taxes', 'brand', 'stocks', 'thumbnail'])->paginate(12)->appends(request()->query());
 
         $product_html =  view('frontend.product_listing_products', compact('products'))->render();
         $pagination_html = view('frontend.product_listing_pagination', [
@@ -600,7 +574,9 @@ class SearchController extends Controller
 
     public function listingByCategory(Request $request, $category_slug)
     {
-        $category = Category::where('slug', $category_slug)->first();
+        $category = \Cache::remember('frontend_category_by_slug_' . md5($category_slug), 86400, function () use ($category_slug) {
+            return Category::where('slug', $category_slug)->first();
+        });
         if ($category != null) {
             return $this->index($request, $category->id);
         }
@@ -609,7 +585,9 @@ class SearchController extends Controller
 
     public function listingByBrand(Request $request, $brand_slug)
     {
-        $brand = Brand::where('slug', $brand_slug)->first();
+        $brand = \Cache::remember('frontend_brand_by_slug_' . md5($brand_slug), 86400, function () use ($brand_slug) {
+            return Brand::where('slug', $brand_slug)->first();
+        });
         if ($brand != null) {
             return $this->index($request, null, $brand->id);
         }

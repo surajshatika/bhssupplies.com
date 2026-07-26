@@ -12,8 +12,16 @@ class AiBlogPost extends Command
 {
     protected $signature = 'blog:ai-generate
                             {--count=1          : Number of blog posts to generate}
+                            {--title=           : Exact blog title}
+                            {--slug=            : Preferred blog slug}
+                            {--blog-cat-id=     : Existing blog category ID}
                             {--category=        : Blog category name (creates if not exists)}
                             {--product-cat=     : Product category ID to pull topic & images from}
+                            {--banner=          : Existing Upload ID for 1300x650 banner}
+                            {--meta-image=      : Existing Upload ID for meta image}
+                            {--meta-title=      : SEO meta title override}
+                            {--meta-desc=       : SEO meta description override}
+                            {--meta-keywords=   : SEO meta keywords override}
                             {--topic=           : Custom topic override}
                             {--keywords=        : Extra seed keywords}
                             {--provider=        : AI provider (openai|claude|grok)}
@@ -38,8 +46,16 @@ class AiBlogPost extends Command
         }
 
         $options = array_filter([
+            'blog_title'          => $this->option('title') ?: null,
+            'slug'                => $this->option('slug') ?: null,
+            'blog_category_id'    => $this->option('blog-cat-id') ? (int)$this->option('blog-cat-id') : null,
             'category_name'       => $this->option('category') ?: null,
             'product_category_id' => $this->option('product-cat') ? (int)$this->option('product-cat') : null,
+            'banner_upload_id'    => $this->option('banner') ? (int)$this->option('banner') : null,
+            'meta_image_upload_id'=> $this->option('meta-image') ? (int)$this->option('meta-image') : null,
+            'meta_title'          => $this->option('meta-title') ?: null,
+            'meta_description'    => $this->option('meta-desc') ?: null,
+            'meta_keywords'       => $this->option('meta-keywords') ?: null,
             'topic'               => $this->option('topic') ?: null,
             'keywords'            => $this->option('keywords') ?: null,
             'ai_provider'         => $provider,

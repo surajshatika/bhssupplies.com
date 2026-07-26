@@ -8,6 +8,7 @@ use App\Models\CityTranslation;
 use App\Models\Country;
 use App\Models\State;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class CityController extends Controller
 {
@@ -32,9 +33,15 @@ class CityController extends Controller
         //         $q->where('status', 1);
         //     });
         // } else {
-            $cities_queries->whereHas('country', function ($q) {
-                $q->where('status', 1);
-            });
+            if ($this->citiesHaveCountry()) {
+                $cities_queries->whereHas('country', function ($q) {
+                    $q->where('status', 1);
+                });
+            } else {
+                $cities_queries->whereHas('state.country', function ($q) {
+                    $q->where('status', 1);
+                });
+            }
         
         if ($request->sort_city) {
             $cities_queries->where('name', 'like', "%$sort_city%");
@@ -43,7 +50,13 @@ class CityController extends Controller
             $cities_queries->where('state_id', $request->sort_state);
         }
         if ($request->sort_country) {
-            $cities_queries->where('country_id', $request->sort_country);
+            if ($this->citiesHaveCountry()) {
+                $cities_queries->where('country_id', $request->sort_country);
+            } else {
+                $cities_queries->whereHas('state', function ($q) use ($sort_country) {
+                    $q->where('country_id', $sort_country);
+                });
+            }
         }
         $cities = $cities_queries->orderBy('created_at', 'desc')->paginate(15);
         $states = State::where('status', 1)->get();
@@ -72,7 +85,9 @@ class CityController extends Controller
         $city->cost = $request->cost;
         $city->status = 0;
         $city->state_id = $request->state_id ?? null;
-        $city->country_id = $request->country_id ? $request->country_id : State::findOrFail($request->state_id)->country_id;
+        if ($this->citiesHaveCountry()) {
+            $city->country_id = $request->country_id ? $request->country_id : State::findOrFail($request->state_id)->country_id;
+        }
         $city->save();
 
         flash(translate('City has been inserted successfully'))->success();
@@ -110,12 +125,14 @@ class CityController extends Controller
             $city->name = $request->name;
         }
         //if request country changed , state should null if $request->country_id is not null and $request->state_id is null
-        if ($request->country_id && !$request->state_id && $request->country_id != $city->country_id) {
+        if ($request->country_id && !$request->state_id && $request->country_id != $this->cityCountryId($city)) {
             $city->state_id = null;
         } else {
             $city->state_id = $request->state_id ?? $city->state_id;
         }
-        $city->country_id = $request->country_id ? $request->country_id  : State::findOrFail($city->state_id)->country_id;
+        if ($this->citiesHaveCountry()) {
+            $city->country_id = $request->country_id ? $request->country_id  : State::findOrFail($city->state_id)->country_id;
+        }
         $city->cost = $request->cost;
 
         $city->save();
@@ -167,7 +184,29 @@ class CityController extends Controller
 
     public function getCitiesByCountry(Request $request)
     {
-        $cities = City::where('country_id', $request->country_id)->where('status', 1)->get(['id', 'name']);
+        $query = City::where('status', 1);
+        if ($this->citiesHaveCountry()) {
+            $query->where('country_id', $request->country_id);
+        } else {
+            $query->whereIn('state_id', function ($subQuery) use ($request) {
+                $subQuery->select('id')->from('states')->where('country_id', $request->country_id);
+            });
+        }
+        $cities = $query->get(['id', 'name']);
         return response()->json($cities);
+    }
+
+    protected function citiesHaveCountry(): bool
+    {
+        return Schema::hasColumn('cities', 'country_id');
+    }
+
+    protected function cityCountryId(City $city): ?int
+    {
+        if ($this->citiesHaveCountry()) {
+            return $city->country_id ? (int) $city->country_id : null;
+        }
+
+        return $city->state_id ? (int) State::where('id', $city->state_id)->value('country_id') : null;
     }
 }

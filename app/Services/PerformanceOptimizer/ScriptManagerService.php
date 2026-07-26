@@ -54,7 +54,10 @@ class ScriptManagerService
         // Safety baseline: scripts whose src contains any of these are NEVER deferred/denied/delayed,
         // regardless of user rules. The layout has inline <script> blocks that call $() / AIZ.* at parse
         // time — touching these breaks home-section AJAX loaders, infinite scroll, modals, etc.
-        $protectedSrcSubstrings = ['jquery', 'vendors.js', 'aiz-core.js'];
+        $protectedSrcSubstrings = [
+            'jquery', 'vendors.js', 'aiz-core', 'bootstrap', 'slick',
+            'checkout', 'stripe', 'recaptcha',
+        ];
 
         return preg_replace_callback('/<script\b([^>]*)>([\s\S]*?)<\/script>/i', function ($m) use ($rules, $protectedSrcSubstrings) {
             $attrs   = $m[1];

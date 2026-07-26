@@ -77,6 +77,65 @@ class AiSeoBoardController extends Controller
         }
     }
 
+    /** Generate suggestions without writing — for the preview & edit drawer. */
+    public function preview(Request $request): JsonResponse
+    {
+        $request->validate([
+            'type' => 'required|in:product,category,page,blog',
+            'id'   => 'required|integer|min:1',
+        ]);
+
+        try {
+            $data = $this->board->previewAiFix(
+                $request->input('type'),
+                (int) $request->input('id'),
+                $request->input('provider')
+            );
+
+            return response()->json(['success' => true, 'data' => $data]);
+        } catch (Throwable $e) {
+            logger()->error('AI SEO Board preview failed', [
+                'type' => $request->input('type'), 'id' => $request->input('id'), 'error' => $e->getMessage(),
+            ]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
+    }
+
+    /** Persist admin-approved (possibly edited) suggestion values. */
+    public function applyApproved(Request $request): JsonResponse
+    {
+        $request->validate([
+            'type'               => 'required|in:product,category,page,blog',
+            'id'                 => 'required|integer|min:1',
+            'meta_title'         => 'nullable|string|max:255',
+            'meta_description'   => 'nullable|string|max:500',
+            'focus_keyword'      => 'nullable|string|max:191',
+            'secondary_keywords' => 'nullable|string|max:1000',
+            'schema'             => 'nullable|boolean',
+        ]);
+
+        try {
+            $result = $this->board->applyApprovedFix(
+                $request->input('type'),
+                (int) $request->input('id'),
+                [
+                    'meta_title'         => $request->input('meta_title'),
+                    'meta_description'   => $request->input('meta_description'),
+                    'focus_keyword'      => $request->input('focus_keyword'),
+                    'secondary_keywords' => $request->input('secondary_keywords'),
+                    'schema'             => $request->boolean('schema'),
+                ]
+            );
+
+            return response()->json(['success' => true, 'data' => $result]);
+        } catch (Throwable $e) {
+            logger()->error('AI SEO Board apply-approved failed', [
+                'type' => $request->input('type'), 'id' => $request->input('id'), 'error' => $e->getMessage(),
+            ]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
+    }
+
     public function rescore(Request $request): JsonResponse
     {
         $request->validate([
@@ -120,9 +179,14 @@ class AiSeoBoardController extends Controller
      */
     public function bulkEstimate(Request $request): JsonResponse
     {
-        $payload  = $this->bulkPayload($request);
-        $targets  = $this->board->collectTargets($payload);
-        $estimate = $this->board->estimateBatchCost($targets, $request->input('provider'));
+        try {
+            $payload  = $this->bulkPayload($request);
+            $targets  = $this->board->collectTargets($payload);
+            $estimate = $this->board->estimateBatchCost($targets, $request->input('provider'));
+        } catch (Throwable $e) {
+            logger()->error('AI SEO Board bulk estimate failed', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
 
         $guard      = app(SeoBudgetGuard::class);
         $cap        = $guard->dailyCapUsd();
@@ -139,6 +203,7 @@ class AiSeoBoardController extends Controller
             'ai_call'         => $estimate['ai_call'],
             'sync_warning'    => $this->queueWillRunInline() && $estimate['count'] > 25,
             'queue_driver'    => config('queue.default'),
+            'cron_chunked'    => $this->queueWillRunInline(),
             'budget' => [
                 'daily_cap_usd' => $cap,
                 'spent_today'   => round($spent, 4),
@@ -150,8 +215,13 @@ class AiSeoBoardController extends Controller
 
     public function bulkRun(Request $request): JsonResponse
     {
-        $payload = $this->bulkPayload($request);
-        $targets = $this->board->collectTargets($payload);
+        try {
+            $payload = $this->bulkPayload($request);
+            $targets = $this->board->collectTargets($payload);
+        } catch (Throwable $e) {
+            logger()->error('AI SEO Board bulk run payload failed', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
 
         if (empty($targets)) {
             return response()->json(['success' => false, 'error' => 'No matching entities to fix.'], 422);
@@ -171,12 +241,20 @@ class AiSeoBoardController extends Controller
             ], 429);
         }
 
-        $batch = $this->board->createBatch(
-            $targets,
-            $request->input('provider'),
-            optional(auth()->user())->id,
-            $request->input('label')
-        );
+        $runInCronChunks = $this->queueWillRunInline();
+
+        try {
+            $batch = $this->board->createBatch(
+                $targets,
+                $request->input('provider'),
+                optional(auth()->user())->id,
+                $request->input('label'),
+                !$runInCronChunks
+            );
+        } catch (Throwable $e) {
+            logger()->error('AI SEO Board bulk run failed', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 422);
+        }
 
         $guard->bustCache();
 
@@ -184,6 +262,7 @@ class AiSeoBoardController extends Controller
             'success'  => true,
             'batch_id' => $batch->id,
             'snapshot' => $this->batchSnapshot($batch),
+            'queued_for_cron' => $runInCronChunks,
         ]);
     }
 
@@ -217,9 +296,9 @@ class AiSeoBoardController extends Controller
         $request->validate([
             'mode'      => 'required|in:selected,filtered',
             'type'      => 'nullable|in:product,category,page,blog',
-            'targets'   => 'array',
+            'targets'   => 'array|max:' . AiSeoBoardService::MAX_MANUAL_BATCH_TARGETS,
             'targets.*' => 'array',
-            'limit'     => 'nullable|integer|min:1|max:5000',
+            'limit'     => 'nullable|integer|min:1|max:' . AiSeoBoardService::MAX_MANUAL_BATCH_TARGETS,
         ]);
 
         if ($request->input('mode') === 'selected') {
@@ -235,7 +314,10 @@ class AiSeoBoardController extends Controller
                 'max_score' => $request->filled('max_score') ? (int) $request->input('max_score') : null,
                 'sort'      => $request->input('sort', 'recent'),
             ],
-            'limit'   => (int) $request->input('limit', 500),
+            'limit'   => min(
+                AiSeoBoardService::MAX_MANUAL_BATCH_TARGETS,
+                (int) $request->input('limit', AiSeoBoardService::MAX_MANUAL_BATCH_TARGETS)
+            ),
         ];
     }
 
@@ -251,7 +333,7 @@ class AiSeoBoardController extends Controller
             'failed'             => $batch->failed,
             'skipped'            => $batch->skipped,
             'percent'            => $batch->progressPercent(),
-            'current_label'      => $batch->current_label,
+            'current_label'      => $batch->current_label ?: ($this->queueWillRunInline() && $batch->status === SeoFixBatch::STATUS_QUEUED ? 'Queued for cron chunk processor' : null),
             'provider'           => $batch->provider,
             'estimated_cost_usd' => (float) $batch->estimated_cost_usd,
             'actual_cost_usd'    => (float) $batch->actual_cost_usd,
@@ -259,6 +341,8 @@ class AiSeoBoardController extends Controller
             'completed_at'       => optional($batch->completed_at)->toDateTimeString(),
             'is_terminal'        => $batch->isTerminal(),
             'recent_errors'      => array_slice($batch->error_log ?? [], -3),
+            'queue_driver'       => config('queue.default'),
+            'cron_chunked'       => $this->queueWillRunInline(),
         ];
     }
 

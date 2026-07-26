@@ -9,6 +9,7 @@ use App\Models\City;
 use App\Models\State;
 use Auth;
 use Log;
+use Illuminate\Support\Facades\Schema;
 
 class AddressController extends Controller
 {
@@ -49,8 +50,14 @@ class AddressController extends Controller
         $address->address       = $request->address;
         $address->country_id    = $request->country_id;
         $address->state_id      = $request->state_id;
-        $address->city_id       = $request->city_id;
-        $address->area_id       = $request->area_id;
+        $address->city_id       = $this->resolveAddressCityId($request);
+        if (!$address->city_id) {
+            flash(translate('Please enter a valid city.'))->warning();
+            return back()->withInput();
+        }
+        if ($this->addressesHaveArea()) {
+            $address->area_id   = $request->area_id;
+        }
         $address->longitude     = $request->longitude;
         $address->latitude      = $request->latitude;
         $address->postal_code   = $request->postal_code;
@@ -72,8 +79,14 @@ class AddressController extends Controller
         $address->address       = $request->address;
         $address->country_id    = $request->country_id;
         $address->state_id      = $request->state_id;
-        $address->city_id       = $request->city_id;
-        $address->area_id       = $request->area_id;
+        $address->city_id       = $this->resolveAddressCityId($request);
+        if (!$address->city_id) {
+            flash(translate('Please enter a valid city.'))->warning();
+            return back()->withInput();
+        }
+        if ($this->addressesHaveArea()) {
+            $address->area_id   = $request->area_id;
+        }
         $address->longitude     = $request->longitude;
         $address->latitude      = $request->latitude;
         $address->postal_code   = $request->postal_code;
@@ -106,9 +119,7 @@ class AddressController extends Controller
     {
         $data['address_data'] = Address::findOrFail($id);
         $data['states'] = State::where('status', 1)->where('country_id', $data['address_data']->country_id)->get();
-        $data['cities'] = City::where('status', 1)
-            ->where(get_setting('has_state') == 1 ? 'state_id' : 'country_id', get_setting('has_state') == 1 ? $data['address_data']->state_id : (get_active_countries()->count() == 1 ? get_active_countries()->first()->id : $data['address_data']->country_id))
-            ->get();
+        $data['cities'] = $this->citiesForAddress($data['address_data']);
         //Log::info('Fetched cities:', ['cities' => $data['cities']]);
         $data['areas'] = Area::where('status', 1)->where('city_id', $data['address_data']->city_id)->get();
         $returnHTML = view('frontend.partials.address.address_edit_modal', $data)->render();
@@ -120,9 +131,7 @@ class AddressController extends Controller
     {
         $data['address_data'] = Address::findOrFail($id);
         $data['states'] = State::where('status', 1)->where('country_id', $data['address_data']->country_id)->get();
-        $data['cities'] = City::where('status', 1)
-            ->where(get_setting('has_state') == 1 ? 'state_id' : 'country_id', get_setting('has_state') == 1 ? $data['address_data']->state_id : (get_active_countries()->count() == 1 ? get_active_countries()->first()->id : $data['address_data']->country_id))
-            ->get();
+        $data['cities'] = $this->citiesForAddress($data['address_data']);
         //Log::info('Fetched cities:', ['cities' => $data['cities']]);
         $data['areas'] = Area::where('status', 1)->where('city_id', $data['address_data']->city_id)->get();
         $returnHTML = view('frontend.partials.address.billing_address_edit_modal', $data)->render();
@@ -147,8 +156,10 @@ class AddressController extends Controller
             $address->state_id = $request->state_id ?? $address->state_id;
         }
         $address->country_id    = $request->country_id;
-        $address->city_id       = $request->city_id ?? $address->city_id;
-        $address->area_id       = $request->area_id ?? null;
+        $address->city_id       = $this->resolveAddressCityId($request) ?? $address->city_id;
+        if ($this->addressesHaveArea()) {
+            $address->area_id   = $request->area_id ?? null;
+        }
         $address->longitude     = $request->longitude;
         $address->latitude      = $request->latitude;
         $address->postal_code   = $request->postal_code;
@@ -168,8 +179,10 @@ class AddressController extends Controller
             $address->state_id = $request->state_id ?? $address->state_id;
         }
         $address->country_id    = $request->country_id;
-        $address->city_id       = $request->city_id ?? $address->city_id;
-        $address->area_id       = $request->area_id ?? null;
+        $address->city_id       = $this->resolveAddressCityId($request) ?? $address->city_id;
+        if ($this->addressesHaveArea()) {
+            $address->area_id   = $request->area_id ?? null;
+        }
         $address->longitude     = $request->longitude;
         $address->latitude      = $request->latitude;
         $address->postal_code   = $request->postal_code;
@@ -264,7 +277,7 @@ class AddressController extends Controller
 
     public function getCitiesByCountry(Request $request)
     {
-        $cities = City::where('status', 1)->where('country_id', $request->country_id)->get();
+        $cities = $this->citiesByCountry((int) $request->country_id);
         $html = '<option value="">' . translate("Select City") . '</option>';
 
         foreach ($cities as $row) {
@@ -272,5 +285,95 @@ class AddressController extends Controller
         }
 
         echo json_encode($html);
+    }
+
+    protected function citiesForAddress(Address $address)
+    {
+        if ((int) get_setting('has_state') === 1) {
+            return City::where('status', 1)->where('state_id', $address->state_id)->get();
+        }
+
+        $countryId = get_active_countries()->count() === 1
+            ? get_active_countries()->first()->id
+            : $address->country_id;
+
+        return $this->citiesByCountry((int) $countryId);
+    }
+
+    protected function citiesByCountry(int $countryId)
+    {
+        $query = City::where('status', 1);
+
+        if (Schema::hasColumn('cities', 'country_id')) {
+            return $query->where('country_id', $countryId)->get();
+        }
+
+        return $query->whereIn('state_id', function ($subQuery) use ($countryId) {
+            $subQuery->select('id')->from('states')->where('country_id', $countryId);
+        })->get();
+    }
+
+    protected function addressesHaveArea(): bool
+    {
+        return Schema::hasColumn('addresses', 'area_id');
+    }
+
+    protected function resolveAddressCityId(Request $request): ?int
+    {
+        $cityId = (int) $request->city_id;
+        if ($cityId > 0 && City::where('id', $cityId)->exists()) {
+            return $cityId;
+        }
+
+        $cityName = trim(preg_replace('/\s+/', ' ', (string) $request->city_name));
+        if ($cityName === '') {
+            return null;
+        }
+
+        $countryId = (int) $request->country_id;
+        $stateId = (int) $request->state_id;
+
+        $cityQuery = City::query()
+            ->whereRaw('LOWER(name) = ?', [strtolower($cityName)]);
+
+        if ($stateId > 0 && Schema::hasColumn('cities', 'state_id')) {
+            $cityQuery->where('state_id', $stateId);
+        } elseif ($countryId > 0 && Schema::hasColumn('cities', 'country_id')) {
+            $cityQuery->where('country_id', $countryId);
+        } elseif ($countryId > 0 && Schema::hasColumn('cities', 'state_id')) {
+            $stateIds = State::where('country_id', $countryId)->pluck('id');
+            if ($stateIds->isNotEmpty()) {
+                $cityQuery->whereIn('state_id', $stateIds);
+            }
+        }
+
+        if ($city = $cityQuery->first()) {
+            return $city->id;
+        }
+
+        $city = new City();
+        $city->name = $cityName;
+
+        if (Schema::hasColumn('cities', 'state_id')) {
+            $city->state_id = $stateId > 0
+                ? $stateId
+                : (int) State::where('country_id', $countryId)->where('status', 1)->value('id');
+        }
+
+        if (Schema::hasColumn('cities', 'country_id')) {
+            $city->country_id = $countryId;
+        }
+
+        if (Schema::hasColumn('cities', 'cost')) {
+            $city->cost = 0;
+        }
+
+        if (Schema::hasColumn('cities', 'status')) {
+            $city->status = 1;
+        }
+
+        $city->save();
+
+        return $city->id;
     }
 }

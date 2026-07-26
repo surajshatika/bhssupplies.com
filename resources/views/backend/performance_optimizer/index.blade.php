@@ -45,6 +45,7 @@
         'security'   => ['Security Audit',      'las la-shield-alt',     'performance_optimizer.security'],
         'ai'         => ['AI Recommendations',  'las la-robot',          'performance_optimizer.ai.index'],
         'vitals'     => ['Web Vitals',          'las la-chart-line',     'performance_optimizer.vitals'],
+        'advanced'   => ['Advanced',            'las la-cogs',           'performance_optimizer.index'],
     ];
 
     // AI tab pending-count badge (graceful if model not yet present)
@@ -173,9 +174,9 @@
             <div class="perf-stat-sub">{{ translate('Backup') }}: {{ $g_img['backup_size'] }}</div>
         </div>
         <div class="perf-stat-card perf-stat-cyan">
-            <div class="perf-stat-value">{{ ($g_cache['driver'] ?? '') === 'litespeed' ? translate('Server') : number_format($g_cache['pages']) }}</div>
+            <div class="perf-stat-value">{{ number_format($g_cache['pages']) }}</div>
             <div class="perf-stat-label">{{ translate('Pages Cached') }}</div>
-            <div class="perf-stat-sub">{{ ($g_cache['driver'] ?? '') === 'litespeed' ? translate('Managed by LiteSpeed') : ($g_cache['size'] . ' ' . translate('stored')) }} · {{ strtoupper($g_cache['driver']) }}</div>
+            <div class="perf-stat-sub">{{ ($g_cache['driver'] ?? '') === 'litespeed' ? translate('LiteSpeed + local safety copies') : ($g_cache['size'] . ' ' . translate('stored')) }} · {{ strtoupper($g_cache['driver']) }}</div>
         </div>
         <div class="perf-stat-card perf-stat-yellow">
             <div class="perf-stat-value">{{ $g_db_size }}</div>
@@ -189,7 +190,8 @@
     ──────────────────────────────────────────────────────────────── --}}
     <div class="perf-tab-bar">
         @foreach($perfTabs as $k => $t)
-            <a href="{{ route($t[2]) }}" class="perf-tab {{ $tab === $k ? 'active' : '' }}">
+            @php $routeUrl = $t[2] === 'performance_optimizer.index' ? route('performance_optimizer.index', ['tab' => $k]) : route($t[2]); @endphp
+            <a href="{{ $routeUrl }}" class="perf-tab {{ $tab === $k ? 'active' : '' }}">
                 <i class="{{ $t[1] }}"></i>
                 <span>{{ translate($t[0]) }}</span>
                 @if($k === 'logs' && $g_err_log_count > 0)

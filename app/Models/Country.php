@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use App\Traits\PreventDemoModeChanges;
+use Illuminate\Support\Facades\Schema;
 
 class Country extends Model
 {
@@ -31,6 +32,10 @@ class Country extends Model
 
     public function cities()
     {
+        if (!Schema::hasColumn('cities', 'country_id')) {
+            return $this->hasManyThrough(City::class, State::class);
+        }
+
         return $this->hasMany(City::class);
     }
         

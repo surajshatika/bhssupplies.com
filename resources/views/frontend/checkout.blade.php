@@ -1,5 +1,7 @@
 @extends('frontend.layouts.app')
 
+@php($checkoutMapDisabled = true)
+
 @section('content')
 
     <section class="my-4 gry-bg">
@@ -460,6 +462,10 @@
             });
         });
 
+        $(document).on('input change', '#shipping_info .checkout-manual-city', function () {
+            stepCompletionShippingInfo();
+        });
+
         $('select[name="area_id"].guest-checkout').change(function () {
             let country_id = $('select[name="country_id"]').length
                 ? $('select[name="country_id"]').val()
@@ -722,14 +728,14 @@
     <script>
         $(document).ready(function() {
             @if(get_setting('has_state') == 1)
-                get_states(@json(get_active_countries()[0]->id));
+                get_states(@json(get_active_countries()[0]->id), '#shipping_info');
                 @if(get_setting('billing_address_required') == 1)
-                  get_billing_states(@json(get_active_countries()[0]->id));
+                  get_billing_states(@json(get_active_countries()[0]->id), '#shipping_info');
                 @endif
             @else
-                get_city_by_country(@json(get_active_countries()[0]->id));
+                get_city_by_country(@json(get_active_countries()[0]->id), '#shipping_info');
                 @if(get_setting('billing_address_required') == 1)
-                  get_billing_city_by_country(@json(get_active_countries()[0]->id));
+                  get_billing_city_by_country(@json(get_active_countries()[0]->id), '#shipping_info');
                 @endif
             @endif
         });
@@ -739,7 +745,7 @@
     </script>
     @endif
 
-    @if (get_setting('google_map') == 1)
+    @if (get_setting('google_map') == 1 && empty($checkoutMapDisabled))
         @include('frontend.partials.google_map')
     @endif
 

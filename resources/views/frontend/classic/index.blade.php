@@ -60,15 +60,17 @@
     $lcp_slider_images = json_decode(get_setting('home_slider_images', null, $lang), true);
     $lcp_sliders = get_slider_images($lcp_slider_images);
     $lcp_image_url = ($lcp_sliders && count($lcp_sliders) > 0 && $lcp_sliders[0])
-        ? my_asset($lcp_sliders[0]->file_name)
+        ? optimized_image_url(my_asset($lcp_sliders[0]->file_name))
         : null;
+    $flash_deal = get_featured_flash_deal();
 @endphp
 
-@if($lcp_image_url)
 @section('lcp_preload')
+    {{-- Preload first slider (main LCP candidate on desktop) --}}
+    @if($lcp_image_url)
     <link rel="preload" as="image" href="{{ $lcp_image_url }}" fetchpriority="high">
+    @endif
 @endsection
-@endif
 
 <h1 class="sr-only">{{ get_setting('meta_title') ?: env('APP_NAME') }}</h1>
 <!-- Sliders -->
@@ -97,10 +99,12 @@
                             href="{{ isset(json_decode($home_slider_links, true)[$key]) ? json_decode($home_slider_links, true)[$key] : '' }}">
                             <!-- Image -->
                             <img class="d-block w-100"
-                                src="{{ $slider ? my_asset($slider->file_name) : static_asset('assets/img/placeholder.jpg') }}"
+                                src="{{ $slider ? optimized_image_url(my_asset($slider->file_name)) : static_asset('assets/img/placeholder.jpg') }}"
                                 alt="{{ env('APP_NAME') }} — {{ $key == 0 ? 'Featured Promotions' : 'Special Offer ' . ($key + 1) }}"
                                 width="1200" height="460"
-                                {{ $key > 0 ? 'loading="lazy"' : 'fetchpriority="high"' }}
+                                sizes="(max-width: 767px) 100vw, 1200px"
+                                decoding="async"
+                                {!! $key > 0 ? 'loading="lazy"' : 'loading="eager" fetchpriority="high"' !!}
                                 onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder-rect.jpg') }}';">
                         </a>
                     </div>
@@ -113,9 +117,6 @@
 </div>
 
 <!-- Flash Deal -->
-@php
-$flash_deal = get_featured_flash_deal();
-@endphp
 @if ($flash_deal != null)
 <section class="mb-2 mb-md-3 mt-2 mt-md-3" id="flash_deal">
     <div class="container">
@@ -162,14 +163,21 @@ $flash_deal = get_featured_flash_deal();
         <div class="row gutters-5 gutters-md-16">
             <!-- Flash Deals Baner & Countdown -->
             <div class="flash-deals-baner col-xxl-4 col-lg-5 col-6 h-200px h-md-400px h-lg-475px">
-                <a href="{{ route('flash-deal-details', $flash_deal->slug) }}">
-                    <div class="h-100 w-100 w-xl-auto"
-                        style="background-image: url('{{ uploaded_asset($flash_deal->banner) }}'); background-size: cover; background-position: center center;">
-                        <div class="py-5 px-md-3 px-xl-5 d-none d-md-block">
-                            <div class="bg-white">
-                                <div class="aiz-count-down-circle"
-                                    end-date="{{ date('Y/m/d H:i:s', $flash_deal->end_date) }}"></div>
-                            </div>
+                <a href="{{ route('flash-deal-details', $flash_deal->slug) }}" class="d-block h-100 position-relative overflow-hidden">
+                    {{-- Flash banner remains high priority because it is visible in the opening viewport. --}}
+                    <img src="{{ uploaded_asset($flash_deal->banner) }}"
+                         alt="{{ translate('Flash Sale') }}"
+                         loading="eager"
+                         fetchpriority="high"
+                         decoding="async"
+                         width="400" height="475"
+                         class="position-absolute"
+                         style="top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:center center"
+                         onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder-rect.jpg') }}';">
+                    <div class="py-5 px-md-3 px-xl-5 d-none d-md-block position-relative" style="z-index:1">
+                        <div class="bg-white">
+                            <div class="aiz-count-down-circle"
+                                end-date="{{ date('Y/m/d H:i:s', $flash_deal->end_date) }}"></div>
                         </div>
                     </div>
                 </a>
@@ -193,6 +201,9 @@ $flash_deal = get_featured_flash_deal();
                         $flash_deal_product->product->slug,
                         );
                         }
+                        $flashProductImage = get_image($flash_deal_product->product->thumbnail);
+                        $flashHoverImage = get_first_product_image($flash_deal_product->product->photos, $flash_deal_product->product->thumbnail_img);
+                        $showFlashHoverImage = (int) get_setting('perf_product_hover_images', 0) === 1 && $flashHoverImage !== $flashProductImage;
                         @endphp
                         <div
                             class="h-100px h-md-200px h-lg-auto flash-deal-item position-relative text-center has-transition hov-shadow-out z-1">
@@ -200,17 +211,25 @@ $flash_deal = get_featured_flash_deal();
                                 class="d-block py-md-3 overflow-hidden hov-scale-img"
                                 title="{{ $flash_deal_product->product->getTranslation('name') }}">
                                 <!-- Image -->
-                                <div class="d-block h-100 position-relative image-hover-effect">
+                                <div class="d-block h-100 position-relative image-hover-effect {{ $showFlashHoverImage ? 'has-hover-image' : '' }}">
                                     <img class="lazyload h-60px h-md-100px h-lg-140px mw-100 mx-auto has-transition product-main-image"
-                                        src="{{ get_image($flash_deal_product->product->thumbnail) }}"
+                                        src="{{ static_asset('assets/img/placeholder.jpg') }}"
+                                        data-src="{{ $flashProductImage }}"
                                         alt="{{ $flash_deal_product->product->getTranslation('name') }}"
                                         loading="lazy"
+                                        decoding="async"
+                                        width="140" height="140"
                                         onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder.jpg') }}';">
+                                    @if($showFlashHoverImage)
                                     <img class="lazyload h-60px h-md-100px h-lg-140px w-100 mx-auto has-transition product-hover-image position-absolute"
-                                        src="{{ get_first_product_image($flash_deal_product->product->thumbnail, $flash_deal_product->product->photos) }}"
+                                        src="{{ static_asset('assets/img/placeholder.jpg') }}"
+                                        data-src="{{ $flashHoverImage }}"
                                         alt="{{ $flash_deal_product->product->getTranslation('name') }}"
                                         loading="lazy"
+                                        decoding="async"
+                                        width="140" height="140"
                                         onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder.jpg') }}';">
+                                    @endif
                                 </div>
                                 <!-- Price -->
                                 <div
@@ -236,7 +255,13 @@ $flash_deal = get_featured_flash_deal();
 
 <!-- Today's deal -->
 <div id="todays_deal" class="mb-2 mb-md-3 mt-2 mt-md-3">
-
+    <div class="container skel-ajax-placeholder">
+        <div class="skel-product-row">
+            @for ($i = 0; $i < 5; $i++)
+            <div class="skel-product-card"><div class="skel-box skel-img"></div><span class="skel-line skel-name"></span><span class="skel-line skel-name2"></span><span class="skel-line skel-price"></span></div>
+            @endfor
+        </div>
+    </div>
 </div>
 
 <!-- Featured Categories -->
@@ -416,12 +441,24 @@ $flash_deal = get_featured_flash_deal();
 
 <!-- Best Selling  -->
 <div id="section_best_selling">
-
+    <div class="container skel-ajax-placeholder">
+        <div class="skel-product-row">
+            @for ($i = 0; $i < 6; $i++)
+            <div class="skel-product-card"><div class="skel-box skel-img"></div><span class="skel-line skel-name"></span><span class="skel-line skel-name2"></span><span class="skel-line skel-price"></span></div>
+            @endfor
+        </div>
+    </div>
 </div>
 
 <!-- New Products -->
 <div id="section_newest">
-
+    <div class="container skel-ajax-placeholder">
+        <div class="skel-product-row">
+            @for ($i = 0; $i < 6; $i++)
+            <div class="skel-product-card"><div class="skel-box skel-img"></div><span class="skel-line skel-name"></span><span class="skel-line skel-name2"></span><span class="skel-line skel-price"></span></div>
+            @endfor
+        </div>
+    </div>
 </div>
 
 <!-- Banner Section 3 -->

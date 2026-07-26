@@ -4,6 +4,7 @@ namespace App\Observers;
 
 use App\Http\Middleware\SeoRedirectMiddleware;
 use App\Jobs\Seo\PingIndexNowJob;
+use App\Jobs\Seo\RegenerateSitemapJob;
 use App\Models\Blog;
 use App\Models\Category;
 use App\Models\Page;
@@ -110,6 +111,13 @@ class SeoEntitySlugObserver
 
         if ((int) get_setting('seo_auto_cloudflare_purge', 0)) {
             $this->tryDispatch(fn() => \App\Jobs\Seo\PurgeCloudflareUrlsJob::dispatch([$url]));
+        }
+
+        // Opt-in real-time sitemap refresh, debounced ~5 min so a burst of saves
+        // triggers a single regeneration. Default off — the scheduler handles it.
+        if ((int) get_setting('seo_auto_sitemap_realtime', 0) === 1
+            && Cache::add('seo:sitemap:regen:debounce', 1, now()->addMinutes(5))) {
+            $this->tryDispatch(fn() => RegenerateSitemapJob::dispatch());
         }
     }
 

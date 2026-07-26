@@ -1,4 +1,9 @@
 @if (count($newest_products) > 0)
+@php
+    $cart_added = [];
+    $carts = get_user_cart();
+    if (count($carts) > 0) { $cart_added = $carts->pluck('product_id')->toArray(); }
+@endphp
 <section class="mt-4">
     <div class="container">
         <div class="bhs-section-card">
@@ -12,7 +17,7 @@
                 data-arrows="true" data-infinite="false">
                 @foreach ($newest_products as $new_product)
                 <div class="carousel-box px-2 py-2">
-                    @include('frontend.'.get_setting('homepage_select').'.partials.product_box_1', ['product' => $new_product])
+                    @include('frontend.'.get_setting('homepage_select').'.partials.product_box_1', ['product' => $new_product, 'cart_added' => $cart_added])
                 </div>
                 @endforeach
             </div>

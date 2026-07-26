@@ -13,6 +13,8 @@ class PostIndexStatusService extends AbstractSeoService
         $domain  = $payload['domain'] ?? parse_url(url('/'), PHP_URL_HOST);
         $apiKey  = get_setting('seo_google_search_api_key') ?? env('GOOGLE_SEARCH_API_KEY');
         $cx      = get_setting('seo_google_search_cx') ?? env('GOOGLE_SEARCH_CX');
+        $generateAdvice = (bool) ($payload['generate_advice'] ?? true);
+        $requireApi = (bool) ($payload['require_api'] ?? false);
 
         if (is_string($urls)) {
             $urls = array_filter(array_map('trim', preg_split('/[\r\n,]+/', $urls)));
@@ -22,41 +24,68 @@ class PostIndexStatusService extends AbstractSeoService
             $urls = $this->getRecentUrls($domain);
         }
 
+        if (!$apiKey || !$cx) {
+            return [
+                'total' => 0,
+                'indexed' => 0,
+                'not_indexed' => 0,
+                'errors' => 0,
+                'results' => [],
+                'ai_advice' => null,
+                'api_available' => false,
+                'skipped' => $requireApi,
+                'message' => 'Google Custom Search API key and CX are required for reliable index verification.',
+            ];
+        }
+
         $results = [];
         foreach (array_slice($urls, 0, 50) as $url) {
             $results[] = $this->checkIndexStatus($url, $apiKey, $cx);
         }
 
-        $indexed   = count(array_filter($results, fn($r) => $r['indexed']));
-        $notIndexed = count($results) - $indexed;
+        $indexed    = count(array_filter($results, fn($r) => $r['status'] === 'indexed'));
+        $notIndexed = count(array_filter($results, fn($r) => $r['status'] === 'not_indexed'));
+        $errors     = count(array_filter($results, fn($r) => !empty($r['error'])));
 
         $prompt = "SEO Index Status Report for {$domain}:\n"
             . "- Total checked: " . count($results) . "\n"
             . "- Indexed: {$indexed}\n"
-            . "- Not indexed: {$notIndexed}\n\n"
+            . "- Not indexed: {$notIndexed}\n"
+            . "- Check errors: {$errors}\n\n"
             . "List of not-indexed URLs: " . json_encode(array_column(
-                array_filter($results, fn($r) => !$r['indexed']), 'url'
+                array_filter($results, fn($r) => $r['status'] === 'not_indexed'), 'url'
             ), JSON_PRETTY_PRINT) . "\n\n"
             . "Provide recommendations to get these pages indexed faster.";
 
-        $aiAdvice = $this->ai()->generate($prompt, 'You are an expert in Google indexing and Search Console.');
+        $aiAdvice = $generateAdvice && !empty($results)
+            ? $this->ai()->generate($prompt, 'You are an expert in Google indexing and Search Console.')
+            : null;
 
         return [
             'total'      => count($results),
             'indexed'    => $indexed,
             'not_indexed'=> $notIndexed,
+            'errors'     => $errors,
             'results'    => $results,
             'ai_advice'  => $aiAdvice,
             'api_available' => !empty($apiKey && $cx),
+            'skipped' => false,
         ];
+    }
+
+    public function isApiConfigured(): bool
+    {
+        return (bool) (
+            (get_setting('seo_google_search_api_key') ?? env('GOOGLE_SEARCH_API_KEY'))
+            && (get_setting('seo_google_search_cx') ?? env('GOOGLE_SEARCH_CX'))
+        );
     }
 
     protected function checkIndexStatus(string $url, ?string $apiKey, ?string $cx): array
     {
-        $indexed = false;
-        $method  = 'cache_check';
-
         if ($apiKey && $cx) {
+            $method = 'google_search_api';
+
             try {
                 $response = Http::timeout(10)
                     ->withOptions(['verify' => config('seo.ssl_verify', true)])
@@ -69,22 +98,44 @@ class PostIndexStatusService extends AbstractSeoService
                 if ($response->successful()) {
                     $total = $response->json('searchInformation.totalResults', '0');
                     $indexed = (int) $total > 0;
-                    $method = 'google_search_api';
+
+                    return $this->indexStatusResult($url, $indexed, $method);
                 }
-            } catch (\Throwable $e) {}
-        } else {
-            // Fallback: check via Google cache URL
-            try {
-                $cacheUrl = 'https://webcache.googleusercontent.com/search?q=cache:' . urlencode($url);
-                $response = Http::timeout(8)->withOptions(['verify' => false])->get($cacheUrl);
-                $indexed  = $response->successful() && !str_contains($response->body(), 'Error 404');
-            } catch (\Throwable $e) {}
+
+                return $this->indexStatusError(
+                    $url,
+                    $method,
+                    'Google Search API HTTP ' . $response->status() . ': '
+                        . $response->json('error.message', 'Request failed.')
+                );
+            } catch (\Throwable $e) {
+                return $this->indexStatusError($url, $method, $e->getMessage());
+            }
         }
 
+        return $this->indexStatusError($url, 'api_unavailable', 'Google Custom Search API key and CX are required.');
+    }
+
+    protected function indexStatusResult(string $url, bool $indexed, string $method): array
+    {
         return [
             'url'      => $url,
             'indexed'  => $indexed,
+            'status'   => $indexed ? 'indexed' : 'not_indexed',
             'method'   => $method,
+            'error'    => null,
+            'checked_at' => now()->toDateTimeString(),
+        ];
+    }
+
+    protected function indexStatusError(string $url, string $method, string $error): array
+    {
+        return [
+            'url'        => $url,
+            'indexed'    => false,
+            'status'     => 'api_error',
+            'method'     => $method,
+            'error'      => $error,
             'checked_at' => now()->toDateTimeString(),
         ];
     }

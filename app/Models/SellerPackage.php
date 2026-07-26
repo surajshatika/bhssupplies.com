@@ -24,7 +24,7 @@ class SellerPackage extends Model
 
     public function seller_package_payments()
     {
-        return $this->hasMany(SelllerPackagePayment::class);
+        return $this->hasMany(SellerPackagePayment::class);
     }
 
     public function shop()

@@ -16,14 +16,16 @@ class Twillo implements SendSms
 
         $client = new Client($sid, $token);
         try {
-            $client->messages->create(
+            $message = $client->messages->create(
                 ($type == 1) ? $to : "whatsapp:" . $to, // Text this number
                 array(
                     'from' =>  ($type == 1) ? env('VALID_TWILLO_NUMBER') : "whatsapp:" . env('VALID_TWILLO_NUMBER'), // From a valid Twilio number
                     'body' => $text
                 )
             );
+            return $message->sid ?? true;
         } catch (\Exception $e) {
+            throw $e;
         }
     }
 }

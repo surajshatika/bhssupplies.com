@@ -150,11 +150,11 @@
                         @if ($header_logo != null)
                             <img id="header-logo-preview" src="{{ uploaded_asset($header_logo) }}" alt="{{ env('APP_NAME') }} Logo"
                                 class="mw-100 h-55px h-md-100px" width="230" height="100"
-                                loading="eager" fetchpriority="high" decoding="async">
+                                loading="eager" decoding="async">
                         @else
                             <img id="header-logo-preview" src="{{ static_asset('assets/img/logo.png') }}" alt="{{ env('APP_NAME') }} Logo"
                                 class="mw-100 h-55px h-md-100px" width="230" height="100"
-                                loading="eager" fetchpriority="high" decoding="async">
+                                loading="eager" decoding="async">
                         @endif
                     </a>
                 </div>

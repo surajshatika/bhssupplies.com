@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Services\Marketing\EventStore;
+use App\Services\PerformanceOptimizer\PageCacheService;
 use Closure;
 use Illuminate\Cookie\CookieJar;
 use Illuminate\Http\Request;
@@ -29,15 +30,16 @@ class MarketingTracking
 
         try {
             $consent = $this->consent($request);
+            $cacheablePublicPage = $this->isCacheablePublicPage($request);
 
             // 1) Anonymous ID — only if analytics OR consent disabled in admin (legacy)
-            if ($consent['analytics'] && !$request->cookie('mm_anon_id')) {
+            if ($consent['analytics'] && !$cacheablePublicPage && !$request->cookie('mm_anon_id')) {
                 $anonId = (string) Str::uuid();
                 $cookies->queue('mm_anon_id', $anonId, 60 * 24 * 395);
             }
 
             // 2) Session ID — sliding 30 min
-            if ($consent['analytics'] && !$request->cookie('mm_session_id')) {
+            if ($consent['analytics'] && !$cacheablePublicPage && !$request->cookie('mm_session_id')) {
                 $cookies->queue('mm_session_id', (string) Str::uuid(), 30);
             }
 
@@ -52,7 +54,7 @@ class MarketingTracking
             }
 
             // 4) PageView record — only when analytics consent granted
-            if ($consent['analytics'] && $this->shouldRecordPageView($request)) {
+            if ($consent['analytics'] && !$cacheablePublicPage && $this->shouldRecordPageView($request)) {
                 app(EventStore::class)->record('PageView', [
                     'value'    => null,
                     'currency' => null,
@@ -94,5 +96,29 @@ class MarketingTracking
         $accept = (string) $request->header('Accept');
         if ($accept && !str_contains($accept, 'text/html') && $accept !== '*/*') return false;
         return true;
+    }
+
+    protected function isCacheablePublicPage(Request $request): bool
+    {
+        if ((int) get_setting('perf_status', 1) !== 1) return false;
+        if ((int) get_setting('perf_page_cache_status', 0) !== 1) return false;
+        if (!$request->isMethod('GET')) return false;
+        if ($request->ajax() || $request->wantsJson()) return false;
+        if (auth()->check()) return false;
+        if ($this->hasMarketingQuery($request)) return false;
+
+        try {
+            return app(PageCacheService::class)->shouldCache($request);
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    protected function hasMarketingQuery(Request $request): bool
+    {
+        foreach ($this->utmKeys as $key) {
+            if ($request->query($key)) return true;
+        }
+        return false;
     }
 }

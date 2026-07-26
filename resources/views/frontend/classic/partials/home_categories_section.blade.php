@@ -2,6 +2,9 @@
 @php
     $home_categories = json_decode(get_setting('home_categories'));
     $categories = get_category($home_categories);
+    $cart_added = [];
+    $carts = get_user_cart();
+    if (count($carts) > 0) { $cart_added = $carts->pluck('product_id')->toArray(); }
 @endphp
 
 @foreach ($categories as $category_key => $category)
@@ -29,7 +32,7 @@
 
                 @foreach (get_cached_products($category->id) as $product_key => $product)
                 <div class="carousel-box px-2 py-2">
-                    @include('frontend.'.get_setting('homepage_select').'.partials.product_box_1', ['product' => $product])
+                    @include('frontend.'.get_setting('homepage_select').'.partials.product_box_1', ['product' => $product, 'cart_added' => $cart_added])
                 </div>
                 @endforeach
 

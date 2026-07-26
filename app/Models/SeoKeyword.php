@@ -16,7 +16,14 @@ class SeoKeyword extends Model
         'history'         => 'array',
         'cpc_usd'         => 'float',
         'difficulty'      => 'float',
+        'search_volume'   => 'integer',
+        'serp_features'   => 'array',
     ];
+
+    public function competitors()
+    {
+        return $this->hasMany(SeoKeywordCompetitor::class);
+    }
 
     public function recordRank(int $rank): void
     {
@@ -28,8 +35,10 @@ class SeoKeyword extends Model
 
         $this->rank_previous   = $this->rank_current;
         $this->rank_current    = $rank;
-        $this->rank_best       = $this->rank_best  === null ? $rank : min($this->rank_best,  $rank);
-        $this->rank_worst      = $this->rank_worst === null ? $rank : max($this->rank_worst, $rank);
+        if ($rank > 0) {
+            $this->rank_best  = $this->rank_best  === null ? $rank : min($this->rank_best,  $rank);
+            $this->rank_worst = $this->rank_worst === null ? $rank : max($this->rank_worst, $rank);
+        }
         $this->history         = $history;
         $this->last_checked_at = now();
         $this->save();

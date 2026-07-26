@@ -4,12 +4,15 @@ namespace App\Services\PerformanceOptimizer;
 
 use App\Models\PerformanceOptimizer\CacheRule;
 use App\Models\PerformanceOptimizer\OptimizationLog;
+use App\Models\Category;
 use App\Models\Currency;
+use App\Models\Product;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class PageCacheService
 {
@@ -28,9 +31,23 @@ class PageCacheService
         'checkout',
         'order-confirmed',
         // Authentication
+        'login',
+        'logout',
+        'register',
+        'registration',
+        'password',
+        'password/reset',
+        'password/email',
+        'forgot-password',
+        'reset-password',
+        'confirm-password',
+        'email/verify',
+        'email/resend',
+        'refresh-csrf',
         'users/login',
         'users/registration',
         'seller/login',
+        'seller/registration',
         'deliveryboy/login',
         'social-login',
         'account-deletion',
@@ -95,10 +112,8 @@ class PageCacheService
 
         // Hard-coded bypass — user-specific / transactional pages are never cached.
         $path = ltrim($request->path(), '/');
-        foreach (self::NEVER_CACHE_PREFIXES as $prefix) {
-            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
-                return false;
-            }
+        if ($this->isNeverCachePath($path)) {
+            return false;
         }
 
         // Admin-configured path excludes (supports prefix match + simple wildcard via fnmatch)
@@ -155,11 +170,8 @@ class PageCacheService
             $warnings[] = 'Memcached extension is missing; file cache fallback is active.';
         }
 
-        foreach (self::NEVER_CACHE_PREFIXES as $prefix) {
-            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
-                $reasons[] = "Path is protected by the never-cache list: {$prefix}.";
-                break;
-            }
+        if ($matchedNeverCache = $this->matchedNeverCachePrefix($path)) {
+            $reasons[] = "Path is protected by the never-cache list: {$matchedNeverCache}.";
         }
 
         foreach ($this->excludedPaths() as $ex) {
@@ -197,7 +209,7 @@ class PageCacheService
             'reasons' => $reasons,
             'warnings' => $warnings,
             'ttl_minutes' => $ttl,
-            'stored_copy' => $this->driver === 'litespeed' ? null : $this->has($url, $request),
+            'stored_copy' => $this->has($url, $request),
         ];
     }
 
@@ -302,7 +314,10 @@ class PageCacheService
             $locale = 'en';
         }
         try {
-            $currency = $this->defaultCurrencyCode();
+            // Rendered prices follow the VISITOR's selected currency (convert_price()
+            // reads session('currency_code')) — the cache key must too, or one
+            // visitor's currency-specific HTML gets served to everyone.
+            $currency = session('currency_code') ?: $this->defaultCurrencyCode();
         } catch (Exception $e) {
             $currency = 'USD';
         }
@@ -448,6 +463,75 @@ class PageCacheService
         if (file_exists($path)) @unlink($path);
     }
 
+    /**
+     * Remove every cached variant (installed-locale × device) of a single URL.
+     * Lets SEO/content edits invalidate just the affected page instantly, instead
+     * of waiting for the page-cache TTL to expire. O(locales × 2) unlink ops.
+     */
+    public function forgetUrl(string $url): int
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return 0;
+        }
+
+        $removed = 0;
+        foreach ($this->purgeLocales() as $locale) {
+            foreach ($this->purgeCurrencies() as $currency) {
+                foreach (['d', 'm'] as $device) {
+                    $hash = md5($url . '|' . "{$locale}_{$currency}_{$device}");
+                    $key  = 'perf_page_cache_' . $hash;
+
+                    if ($this->canUseMemoryDriver()) {
+                        try {
+                            Cache::store($this->driver)->forget($key);
+                            $this->removeMemoryIndex($key);
+                        } catch (\Throwable $e) {}
+                    }
+
+                    $path = $this->cacheDir . DIRECTORY_SEPARATOR . $hash . '.html';
+                    if (is_file($path)) {
+                        @unlink($path);
+                        $removed++;
+                    }
+                }
+            }
+        }
+
+        return $removed;
+    }
+
+    /** Currency codes pages may have been cached under (visitor-selected). */
+    protected function purgeCurrencies(): array
+    {
+        try {
+            if (Schema::hasTable('currencies')) {
+                $codes = Currency::query()->where('status', 1)->pluck('code')->filter()->unique()->values()->all();
+                if (!empty($codes)) {
+                    return $codes;
+                }
+            }
+        } catch (\Throwable $e) {}
+
+        try { return [$this->defaultCurrencyCode()]; }
+        catch (\Throwable $e) { return ['USD']; }
+    }
+
+    /** Locale codes the storefront may have cached pages under. */
+    protected function purgeLocales(): array
+    {
+        try {
+            if (Schema::hasTable('languages') && class_exists(\App\Models\Language::class)) {
+                $codes = \App\Models\Language::query()->pluck('code')->filter()->unique()->values()->all();
+                if (!empty($codes)) {
+                    return $codes;
+                }
+            }
+        } catch (\Throwable $e) {}
+
+        return [(string) config('app.locale', 'en')];
+    }
+
     public function clearAll(): int
     {
         $count = 0;
@@ -517,16 +601,17 @@ class PageCacheService
         $base       = rtrim(url('/'), '/');
         $baseHost   = (string) parse_url($base, PHP_URL_HOST);
         $sitemapUrl = $base . '/sitemap.xml';
-        $urls       = [$base];
+        $urls       = $this->defaultWarmUrls($base);
         $warmed     = 0;
         $failed     = 0;
         $attempted  = 0;
         $verifyTls  = !str_contains($base, 'localhost') && !str_contains($base, '127.0.0.1');
+        $timeout    = max(10, min(45, (int) $this->setting('perf_cache_warm_timeout_seconds', 45)));
 
         try {
             $http = $verifyTls
-                ? Http::connectTimeout(2)->timeout(6)
-                : Http::connectTimeout(2)->timeout(6)->withoutVerifying();
+                ? Http::connectTimeout(3)->timeout($timeout)
+                : Http::connectTimeout(3)->timeout($timeout)->withoutVerifying();
             $response = $http->get($sitemapUrl);
             if ($response->successful()) {
                 preg_match_all('/<loc>(.*?)<\/loc>/s', $response->body(), $matches);
@@ -542,15 +627,24 @@ class PageCacheService
             return $this->isWarmableUrl($url, $baseHost);
         }));
 
-        foreach (array_slice($urls, 0, $max) as $u) {
+        $cursorKey = 'perf_page_cache_warm_cursor_' . md5($base);
+        $cursor = (int) Cache::get($cursorKey, 0);
+        if ($cursor < 0 || $cursor >= count($urls)) {
+            $cursor = 0;
+        }
+        $batch = array_slice($urls, $cursor, $max);
+
+        foreach ($batch as $u) {
             $attempted++;
             try {
                 $http = $verifyTls
-                    ? Http::connectTimeout(2)->timeout(6)
-                    : Http::connectTimeout(2)->timeout(6)->withoutVerifying();
-                $resp = $http->get($u);
+                    ? Http::connectTimeout(3)->timeout($timeout)
+                    : Http::connectTimeout(3)->timeout($timeout)->withoutVerifying();
+                $resp = $http
+                    ->withHeaders(['User-Agent' => 'BHS-Performance-Optimizer-Warm/1.1'])
+                    ->get($u);
                 if ($resp->successful() && $this->isHtmlWarmResponse($resp)) {
-                    if ($this->driver === 'litespeed' || $this->store($u, $resp->body())) {
+                    if ($this->store($u, $resp->body())) {
                         $warmed++;
                     } else {
                         $failed++;
@@ -569,6 +663,9 @@ class PageCacheService
             }
         }
 
+        $nextCursor = count($urls) > 0 ? ($cursor + count($batch)) % count($urls) : 0;
+        Cache::put($cursorKey, $nextCursor, 86400);
+
         try {
             OptimizationLog::create([
                 'type' => 'page_cache', 'action' => 'warm', 'status' => $failed > 0 && $warmed === 0 ? 'failed' : 'success',
@@ -577,6 +674,8 @@ class PageCacheService
                     'failed' => $failed,
                     'attempted' => $attempted,
                     'total_urls' => count($urls),
+                    'cursor' => $cursor,
+                    'next_cursor' => $nextCursor,
                     'driver' => $this->driver,
                 ],
             ]);
@@ -589,7 +688,64 @@ class PageCacheService
             'failed' => $failed,
             'attempted' => $attempted,
             'total' => count($urls),
+            'cursor' => $cursor,
+            'next_cursor' => $nextCursor,
         ];
+    }
+
+    protected function defaultWarmUrls(string $base): array
+    {
+        return Cache::remember('perf_default_warm_urls', 300, function () use ($base) {
+            $urls = [$base];
+
+            try {
+                $categoryQuery = Category::query()
+                    ->select('slug')
+                    ->whereNotNull('slug')
+                    ->where('slug', '!=', '')
+                    ->orderByDesc('id')
+                    ->limit(8);
+
+                if (Schema::hasColumn('categories', 'published')) {
+                    $categoryQuery->where('published', 1);
+                }
+
+                foreach ($categoryQuery->pluck('slug') as $slug) {
+                    $urls[] = route('products.category', $slug);
+                }
+            } catch (\Throwable $e) {
+                Log::debug('[PerfOptimizer] category warm seed failed: ' . $e->getMessage());
+            }
+
+            try {
+                $productQuery = Product::query()
+                    ->select('slug')
+                    ->whereNotNull('slug')
+                    ->where('slug', '!=', '')
+                    ->orderByDesc('id')
+                    ->limit(10);
+
+                if (Schema::hasColumn('products', 'published')) {
+                    $productQuery->where('published', 1);
+                }
+                if (Schema::hasColumn('products', 'approved')) {
+                    $productQuery->where('approved', 1);
+                }
+                if (Schema::hasColumn('products', 'auction_product')) {
+                    $productQuery->where(function ($query) {
+                        $query->whereNull('auction_product')->orWhere('auction_product', 0);
+                    });
+                }
+
+                foreach ($productQuery->pluck('slug') as $slug) {
+                    $urls[] = route('product', $slug);
+                }
+            } catch (\Throwable $e) {
+                Log::debug('[PerfOptimizer] product warm seed failed: ' . $e->getMessage());
+            }
+
+            return array_values(array_unique($urls));
+        });
     }
 
     protected function isWarmableUrl(string $url, string $baseHost): bool
@@ -608,11 +764,7 @@ class PageCacheService
         }
 
         $path = ltrim((string) parse_url($url, PHP_URL_PATH), '/');
-        foreach (self::NEVER_CACHE_PREFIXES as $prefix) {
-            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
-                return false;
-            }
-        }
+        if ($this->isNeverCachePath($path)) return false;
 
         foreach ($this->excludedPaths() as $ex) {
             if ($ex !== '' && (str_starts_with($path, $ex) || fnmatch($ex, $path))) {
@@ -638,8 +790,24 @@ class PageCacheService
         return $contentType === '' || str_contains($contentType, 'text/html');
     }
 
+    public function isNeverCachePath(string $path): bool
+    {
+        return $this->matchedNeverCachePrefix($path) !== null;
+    }
+
+    protected function matchedNeverCachePrefix(string $path): ?string
+    {
+        $path = ltrim($path, '/');
+        foreach (self::NEVER_CACHE_PREFIXES as $prefix) {
+            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
+                return $prefix;
+            }
+        }
+        return null;
+    }
+
     /**
-     * List recently cached pages (file driver only, up to $limit).
+     * List recently cached file-backed pages (up to $limit).
      * Each entry: {url, size_bytes, cached_at}
      */
     public function getPagesList(int $limit = 50): array
@@ -656,7 +824,7 @@ class PageCacheService
                 return [];
             }
         }
-        if ($this->driver !== 'file') return [];
+        if (!in_array($this->driver, ['file', 'litespeed'], true)) return [];
         if (!is_dir($this->cacheDir)) return [];
 
         $files = glob($this->cacheDir . '/*.html') ?: [];

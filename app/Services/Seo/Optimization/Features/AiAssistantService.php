@@ -27,6 +27,13 @@ class AiAssistantService extends AbstractSeoService
         $provider     = $payload['provider'] ?? get_setting('seo_suite_default_provider', 'openai');
         $context      = $payload['context'] ?? 'general'; // general, on_page, off_page, technical
 
+        if (is_string($history)) {
+            $history = json_decode($history, true);
+        }
+        if (!is_array($history)) {
+            $history = [];
+        }
+
         if (empty($message)) {
             return ['error' => 'Message is required.'];
         }
@@ -41,6 +48,8 @@ class AiAssistantService extends AbstractSeoService
             'message'   => $message,
             'response'  => $response,
             'provider'  => $ai->getName(),
+            'provider_attempts' => method_exists($ai, 'getAttempts') ? $ai->getAttempts() : [],
+            'failover_used' => method_exists($ai, 'usedFallback') ? $ai->usedFallback() : false,
             'context'   => $context,
             'timestamp' => now()->toDateTimeString(),
         ];
@@ -66,10 +75,14 @@ class AiAssistantService extends AbstractSeoService
         $system = $this->buildSystemPrompt('general');
         $ai     = SeoProviderManager::make($payload['provider'] ?? null);
 
+        $response = $ai->generate($prompt, $system);
+
         return [
             'action'   => $action,
-            'response' => $ai->generate($prompt, $system),
+            'response' => $response,
             'provider' => $ai->getName(),
+            'provider_attempts' => method_exists($ai, 'getAttempts') ? $ai->getAttempts() : [],
+            'failover_used' => method_exists($ai, 'usedFallback') ? $ai->usedFallback() : false,
         ];
     }
 

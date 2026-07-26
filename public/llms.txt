@@ -1,10 +1,10 @@
 # BHS Wholesale & Distributor | Quality AC, Electrical, Plumbing, HVAC & Auto Supplies
 
-> E-commerce website
+> Canada-focused ecommerce site serving Mississauga, Brampton, Toronto, and the GTA.
 
 ## About
 
-- Website: https://www.bhssupplies.com
+- Website: http://127.0.0.1:8000
 - Type: E-commerce
 - Primary Language: English
 
@@ -22,10 +22,10 @@
 - Commercial use of scraped data is not permitted without authorization
 
 ## Restricted Areas
-- https://www.bhssupplies.com/admin (private/admin area)
-- https://www.bhssupplies.com/checkout (private/admin area)
-- https://www.bhssupplies.com/cart (private/admin area)
-- https://www.bhssupplies.com/account (private/admin area)
+- http://127.0.0.1:8000/admin (private/admin area)
+- http://127.0.0.1:8000/checkout (private/admin area)
+- http://127.0.0.1:8000/cart (private/admin area)
+- http://127.0.0.1:8000/account (private/admin area)
 
 ## Contact
 

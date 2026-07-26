@@ -58,20 +58,33 @@ class Kernel extends ConsoleKernel
             ->appendOutputTo(storage_path('logs/blog-ai-generate.log'));
 
         // SEO — daily sitemap regeneration at 02:00
-        $schedule->command('seo:generate-sitemap --smart')
-            ->dailyAt('02:00')
+        // SEO master automation - hourly pending SEO and interval-gated technical tasks.
+        $schedule->command('seo:automation-run')
+            ->hourly()
+            ->withoutOverlapping(55)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/seo-automation.log'));
+
+        $schedule->command('seo:process-ai-batches --max-batches=1')
+            ->everyFiveMinutes()
             ->withoutOverlapping(10)
             ->runInBackground()
-            ->appendOutputTo(storage_path('logs/seo-sitemap.log'));
+            ->appendOutputTo(storage_path('logs/seo-ai-batches.log'));
 
         // SEO — daily score snapshot at 02:30 (records per-entity scores)
-        $schedule->command('seo:snapshot-scores --sample=80')
-            ->dailyAt('02:30')
-            ->withoutOverlapping(15)
-            ->runInBackground()
-            ->appendOutputTo(storage_path('logs/seo-snapshot.log'));
-
         // SEO — weekly broken-link sweep, Monday 03:30
+        $schedule->command('seo:auto-optimize-pending')
+            ->dailyAt('02:45')
+            ->withoutOverlapping(30)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/seo-auto-optimize.log'));
+
+        $schedule->command('seo:auto-offpage-campaign')
+            ->dailyAt('03:10')
+            ->withoutOverlapping(30)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/seo-auto-offpage.log'));
+
         $schedule->command('seo:check-broken-links --limit=400 --per-entity=10')
             ->weeklyOn(1, '03:30')
             ->withoutOverlapping(20)
@@ -91,6 +104,20 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping(20)
             ->runInBackground()
             ->appendOutputTo(storage_path('logs/seo-ranks.log'));
+
+        // SEO — Evergreen Auto-Improver loop (05:00)
+        $schedule->command('seo:evergreen-loop')
+            ->dailyAt('05:00')
+            ->withoutOverlapping(10)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/seo-evergreen-loop.log'));
+
+        // SEO — Cannibalization Resolver (weekly on Sunday 05:30)
+        $schedule->command('seo:resolve-cannibalization')
+            ->weeklyOn(0, '05:30')
+            ->withoutOverlapping(10)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/seo-cannibalization.log'));
 
         // SEO — PageSpeed Insights audit, twice daily (06:00 + 18:00)
         $schedule->command('seo:pagespeed --strategy=mobile')

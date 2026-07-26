@@ -9,6 +9,13 @@ use App\Models\SeoKeyword;
 use App\Models\SeoMeta;
 use App\Models\SeoRun;
 use App\Models\SeoScoreHistory;
+use App\Services\Seo\Board\AiSeoBoardService;
+use App\Services\Seo\Budget\SeoBudgetGuard;
+use App\Services\Seo\Automation\SeoAutomationCoverage;
+use App\Services\Seo\Optimization\Features\PostIndexStatusService;
+use App\Services\Seo\Providers\SeoProviderReliability;
+use App\Services\Seo\Ranking\RankerManager;
+use App\Services\Seo\SearchConsole\GoogleSearchConsoleService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -45,6 +52,153 @@ class SeoMonitoringService
             'keyword_movers'=> $this->keywordMovers(),
             'broken_links'  => $this->brokenLinkSummary(),
             'score_buckets' => $this->scoreBuckets(),
+            'autopilot'     => $this->autopilotHealth(),
+            'integration_readiness' => $this->integrationReadiness(),
+            'latest_index_coverage' => $this->latestIndexCoverage(),
+        ];
+    }
+
+    protected function integrationReadiness(): array
+    {
+        try {
+            $aiProviders = collect(app(SeoProviderReliability::class)->dashboard())->where('configured', true)->count();
+        } catch (Throwable $e) {
+            $aiProviders = 0;
+        }
+
+        try {
+            $gscReady = app(GoogleSearchConsoleService::class)->isConfigured();
+        } catch (Throwable $e) {
+            $gscReady = false;
+        }
+
+        try {
+            $rankReady = RankerManager::make()->isConfigured();
+        } catch (Throwable $e) {
+            $rankReady = false;
+        }
+
+        try {
+            $indexCoverageReady = app(PostIndexStatusService::class)->isApiConfigured();
+        } catch (Throwable $e) {
+            $indexCoverageReady = false;
+        }
+
+        $competitors = preg_split('/[\r\n,]+/', (string) get_setting('seo_competitor_urls', '')) ?: [];
+        $items = [
+            ['label' => 'Master hourly automation', 'ready' => (int) get_setting('seo_master_automation_enabled', 1) === 1, 'detail' => 'Runs the interval-gated SEO orchestration chain.'],
+            ['label' => 'AI provider failover', 'ready' => $aiProviders > 0, 'detail' => $aiProviders . ' AI provider(s) configured.'],
+            ['label' => 'Google Search Console', 'ready' => $gscReady, 'detail' => 'Provides real query, landing-page, click, and impression data.'],
+            ['label' => 'Rank tracker provider', 'ready' => $rankReady, 'detail' => 'Checks Google keyword positions on schedule.'],
+            ['label' => 'Index coverage API', 'ready' => $indexCoverageReady, 'detail' => 'Requires Google Custom Search API key and CX.'],
+            ['label' => 'IndexNow resubmission', 'ready' => (int) get_setting('seo_auto_indexnow', 0) === 1 && filled(get_setting('seo_indexnow_key', config('seo.indexnow.key'))), 'detail' => 'Resubmits confirmed index gaps and refreshed crawl artifacts.'],
+            ['label' => 'Competitor gap inputs', 'ready' => count(array_filter(array_map('trim', $competitors))) > 0, 'detail' => 'Adds competitor positioning angles without copying content.'],
+            ['label' => 'Technical crawl artifacts', 'ready' => file_exists(public_path('sitemap-index.xml')) && file_exists(public_path('robots.txt')) && file_exists(public_path('llms.txt')), 'detail' => 'Sitemap index, robots.txt, and LLMs.txt are published.'],
+        ];
+        $readyCount = collect($items)->where('ready', true)->count();
+
+        return [
+            'score' => (int) round(($readyCount / max(1, count($items))) * 100),
+            'ready_count' => $readyCount,
+            'total_count' => count($items),
+            'items' => $items,
+            'automatic_controls' => app(SeoAutomationCoverage::class)->summary()['automatic_count'],
+        ];
+    }
+
+    protected function latestIndexCoverage(): ?array
+    {
+        if (!Schema::hasTable('seo_runs')) {
+            return null;
+        }
+
+        try {
+            $run = SeoRun::query()->where('feature', 'index_coverage')->latest('id')->first();
+            if (!$run) {
+                return null;
+            }
+
+            $result = $run->result_payload ?? [];
+
+            return [
+                'status' => $run->status,
+                'checked' => (int) ($result['total'] ?? 0),
+                'indexed' => (int) ($result['indexed'] ?? 0),
+                'not_indexed' => (int) ($result['not_indexed'] ?? 0),
+                'errors' => (int) ($result['errors'] ?? 0),
+                'skipped' => (bool) ($result['skipped'] ?? false),
+                'message' => $result['message'] ?? $run->error_message,
+                'indexnow_submitted' => (int) data_get($result, 'indexnow.submitted', 0),
+                'completed_at' => optional($run->completed_at ?: $run->updated_at)->format('Y-m-d H:i'),
+            ];
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+
+    protected function autopilotHealth(): array
+    {
+        $enabled = (int) get_setting('seo_auto_seo_enabled', 1) === 1;
+        $batchSize = min(AiSeoBoardService::MAX_AUTO_BATCH_TARGETS, max(1, (int) get_setting('seo_auto_seo_batch_size', 10)));
+        $breakdown = [];
+        $pendingTotal = 0;
+        $activeBatch = null;
+        $activeBatches = collect();
+        $recentFailureCount = 0;
+
+        try {
+            if (Schema::hasTable('seo_meta')) {
+                $breakdown = app(AiSeoBoardService::class)->pendingBreakdownByType(['page', 'category', 'product']);
+                $pendingTotal = collect($breakdown)->sum('pending');
+            }
+            if (Schema::hasTable('seo_fix_batches')) {
+                $activeBatches = SeoFixBatch::query()
+                    ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
+                    ->orderBy('id')
+                    ->get();
+                $activeBatch = $activeBatches->first();
+                $recentFailureCount = SeoFixBatch::query()
+                    ->where('created_at', '>=', now()->subDays(7))
+                    ->whereIn('status', [SeoFixBatch::STATUS_FAILED, SeoFixBatch::STATUS_CANCELLED])
+                    ->count();
+            }
+        } catch (Throwable $e) {
+            $breakdown = [];
+        }
+
+        $budget = app(SeoBudgetGuard::class);
+        $cap = $budget->dailyCapUsd();
+        $spent = round($budget->spendToday(), 4);
+        $activeBacklog = $activeBatches->sum(fn(SeoFixBatch $batch) => $batch->remainingCount());
+        $stalledBatchCount = $activeBatches->filter(fn(SeoFixBatch $batch) => $batch->isStalled())->count();
+        $queueDrainMinutes = $activeBacklog > 0 ? (int) ceil($activeBacklog / $batchSize) * 5 : 0;
+        $freshQueueHours = $batchSize > 0 ? (int) ceil(max(0, $pendingTotal - $activeBacklog) / $batchSize) : null;
+        $queueDrainHours = (int) ceil($queueDrainMinutes / 60);
+
+        return [
+            'enabled' => $enabled,
+            'batch_size' => $batchSize,
+            'pending_total' => $pendingTotal,
+            'days_to_completion' => !is_null($freshQueueHours) ? (int) ceil(max($queueDrainHours, $freshQueueHours) / 24) : null,
+            'active_batch_count' => $activeBatches->count(),
+            'active_backlog_urls' => $activeBacklog,
+            'stalled_batch_count' => $stalledBatchCount,
+            'queue_drain_minutes' => $queueDrainMinutes,
+            'active_batch' => $activeBatch ? [
+                'id' => $activeBatch->id,
+                'status' => $activeBatch->status,
+                'percent' => $activeBatch->progressPercent(),
+                'processed' => $activeBatch->processed,
+                'total' => $activeBatch->total,
+                'remaining' => $activeBatch->remainingCount(),
+                'stalled' => $activeBatch->isStalled(),
+                'heartbeat' => optional($activeBatch->updated_at)->diffForHumans(),
+            ] : null,
+            'recent_failure_count' => $recentFailureCount,
+            'budget_cap' => $cap,
+            'spent_today' => $spent,
+            'remaining_today' => $cap > 0 ? round($budget->remainingUsd(), 4) : null,
+            'breakdown' => $breakdown,
         ];
     }
 
@@ -184,7 +338,7 @@ class SeoMonitoringService
         return SeoFixBatch::query()
             ->orderByDesc('id')
             ->limit($limit)
-            ->get(['id', 'label', 'status', 'total', 'succeeded', 'failed', 'skipped', 'actual_cost_usd', 'created_at', 'completed_at'])
+            ->get(['id', 'label', 'status', 'total', 'succeeded', 'failed', 'skipped', 'actual_cost_usd', 'error_log', 'created_at', 'completed_at'])
             ->map(fn($b) => [
                 'id'           => $b->id,
                 'label'        => $b->label,
@@ -194,6 +348,7 @@ class SeoMonitoringService
                 'failed'       => $b->failed,
                 'skipped'      => $b->skipped,
                 'cost_usd'     => round((float) $b->actual_cost_usd, 4),
+                'latest_error' => collect($b->error_log ?? [])->last()['msg'] ?? null,
                 'started_at'   => optional($b->created_at)->format('Y-m-d H:i'),
                 'completed_at' => optional($b->completed_at)->format('Y-m-d H:i'),
             ])

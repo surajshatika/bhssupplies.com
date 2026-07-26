@@ -9,11 +9,15 @@ use App\Models\Page;
 use App\Models\Product;
 use App\Models\SeoFixBatch;
 use App\Models\SeoMeta;
+use App\Models\SeoProject;
+use App\Models\SeoScoreHistory;
 use App\Services\Seo\OnPage\Features\TruSeoAnalysisService;
 use App\Services\Seo\Providers\SeoProviderManager;
+use App\Services\Seo\Providers\SeoProviderReliability;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -31,9 +35,18 @@ use Throwable;
 class AiSeoBoardService
 {
     public const SUPPORTED_TYPES = ['product', 'category', 'page', 'blog'];
+    public const SEO_DONE_SCORE = 80;
+    public const AUTOPILOT_TYPES = ['page', 'category', 'product', 'blog'];
+    public const MAX_AUTOPILOT_ATTEMPTS = 5;
+    public const MAX_MANUAL_BATCH_TARGETS = 10;
+    public const MAX_AUTO_BATCH_TARGETS = 100;
 
     /** @var array<string,array{class:string,label:string,url:string,name:string,description:?string,image:?string}> */
     protected array $typeMap;
+
+    protected array $tableExistsCache = [];
+
+    protected array $tableColumnCache = [];
 
     public function __construct(protected ?TruSeoAnalysisService $analyzer = null)
     {
@@ -59,6 +72,8 @@ class AiSeoBoardService
             'critical'    => 0,
             'warning'     => 0,
             'good'        => 0,
+            'done'        => 0,
+            'pending'     => 0,
         ];
 
         if (!Schema::hasTable('seo_meta')) {
@@ -66,6 +81,10 @@ class AiSeoBoardService
         }
 
         foreach (array_keys($this->typeMap) as $type) {
+            if (!$this->entityTableExists($type)) {
+                continue;
+            }
+
             $stats['total'] += $this->baseQuery($type)->count();
         }
 
@@ -79,8 +98,779 @@ class AiSeoBoardService
         $stats['critical']    = (clone $metaQuery)->where('seo_score', '<', 50)->count();
         $stats['warning']     = (clone $metaQuery)->whereBetween('seo_score', [50, 79])->count();
         $stats['good']        = (clone $metaQuery)->where('seo_score', '>=', 80)->count();
+        $stats['done']        = $this->countSeoDoneUrls();
+        $stats['pending']     = $this->countSeoPendingUrls();
 
         return $stats;
+    }
+
+    public function dashboardUrlInventory(int $doneLimit = 10, int $pendingLimit = 12): array
+    {
+        $done = collect();
+        $pending = collect();
+
+        if (!Schema::hasTable('seo_meta')) {
+            return [
+                'done' => collect(),
+                'pending' => collect(),
+                'done_count' => 0,
+                'pending_count' => 0,
+                'total_count' => 0,
+            ];
+        }
+
+        foreach (array_keys($this->typeMap) as $type) {
+            $query = $this->baseQuery($type)->latest('updated_at')->limit(max($doneLimit, $pendingLimit) * 2);
+            foreach ($query->get() as $entity) {
+                $row = $this->buildRow($entity, $type);
+                if ($this->isSeoDoneRow($row)) {
+                    $done->push($row);
+                } else {
+                    $pending->push($row);
+                }
+            }
+        }
+
+        return [
+            'done' => $done->sortByDesc('score')->take($doneLimit)->values(),
+            'pending' => $pending->sortBy('score')->take($pendingLimit)->values(),
+            'done_count' => $this->countSeoDoneUrls(),
+            'pending_count' => $this->countSeoPendingUrls(),
+            'total_count' => collect(array_keys($this->typeMap))->sum(fn($type) => $this->baseQuery($type)->count()),
+        ];
+    }
+
+    public function collectPendingTargetsAcrossTypes(int $limit = 10, array $types = self::AUTOPILOT_TYPES): array
+    {
+        $limit = max(1, min(self::MAX_AUTO_BATCH_TARGETS, $limit));
+
+        return $this->nextAutopilotTargetPreview($limit, $types)
+            ->map(fn(array $row) => ['type' => $row['type'], 'id' => (int) $row['id']])
+            ->values()
+            ->all();
+    }
+
+    protected function isSeoDoneRow(array $row): bool
+    {
+        return !empty($row['has_meta'])
+            && !empty($row['has_focus_kw'])
+            && !empty($row['has_schema'])
+            && (int) ($row['score'] ?? 0) >= self::SEO_DONE_SCORE;
+    }
+
+    /**
+     * Returns true when the keyword list was updated AFTER this entity was last
+     * analyzed, meaning its content/schema may not include the new keywords yet.
+     */
+    protected function needsKeywordRefresh(Model $entity): bool
+    {
+        $kwUpdatedAt = get_setting('seo_keywords_updated_at');
+        if (!$kwUpdatedAt) {
+            return false;
+        }
+        try {
+            $kwTs = \Carbon\Carbon::parse($kwUpdatedAt);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        $lastAnalyzed = SeoMeta::where('model_type', get_class($entity))
+            ->where('model_id', $entity->getKey())
+            ->value('last_analyzed_at');
+
+        if (!$lastAnalyzed) {
+            return true;
+        }
+
+        return \Carbon\Carbon::parse($lastAnalyzed)->lt($kwTs);
+    }
+
+    public function pendingBreakdownByType(array $types = self::AUTOPILOT_TYPES): array
+    {
+        $rows = [];
+
+        foreach ($types as $type) {
+            if (!isset($this->typeMap[$type])) {
+                continue;
+            }
+
+            $class = $this->typeMap[$type]['class'];
+            $total = $this->baseQuery($type)->count();
+            $done = Schema::hasTable('seo_meta')
+                ? SeoMeta::query()
+                    ->where('model_type', $class)
+                    ->whereNotNull('meta_title')
+                    ->whereNotNull('meta_description')
+                    ->whereNotNull('focus_keyword')
+                    ->whereNotNull('schema_json')
+                    ->where('seo_score', '>=', self::SEO_DONE_SCORE)
+                    ->count()
+                : 0;
+
+            $missingMetaQuery = $this->baseQuery($type);
+            if (Schema::hasTable('seo_meta')) {
+                $this->applyMissingFilter($missingMetaQuery, $class, 'meta');
+            }
+
+            $rows[$type] = [
+                'label' => $this->typeMap[$type]['label'],
+                'total' => $total,
+                'done' => $done,
+                'pending' => max(0, $total - $done),
+                'missing_meta' => Schema::hasTable('seo_meta') ? $missingMetaQuery->count() : $total,
+                'completion' => $total > 0 ? (int) round(($done / $total) * 100) : 0,
+            ];
+        }
+
+        return $rows;
+    }
+
+    public function nextAutopilotTargetPreview(int $limit = 10, array $types = self::AUTOPILOT_TYPES): Collection
+    {
+        $limit = max(1, min(self::MAX_AUTO_BATCH_TARGETS, $limit));
+        $attempts = $this->recentBatchTargetAttempts();
+
+        $retryRows = $this->pendingRowsFromPreviousBatches($limit * 3, $types, $attempts);
+        $freshRows = $this->pendingAutopilotRows($limit * 3, $types);
+
+        // In-progress batches resume in their original order first so a running
+        // chunk always finishes before new work is started.
+        [$activeRows, $retryRest] = $retryRows->partition(
+            fn(array $row) => ($row['queue_source'] ?? '') === 'active_resume'
+        );
+
+        $worstFirst = fn(array $a, array $b): int =>
+            ((int) ($a['score'] ?? 0) <=> (int) ($b['score'] ?? 0))
+            ?: ((int) ($b['priority_score'] ?? 0) <=> (int) ($a['priority_score'] ?? 0));
+
+        // Everything else (previous retries + fresh candidates): worst SEO score
+        // first (0 / unscored lead), then by gap-priority. Attempt-capped URLs are
+        // held back so the autopilot stops looping on the same stuck pages.
+        $pool = $retryRest
+            ->concat($freshRows)
+            ->reject(fn(array $row) => (int) ($attempts[$this->targetKey($row)] ?? 0) >= self::MAX_AUTOPILOT_ATTEMPTS)
+            ->unique(fn(array $row) => $this->targetKey($row))
+            ->sort($worstFirst)
+            ->values();
+
+        $selected = $activeRows
+            ->concat($pool)
+            ->unique(fn(array $row) => $this->targetKey($row))
+            ->take($limit)
+            ->values();
+
+        if ($selected->isNotEmpty()) {
+            return $selected;
+        }
+
+        // Everything is attempt-capped — retry the worst-scoring capped URLs.
+        return $retryRows
+            ->concat($freshRows)
+            ->unique(fn(array $row) => $this->targetKey($row))
+            ->sort($worstFirst)
+            ->take($limit)
+            ->map(function (array $row): array {
+                $row['queue_source'] = 'attempt_cap_retry';
+                $row['priority_reasons'] = array_values(array_unique(array_merge(
+                    $row['priority_reasons'] ?? [],
+                    ['Retry after attempt cap']
+                )));
+
+                return $row;
+            })
+            ->values();
+    }
+
+    protected function pendingRowsFromPreviousBatches(int $limit, array $types, array $attempts): Collection
+    {
+        if (!Schema::hasTable('seo_fix_batches')) {
+            return collect();
+        }
+
+        $allowedTypes = array_flip($this->orderedAutopilotTypes($types));
+        $candidateTargets = collect();
+        $rows = collect();
+        $seen = [];
+
+        $batches = SeoFixBatch::query()
+            ->whereIn('status', [
+                SeoFixBatch::STATUS_QUEUED,
+                SeoFixBatch::STATUS_RUNNING,
+                SeoFixBatch::STATUS_COMPLETED,
+                SeoFixBatch::STATUS_FAILED,
+            ])
+            ->latest()
+            ->limit(30)
+            ->get()
+            ->sortBy(function (SeoFixBatch $batch): string {
+                $active = in_array($batch->status, [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING], true);
+
+                return $active
+                    ? '0-' . str_pad((string) $batch->id, 9, '0', STR_PAD_LEFT)
+                    : '1-' . str_pad((string) (999999999 - (int) $batch->id), 9, '0', STR_PAD_LEFT);
+            });
+
+        foreach ($batches as $batch) {
+            $active = in_array($batch->status, [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING], true);
+            $targets = $batch->target_ids ?? [];
+            $offset = $active ? (int) $batch->processed : 0;
+
+            foreach (array_slice($targets, $offset) as $target) {
+                $type = (string) ($target['type'] ?? '');
+                $id = (int) ($target['id'] ?? 0);
+                $key = $type . ':' . $id;
+
+                if (!$type || !$id || !isset($allowedTypes[$type]) || isset($seen[$key])) {
+                    continue;
+                }
+                if (!$active && (int) ($attempts[$key] ?? 0) >= self::MAX_AUTOPILOT_ATTEMPTS) {
+                    continue;
+                }
+
+                $seen[$key] = true;
+                $candidateTargets->push([
+                    'type' => $type,
+                    'id' => $id,
+                    'key' => $key,
+                    'active' => $active,
+                    'batch_id' => (int) $batch->id,
+                ]);
+
+                if ($candidateTargets->count() >= $limit * 8) {
+                    break 2;
+                }
+            }
+        }
+
+        $entitiesByType = [];
+        $metaByType = [];
+        foreach ($candidateTargets->groupBy('type') as $type => $targetsForType) {
+            if (!$this->entityTableExists($type)) {
+                continue;
+            }
+
+            $class = $this->typeMap[$type]['class'];
+            $ids = $targetsForType->pluck('id')->unique()->values()->all();
+            $table = $this->baseQuery($type)->getModel()->getTable();
+            $entities = $this->queueCandidateQuery($type)
+                ->whereIn($table . '.id', $ids)
+                ->get()
+                ->keyBy(fn(Model $entity) => (int) $entity->getKey());
+
+            $entitiesByType[$type] = $entities;
+            $metaByType[$type] = $this->metaMapForEntities($entities->values(), $class);
+        }
+
+        foreach ($candidateTargets as $target) {
+            $type = $target['type'];
+            $id = (int) $target['id'];
+            $key = $target['key'];
+            $active = (bool) $target['active'];
+            $entity = ($entitiesByType[$type] ?? collect())->get($id);
+            if (!$entity) {
+                continue;
+            }
+
+            $row = $this->buildFastAutopilotBaseRow($entity, $type, ($metaByType[$type] ?? collect())->get($id));
+            if ($this->isSeoDoneRow($row)) {
+                continue;
+            }
+
+            $row = $this->buildAutopilotPreviewRow($row);
+            $row['queue_source'] = $active ? 'active_resume' : 'previous_retry';
+            $row['retry_from_batch'] = (int) $target['batch_id'];
+            $row['attempt'] = (int) ($attempts[$key] ?? 0) + ($active ? 0 : 1);
+            $rows->put($key, $row);
+
+            if ($rows->count() >= $limit) {
+                return $rows->values();
+            }
+        }
+
+        return $rows->values();
+    }
+
+    protected function recentBatchTargetAttempts(): array
+    {
+        if (!Schema::hasTable('seo_fix_batches')) {
+            return [];
+        }
+
+        $attempts = [];
+        $batches = SeoFixBatch::query()
+            ->whereIn('status', [
+                SeoFixBatch::STATUS_QUEUED,
+                SeoFixBatch::STATUS_RUNNING,
+                SeoFixBatch::STATUS_COMPLETED,
+                SeoFixBatch::STATUS_FAILED,
+            ])
+            ->latest()
+            ->limit(100)
+            ->get();
+
+        foreach ($batches as $batch) {
+            foreach ($this->attemptedTargetsForBatch($batch) as $target) {
+                $key = $this->targetKey($target);
+                if ($key === ':0') {
+                    continue;
+                }
+                $attempts[$key] = (int) ($attempts[$key] ?? 0) + 1;
+            }
+        }
+
+        return $attempts;
+    }
+
+    protected function attemptedTargetsForBatch(SeoFixBatch $batch): array
+    {
+        $targets = array_values($batch->target_ids ?? []);
+        $processed = min(max(0, (int) $batch->processed), count($targets));
+
+        return array_slice($targets, 0, $processed);
+    }
+
+    protected function targetKey(array $target): string
+    {
+        return (string) ($target['type'] ?? '') . ':' . (int) ($target['id'] ?? 0);
+    }
+
+    protected function pendingAutopilotRows(int $limit, array $types): Collection
+    {
+        $preview = collect();
+        $candidateLimit = max($limit, min(120, $limit * 3));
+
+        foreach ($this->orderedAutopilotTypes($types) as $type) {
+            if (!isset($this->typeMap[$type])) {
+                continue;
+            }
+            if (!$this->entityTableExists($type)) {
+                continue;
+            }
+
+            $class = $this->typeMap[$type]['class'];
+            $entities = collect();
+
+            if (Schema::hasTable('seo_meta')) {
+                foreach (['meta', 'focus', 'schema'] as $missing) {
+                    $query = $this->queueCandidateQuery($type);
+                    $this->applyMissingFilter($query, $class, $missing);
+                    $entities = $entities->merge($query->latest('updated_at')->limit($candidateLimit)->get());
+
+                    if ($entities->unique(fn($entity) => $type . ':' . $entity->getKey())->count() >= $candidateLimit) {
+                        break;
+                    }
+                }
+            }
+
+            // Surface the genuinely worst-scoring entities (lowest seo_score, with
+            // unscored NULL rows first) so 0/low-score URLs are prioritised. The
+            // recency-based fallback below never reaches them on its own.
+            $worstIds = $this->lowestScoredEntityIds($class, $candidateLimit);
+            if (!empty($worstIds)) {
+                $entities = $entities->merge(
+                    $this->queueCandidateQuery($type)->whereIn('id', $worstIds)->get()
+                );
+            }
+
+            if ($entities->unique(fn($entity) => $type . ':' . $entity->getKey())->count() < $candidateLimit) {
+                $entities = $entities->merge(
+                    $this->queueCandidateQuery($type)->latest('updated_at')->limit($candidateLimit)->get()
+                );
+            }
+
+            $entities = $entities->unique(fn($entity) => $type . ':' . $entity->getKey())->values();
+            $metaById = $this->metaMapForEntities($entities, $class);
+
+            foreach ($entities as $entity) {
+                $row = $this->buildFastAutopilotBaseRow($entity, $type, $metaById->get((int) $entity->getKey()));
+                if ($this->isSeoDoneRow($row)) {
+                    continue;
+                }
+
+                $preview->push($this->buildAutopilotPreviewRow($row));
+            }
+        }
+
+        return $preview
+            ->sort(function (array $left, array $right): int {
+                // Worst SEO first: lowest seo_score (0 / unscored) leads, then by
+                // priority gaps (missing meta/focus/schema), then type importance.
+                $byScore = (int) ($left['score'] ?? 0) <=> (int) ($right['score'] ?? 0);
+                if ($byScore !== 0) {
+                    return $byScore;
+                }
+                $byPriority = (int) ($right['priority_score'] ?? 0) <=> (int) ($left['priority_score'] ?? 0);
+                if ($byPriority !== 0) {
+                    return $byPriority;
+                }
+                $typePriority = array_flip(self::AUTOPILOT_TYPES);
+                return ($typePriority[$left['type'] ?? ''] ?? PHP_INT_MAX) <=> ($typePriority[$right['type'] ?? ''] ?? PHP_INT_MAX);
+            })
+            ->values();
+    }
+
+    /**
+     * IDs of the worst-scoring entities of a type (lowest seo_score, with unscored
+     * NULL rows treated as the very worst). Drives "fix the 0/low-score URLs first".
+     */
+    protected function lowestScoredEntityIds(string $class, int $limit): array
+    {
+        if (!Schema::hasTable('seo_meta')) {
+            return [];
+        }
+
+        $kwUpdatedAt = get_setting('seo_keywords_updated_at');
+
+        return SeoMeta::query()
+            ->where('model_type', $class)
+            ->where('lang', config('app.locale', 'en'))
+            ->where(function ($q) use ($kwUpdatedAt) {
+                // Standard: unscored or below the done threshold.
+                $q->whereNull('seo_score')
+                  ->orWhere('seo_score', '<', self::SEO_DONE_SCORE);
+                // Also include done entities whose last analysis predates the
+                // most-recent keyword update — they need new keywords woven in.
+                if ($kwUpdatedAt) {
+                    $q->orWhere(function ($sub) use ($kwUpdatedAt) {
+                        $sub->where('seo_score', '>=', self::SEO_DONE_SCORE)
+                            ->where(function ($inner) use ($kwUpdatedAt) {
+                                $inner->whereNull('last_analyzed_at')
+                                      ->orWhere('last_analyzed_at', '<', $kwUpdatedAt);
+                            });
+                    });
+                }
+            })
+            ->orderByRaw('CASE WHEN seo_score IS NULL THEN 0 ELSE 1 END')
+            ->orderBy('seo_score')
+            ->limit($limit)
+            ->pluck('model_id')
+            ->map(fn($id) => (int) $id)
+            ->all();
+    }
+
+    protected function orderedAutopilotTypes(array $types): array
+    {
+        $typePriority = array_flip(self::AUTOPILOT_TYPES);
+
+        return collect($types)
+            ->unique()
+            ->sortBy(fn(string $type) => $typePriority[$type] ?? PHP_INT_MAX)
+            ->values()
+            ->all();
+    }
+
+    protected function buildAutopilotPreviewRow(array $row): array
+    {
+        $priorityScore = $this->autopilotPriorityScore($row);
+        $row['priority_score'] = $priorityScore;
+        $row['priority_label'] = $priorityScore >= 90 ? 'Critical' : ($priorityScore >= 70 ? 'High' : ($priorityScore >= 45 ? 'Medium' : 'Low'));
+        $row['priority_reasons'] = $this->autopilotPriorityReasons($row);
+
+        return $row;
+    }
+
+    protected function metaMapForEntities(Collection $entities, string $class): Collection
+    {
+        if (!Schema::hasTable('seo_meta') || $entities->isEmpty()) {
+            return collect();
+        }
+
+        $ids = $entities
+            ->map(fn(Model $entity) => (int) $entity->getKey())
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return collect();
+        }
+
+        return SeoMeta::query()
+            ->where('model_type', $class)
+            ->where('lang', config('app.locale', 'en'))
+            ->whereIn('model_id', $ids->all())
+            ->get()
+            ->keyBy(fn(SeoMeta $meta) => (int) $meta->model_id);
+    }
+
+    protected function queueCandidateQuery(string $type): Builder
+    {
+        $query = $this->baseQuery($type);
+        $query->setEagerLoads([]);
+
+        $table = $query->getModel()->getTable();
+        $nameColumn = in_array($type, ['page', 'blog'], true) ? 'title' : 'name';
+        $availableColumns = array_flip($this->tableColumns($table));
+
+        $columns = collect([
+            'id',
+            $nameColumn,
+            'slug',
+            'updated_at',
+            'meta_title',
+            'meta_description',
+            'meta_img',
+            'meta_image',
+            'thumbnail_img',
+            'banner',
+        ])
+            ->unique()
+            ->filter(fn(string $column) => isset($availableColumns[$column]))
+            ->map(fn(string $column) => $table . '.' . $column)
+            ->values()
+            ->all();
+
+        return $columns ? $query->select($columns) : $query;
+    }
+
+    protected function tableColumns(string $table): array
+    {
+        if (!array_key_exists($table, $this->tableColumnCache)) {
+            $this->tableColumnCache[$table] = Schema::hasTable($table)
+                ? Schema::getColumnListing($table)
+                : [];
+        }
+
+        return $this->tableColumnCache[$table];
+    }
+
+    protected function buildFastAutopilotBaseRow(Model $entity, string $type, ?SeoMeta $meta = null): array
+    {
+        $class = $this->typeMap[$type]['class'];
+
+        if (!$meta && Schema::hasTable('seo_meta')) {
+            $meta = SeoMeta::query()
+                ->where('model_type', $class)
+                ->where('model_id', $entity->getKey())
+                ->where('lang', config('app.locale', 'en'))
+                ->first();
+        }
+
+        $inline = [
+            'meta_title'       => $entity->meta_title ?? null,
+            'meta_description' => $entity->meta_description ?? null,
+            'focus_keyword'    => null,
+            'og_image'         => $this->resolveImageColumn($entity),
+            'twitter_image'    => $this->resolveImageColumn($entity),
+            'schema_json'      => null,
+            'seo_score'        => null,
+        ];
+
+        $arr = $meta ? $meta->toArray() : [];
+        foreach ($inline as $key => $value) {
+            if (empty($arr[$key]) && !empty($value)) {
+                $arr[$key] = $value;
+            }
+        }
+
+        $score = isset($arr['seo_score']) ? (int) $arr['seo_score'] : 0;
+
+        return [
+            'type'              => $type,
+            'type_label'        => $this->typeMap[$type]['label'],
+            'id'                => $entity->getKey(),
+            'title'             => $this->displayName($entity, $type),
+            'url'               => $this->urlFor($entity, $type),
+            'slug'              => $entity->slug ?? null,
+            'updated_at'        => optional($entity->updated_at)->format('Y-m-d H:i') ?? '-',
+            'meta_title'        => $arr['meta_title'] ?? null,
+            'meta_description'  => $arr['meta_description'] ?? null,
+            'focus_keyword'     => $arr['focus_keyword'] ?? null,
+            'og_image'          => $arr['og_image'] ?? null,
+            'schema_present'    => !empty($arr['schema_json']),
+            'score'             => $score,
+            'grade'             => $this->grade($score),
+            'issues'            => [],
+            'has_meta'          => !empty($arr['meta_title']) && !empty($arr['meta_description']),
+            'has_og'            => !empty($arr['og_image']),
+            'has_schema'        => !empty($arr['schema_json']),
+            'has_focus_kw'      => !empty($arr['focus_keyword']),
+        ];
+    }
+
+    protected function autopilotPriorityReasons(array $row): array
+    {
+        $reasons = [];
+
+        if (!$row['has_meta']) {
+            $reasons[] = 'Missing meta';
+        }
+        if (!$row['has_focus_kw']) {
+            $reasons[] = 'Missing focus keyword';
+        }
+        if (!$row['has_schema']) {
+            $reasons[] = 'Missing schema';
+        }
+
+        $score = (int) ($row['score'] ?? 0);
+        if ($score < 50) {
+            $reasons[] = 'Critical score';
+        } elseif ($score < 70) {
+            $reasons[] = 'Weak score';
+        }
+
+        $type = $row['type'] ?? '';
+        if ($type === 'product') {
+            $reasons[] = 'Revenue page';
+        } elseif ($type === 'category') {
+            $reasons[] = 'Category expansion';
+        } elseif ($type === 'page') {
+            $reasons[] = 'Trust page';
+        }
+
+        $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
+        if (Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
+            $reasons[] = 'Primary city intent';
+        } else {
+            $reasons[] = 'Needs Canada/GTA terms';
+        }
+
+        return array_slice(array_values(array_unique($reasons ?: ['Needs review'])), 0, 5);
+    }
+
+    public function offPageCampaignTargetPreview(int $limit = 10, array $types = self::AUTOPILOT_TYPES): Collection
+    {
+        $preview = collect();
+        $limit = max(1, min(20, $limit));
+
+        if (!Schema::hasTable('seo_meta')) {
+            return $preview;
+        }
+
+        foreach ($types as $type) {
+            if (!isset($this->typeMap[$type])) {
+                continue;
+            }
+
+            $entities = $this->baseQuery($type)->latest('updated_at')->limit($limit * 6)->get();
+            foreach ($entities as $entity) {
+                $row = $this->buildRow($entity, $type);
+                if (!$this->isSeoDoneRow($row)) {
+                    continue;
+                }
+
+                $offPageScore = $this->offPagePriorityScore($row);
+                $row['offpage_score'] = $offPageScore;
+                $row['offpage_label'] = $offPageScore >= 90
+                    ? 'Tier 1'
+                    : ($offPageScore >= 75 ? 'Strong' : ($offPageScore >= 60 ? 'Ready' : 'Reserve'));
+                $row['offpage_reasons'] = $this->offPagePriorityReasons($row);
+                $preview->push($row);
+            }
+        }
+
+        return $preview
+            ->sortByDesc('offpage_score')
+            ->take($limit)
+            ->values();
+    }
+
+    protected function autopilotPriorityScore(array $row): int
+    {
+        $score = 0;
+        if (!$row['has_meta']) {
+            $score += 35;
+        }
+        if (!$row['has_focus_kw']) {
+            $score += 20;
+        }
+        if (!$row['has_schema']) {
+            $score += 20;
+        }
+        $seoScore = (int) ($row['score'] ?? 0);
+        if ($seoScore < 40) {
+            $score += 30;
+        } elseif ($seoScore < 70) {
+            $score += 18;
+        } elseif ($seoScore < 80) {
+            $score += 8;
+        }
+
+        $typeBoost = ['page' => 12, 'category' => 8, 'product' => 4, 'blog' => 2];
+        $score += $typeBoost[$row['type'] ?? ''] ?? 0;
+
+        $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
+        if (!Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
+            $score += 10;
+        }
+        if (!Str::contains($haystack, ['canada', 'gta', 'ontario'])) {
+            $score += 6;
+        }
+        if (($row['type'] ?? '') === 'category' && !Str::contains($haystack, ['supplier', 'supplies', 'wholesale', 'trade'])) {
+            $score += 6;
+        }
+        if (($row['type'] ?? '') === 'product' && !Str::contains($haystack, ['buy', 'shop', 'canada'])) {
+            $score += 4;
+        }
+
+        return min(100, $score);
+    }
+
+    protected function offPagePriorityScore(array $row): int
+    {
+        $score = (int) floor(min(100, max(0, (int) ($row['score'] ?? 0))) / 2);
+
+        $typeBoost = ['category' => 12, 'page' => 10, 'product' => 8, 'blog' => 4];
+        $score += $typeBoost[$row['type'] ?? ''] ?? 0;
+
+        if (!empty($row['has_schema'])) {
+            $score += 10;
+        }
+        if (!empty($row['has_focus_kw'])) {
+            $score += 8;
+        }
+        if (!empty($row['has_meta'])) {
+            $score += 6;
+        }
+
+        $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
+        if (Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
+            $score += 10;
+        }
+        if (Str::contains($haystack, ['trade account', 'leave a review', 'review'])) {
+            $score += 8;
+        }
+
+        $seoScore = (int) ($row['score'] ?? 0);
+        if ($seoScore >= 85) {
+            $score += 8;
+        } elseif ($seoScore >= 75) {
+            $score += 5;
+        }
+
+        return min(100, $score);
+    }
+
+    protected function offPagePriorityReasons(array $row): array
+    {
+        $reasons = ['SEO protected'];
+        $type = $row['type'] ?? '';
+
+        if ($type === 'category') {
+            $reasons[] = 'Category authority';
+        } elseif ($type === 'product') {
+            $reasons[] = 'Money page';
+        } elseif ($type === 'page') {
+            $reasons[] = 'Trust asset';
+        }
+
+        if (!empty($row['has_schema'])) {
+            $reasons[] = 'Schema ready';
+        }
+        if (!empty($row['has_focus_kw'])) {
+            $reasons[] = 'Keyword ready';
+        }
+
+        $haystack = Str::lower(($row['title'] ?? '') . ' ' . ($row['url'] ?? '') . ' ' . ($row['focus_keyword'] ?? ''));
+        if (Str::contains($haystack, ['mississauga', 'brampton', 'toronto'])) {
+            $reasons[] = 'Primary city intent';
+        }
+
+        if (trim((string) get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', ''))) !== '') {
+            $reasons[] = 'Competitor gap campaign';
+        }
+
+        return array_slice(array_values(array_unique($reasons)), 0, 5);
     }
 
     /**
@@ -166,7 +956,8 @@ class AiSeoBoardService
             $meta['meta_title']    ?? '',
             $meta['meta_description'] ?? '',
             $this->plainContent($entity, $type),
-            $this->urlFor($entity, $type)
+            $this->urlFor($entity, $type),
+            $this->buildScoreContext($entity, $type, $meta)
         );
 
         $totalWeight = array_sum(array_column($checks, 'weight'));
@@ -189,13 +980,264 @@ class AiSeoBoardService
     }
 
     /**
-     * Apply an AI-generated fix to a single entity. Writes ONLY missing
-     * fields (meta_title, meta_description, og_image, focus_keyword,
-     * schema_json) so existing curated SEO content is never overwritten.
+     * Apply an AI-generated fix to a single pending entity. SEO-done rows are
+     * protected, while weak pending rows can have bad meta/content repaired.
      *
-     * @return array{applied: array<string,string>, score_before:int, score_after:int, source: 'ai'|'template'}
+     * @return array{applied: array<string,string>, score_before:int, score_after:int, source:string}
      */
     public function applyAiFix(string $type, int $id, ?string $providerName = null): array
+    {
+        $this->assertType($type);
+        $class  = $this->typeMap[$type]['class'];
+        $entity = $class::find($id);
+        if (!$entity) {
+            throw new \RuntimeException("Entity {$type}#{$id} not found.");
+        }
+
+        $currentRow = $this->buildRow($entity, $type);
+        if ($this->isSeoDoneRow($currentRow)) {
+            // Allow re-processing when keywords were updated after this entity
+            // was last analyzed — so new keywords get woven into its content.
+            if (!$this->needsKeywordRefresh($entity)) {
+                // Sync DB score when stale (e.g., entity was improved outside the
+                // autopilot and the seo_meta.seo_score column was never updated).
+                $computedScore = (int) ($currentRow['score'] ?? 0);
+                $meta = $this->loadOrSynthesizeMeta($entity, $type);
+                $storedScore = (int) ($meta['seo_score'] ?? 0);
+
+                // Even for "done" entities, fill in any missing required fields so
+                // pendingBreakdownByType counts them as truly done (all 4 fields + score ≥ 80).
+                $dbMeta = \App\Models\SeoMeta::where('model_type', $this->typeMap[$type]['class'])
+                    ->where('model_id', $entity->getKey())
+                    ->where('lang', config('app.locale', 'en'))
+                    ->first();
+                $fillPatch = [];
+                if ($dbMeta && empty($dbMeta->meta_description)) {
+                    $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($this->displayName($entity, $type), $type)));
+                    $fillPatch['meta_description'] = $this->bestDescriptionForFocus(null, $focus, $this->displayName($entity, $type), $type);
+                }
+                if ($dbMeta && empty($dbMeta->meta_title)) {
+                    $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($this->displayName($entity, $type), $type)));
+                    $fillPatch['meta_title'] = $this->titleWithFocus($focus, $this->displayName($entity, $type), $type);
+                }
+                if (!empty($fillPatch)) {
+                    $this->persistMeta($entity, $type, $fillPatch);
+                }
+                if ($storedScore !== $computedScore) {
+                    $this->persistMeta($entity, $type, [
+                        'seo_score'       => $computedScore,
+                        'seo_grade'       => $currentRow['grade'] ?? $this->grade($computedScore),
+                        'last_analyzed_at' => now(),
+                    ]);
+                }
+                return [
+                    'applied'      => [],
+                    'score_before' => $computedScore,
+                    'score_after'  => $computedScore,
+                    'source'       => 'protected',
+                    'row'          => $currentRow,
+                ];
+            }
+            // Fall through: keyword-stale entity gets a fresh AI pass.
+        }
+
+        $before = $this->scoreEntity($entity, $type);
+        $snapshot = $this->mutationSnapshot($entity, $type);
+        $meta   = $this->loadOrSynthesizeMeta($entity, $type);
+        $name   = $this->displayName($entity, $type);
+        $desc   = $this->plainContent($entity, $type);
+
+        $applied = [];
+        $source  = 'template';
+        $actualProvider = null;
+
+        // Only pay for an AI call when its output would actually be used. The
+        // advanced meta (og/twitter/canonical/robots/breadcrumbs) + schema are
+        // template/derived and applied for free below — so a URL whose AI-sourced
+        // fields (title/description/focus/keywords/content) are already complete
+        // must NOT trigger a billable AI request. This stops the autopilot from
+        // re-spending on "rescored, no change" URLs every batch.
+        if ($this->aiFixWouldHelp($entity, $type, $meta)) {
+            $bundle = $this->askBestAiForSeoBundle(
+                $providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')),
+                $name,
+                $desc,
+                $type,
+                $meta['analysis_checks']['target_competitor_domain'] ?? null
+            );
+        } else {
+            $bundle = ['data' => [], 'tried' => [], 'attempt_details' => [], 'provider' => null];
+            $source = 'complete';
+        }
+        $aiData = $bundle['data'];
+        $aiAttempts = $bundle['tried'] ?? [];
+        $aiAttemptDetails = $bundle['attempt_details'] ?? [];
+        if (!empty($aiData)) {
+            $source = 'ai';
+            $actualProvider = $bundle['provider'];
+        }
+
+        $patch = [];
+
+        $candidateFocus = $this->normalizeFocusKeyword(
+            $aiData['focus_keyword'] ?? ($meta['focus_keyword'] ?? null),
+            $name,
+            $type
+        );
+
+        if ($this->needsFocusKeywordRefresh($meta['focus_keyword'] ?? null)) {
+            $patch['focus_keyword'] = $candidateFocus;
+            $applied['focus_keyword'] = $patch['focus_keyword'];
+        }
+
+        $focusForCopy = $patch['focus_keyword'] ?? ($meta['focus_keyword'] ?? $candidateFocus);
+
+        if ($this->needsMetaTitleRefresh($meta['meta_title'] ?? null, $focusForCopy)) {
+            $patch['meta_title'] = $this->bestTitleForFocus($aiData['title'] ?? null, $focusForCopy, $name, $type);
+            $applied['meta_title'] = $patch['meta_title'];
+        }
+
+        // Resolve secondary keywords BEFORE the description so the desc check
+        // can verify that at least one secondary keyword is present in it.
+        $resolvedSecondaries = null;
+        if ($this->needsSecondaryKeywordsRefresh($meta['secondary_keywords'] ?? null)) {
+            $resolvedSecondaries = $aiData['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type);
+            $patch['secondary_keywords'] = $resolvedSecondaries;
+            $applied['secondary_keywords'] = implode(', ', $resolvedSecondaries);
+        }
+        $secondariesForDesc = $resolvedSecondaries ?? ($meta['secondary_keywords'] ?? []);
+        if (is_string($secondariesForDesc)) {
+            $secondariesForDesc = array_filter(array_map('trim', preg_split('/[\r\n,]+/', $secondariesForDesc)));
+        }
+
+        if ($this->needsMetaDescriptionRefresh($meta['meta_description'] ?? null, $focusForCopy, $secondariesForDesc)) {
+            $patch['meta_description'] = $this->bestDescriptionForFocus($aiData['description'] ?? null, $focusForCopy, $name, $type);
+            $applied['meta_description'] = $patch['meta_description'];
+        }
+
+        if (empty($meta['og_image'])) {
+            $fallbackImage = $this->fallbackImage($entity, $type);
+            if ($fallbackImage) {
+                $patch['og_image']      = $fallbackImage;
+                $patch['twitter_image'] = $fallbackImage;
+                $applied['og_image']    = $fallbackImage;
+            }
+        }
+
+        foreach ($this->advancedMetaPatch($entity, $type, $patch + $meta) as $field => $value) {
+            $patch[$field]   = $value;
+            $applied[$field] = $this->summarizeAppliedValue($value);
+        }
+
+        // Write content BEFORE schema so FAQ visibility is known: FAQPage schema
+        // is only emitted when the matching Q&A is actually on the page.
+        $contentPatch = $this->contentPatch($entity, $type, $aiData, $patch + $meta);
+        if (!empty($contentPatch)) {
+            // Bypass page-cache purge observers — redundant during batch processing.
+            $entityClass = get_class($entity);
+            $entityClass::withoutEvents(function () use ($entity, $contentPatch) {
+                $entity->forceFill($contentPatch)->save();
+            });
+            foreach ($contentPatch as $field => $value) {
+                $applied[$field] = Str::limit(strip_tags((string) $value), 120);
+            }
+        }
+
+        $faqVisible = $this->injectFaqContent($entity, $type, $aiData['faqs'] ?? null);
+        if ($faqVisible && empty($applied['faqs'])) {
+            $applied['faqs'] = count($this->normalizeFaqs($aiData['faqs'] ?? null) ?? []) . ' FAQ(s) added';
+        }
+
+        // Regenerate schema when: (a) none exists, or (b) existing schema doesn't
+        // contain the current focus keyword — meaning it was built for a prior keyword.
+        $existingSchemaStr = is_array($meta['schema_json'] ?? null)
+            ? json_encode($meta['schema_json'])
+            : (string) ($meta['schema_json'] ?? '');
+        $newFocus      = trim((string) ($patch['focus_keyword'] ?? $meta['focus_keyword'] ?? ''));
+        $schemaIsStale = $newFocus !== ''
+            && !Str::contains(mb_strtolower($existingSchemaStr), mb_strtolower($newFocus));
+
+        if (empty($meta['schema_json']) || $schemaIsStale) {
+            $schemaMeta = $patch + $meta;
+            $schemaMeta['faqs']        = $faqVisible ? ($aiData['faqs'] ?? null) : null;
+            $schemaMeta['howto_steps'] = $aiData['howto_steps'] ?? null;
+            $schema = $this->generateSchema($entity, $type, $schemaMeta);
+            if ($schema) {
+                $validation = (new \App\Services\Seo\Optimization\Features\SchemaValidatorService())->validate($schema);
+                if ($validation['valid']) {
+                    $patch['schema_json'] = $schema;
+                    $applied['schema_json'] = json_encode($schema, JSON_UNESCAPED_SLASHES);
+                } else {
+                    logger()->warning('AI SEO Board generated invalid schema; skipped', [
+                        'type'   => $type,
+                        'id'     => $entity->getKey(),
+                        'errors' => $validation['errors'],
+                    ]);
+                }
+            }
+        }
+
+        if (!empty($patch)) {
+            $patch['last_analyzed_at'] = now();
+            $this->persistMeta($entity, $type, $patch);
+        }
+
+        if (!empty($applied) && $actualProvider) {
+            $applied['ai_provider'] = $actualProvider;
+        }
+
+        $entity->refresh();
+        $afterScore = $this->scoreEntity($entity, $type);
+        $qualityGateRolledBack = false;
+        if ($this->shouldRollbackSeoMutation($before, $afterScore)) {
+            $generatedScore = $afterScore['score'];
+            $this->restoreMutationSnapshot($entity, $type, $snapshot);
+            $entity->refresh();
+            $afterScore = $this->scoreEntity($entity, $type);
+            $qualityGateRolledBack = true;
+            $source = 'quality_gate_rollback';
+            $applied = [
+                'quality_gate' => 'Rolled back because the generated SEO score regressed.',
+            ];
+
+            logger()->warning('AI SEO Board quality gate rolled back a regression', [
+                'type' => $type,
+                'id' => $entity->getKey(),
+                'score_before' => $before['score'],
+                'score_after_generated' => $generatedScore,
+                'score_after_restore' => $afterScore['score'],
+            ]);
+        }
+        $this->persistMeta($entity, $type, [
+            'seo_score' => $afterScore['score'],
+            'seo_grade' => $afterScore['grade'],
+            'analysis_checks' => $afterScore['checks'],
+            'last_analyzed_at' => now(),
+        ]);
+        $this->recordScoreHistory($entity, $type, $afterScore);
+
+        $afterRow = $this->buildRow($entity->refresh(), $type);
+
+        return [
+            'applied'      => $applied,
+            'score_before' => $before['score'],
+            'score_after'  => $afterRow['score'],
+            'source'       => $source,
+            'ai_attempts'  => $aiAttempts,
+            'ai_attempt_details' => $aiAttemptDetails,
+            'quality_gate_rolled_back' => $qualityGateRolledBack,
+            'row'          => $afterRow,
+        ];
+    }
+
+    /**
+     * Generate AI/template SEO suggestions for an entity WITHOUT persisting —
+     * powers the "preview & edit before apply" workflow. Only proposes values
+     * for fields that are currently empty (never overwrites curated content).
+     *
+     * @return array{type:string,id:int,title:string,url:string,source:string,score_before:int,current:array,suggestions:array}
+     */
+    public function previewAiFix(string $type, int $id, ?string $providerName = null): array
     {
         $this->assertType($type);
         $class  = $this->typeMap[$type]['class'];
@@ -209,52 +1251,121 @@ class AiSeoBoardService
         $name   = $this->displayName($entity, $type);
         $desc   = $this->plainContent($entity, $type);
 
-        $applied = [];
-        $source  = 'template';
-
-        $ai = SeoProviderManager::make($providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')));
-
+        $source = 'template';
         $aiData = null;
-        if ($ai && method_exists($ai, 'isConfigured') && $ai->isConfigured()) {
-            $aiData = $this->askAiForSeoBundle($ai, $name, $desc, $type);
-            if (!empty($aiData)) {
-                $source = 'ai';
+        $bundle = $this->askBestAiForSeoBundle(
+            $providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider')),
+            $name,
+            $desc,
+            $type
+        );
+        if (!empty($bundle['data'])) {
+            $aiData = $bundle['data'];
+            $source = 'ai';
+        }
+
+        $suggestions = [];
+        if (empty($meta['meta_title'])) {
+            $suggestions['meta_title'] = $aiData['title'] ?? $this->templateTitle($name, $type);
+        }
+        if (empty($meta['meta_description'])) {
+            $suggestions['meta_description'] = !empty($aiData['description'])
+                ? $this->fitDescription($aiData['description'])
+                : $this->templateDescription($name, $type);
+        }
+        if (empty($meta['focus_keyword'])) {
+            $suggestions['focus_keyword'] = $aiData['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type);
+        }
+        if (empty($meta['secondary_keywords'])) {
+            $kw = $aiData['secondary_keywords'] ?? $this->canadaKeywordSet($name, $type);
+            $suggestions['secondary_keywords'] = implode(', ', $kw);
+        }
+        $suggestions['schema'] = empty($meta['schema_json']); // checkbox default for "generate schema"
+
+        return [
+            'type'         => $type,
+            'id'           => $id,
+            'title'        => $name,
+            'url'          => $this->urlFor($entity, $type),
+            'source'       => $source,
+            'provider'     => $bundle['provider'] ?? null,
+            'ai_attempts'  => $bundle['tried'] ?? [],
+            'ai_attempt_details' => $bundle['attempt_details'] ?? [],
+            'score_before' => $before['score'],
+            'current'      => [
+                'meta_title'       => $meta['meta_title'] ?? null,
+                'meta_description' => $meta['meta_description'] ?? null,
+                'focus_keyword'    => $meta['focus_keyword'] ?? null,
+            ],
+            'suggestions'  => $suggestions,
+        ];
+    }
+
+    /**
+     * Persist admin-approved (and possibly edited) suggestion values. Writes
+     * only fields that are still empty, so a concurrent curated edit always wins.
+     *
+     * @param array $approved keys: meta_title, meta_description, focus_keyword,
+     *                        secondary_keywords (string|array), schema (bool)
+     */
+    public function applyApprovedFix(string $type, int $id, array $approved): array
+    {
+        $this->assertType($type);
+        $class  = $this->typeMap[$type]['class'];
+        $entity = $class::find($id);
+        if (!$entity) {
+            throw new \RuntimeException("Entity {$type}#{$id} not found.");
+        }
+
+        $before = $this->scoreEntity($entity, $type);
+        $meta   = $this->loadOrSynthesizeMeta($entity, $type);
+
+        $patch = [];
+        $applied = [];
+
+        foreach (['meta_title', 'meta_description', 'focus_keyword'] as $field) {
+            if (empty($meta[$field]) && !empty($approved[$field])) {
+                $value = trim((string) $approved[$field]);
+                if ($field === 'meta_description') {
+                    $value = $this->fitDescription($value);
+                }
+                $patch[$field]   = $value;
+                $applied[$field] = $value;
             }
         }
 
-        $patch = [];
-
-        if (empty($meta['meta_title'])) {
-            $patch['meta_title'] = $aiData['title']
-                ?? Str::limit($name . ' | ' . get_setting('website_name', config('app.name')), 60, '');
-            $applied['meta_title'] = $patch['meta_title'];
-        }
-
-        if (empty($meta['meta_description'])) {
-            $patch['meta_description'] = $aiData['description']
-                ?? Str::limit('Shop ' . $name . '. Quality products, fast delivery, and competitive prices.', 160, '');
-            $applied['meta_description'] = $patch['meta_description'];
-        }
-
-        if (empty($meta['focus_keyword'])) {
-            $patch['focus_keyword'] = $aiData['focus_keyword'] ?? Str::limit(Str::lower($name), 60, '');
-            $applied['focus_keyword'] = $patch['focus_keyword'];
+        if (empty($meta['secondary_keywords']) && !empty($approved['secondary_keywords'])) {
+            $list = is_array($approved['secondary_keywords'])
+                ? $approved['secondary_keywords']
+                : array_values(array_filter(array_map('trim', explode(',', (string) $approved['secondary_keywords']))));
+            if (!empty($list)) {
+                $patch['secondary_keywords']   = array_values($list);
+                $applied['secondary_keywords'] = implode(', ', $list);
+            }
         }
 
         if (empty($meta['og_image'])) {
-            $fallbackImage = $this->fallbackImage($entity, $type);
-            if ($fallbackImage) {
-                $patch['og_image']      = $fallbackImage;
-                $patch['twitter_image'] = $fallbackImage;
-                $applied['og_image']    = $fallbackImage;
+            $img = $this->fallbackImage($entity, $type);
+            if ($img) {
+                $patch['og_image']      = $img;
+                $patch['twitter_image'] = $img;
+                $applied['og_image']    = $img;
             }
         }
 
-        if (empty($meta['schema_json'])) {
+        foreach ($this->advancedMetaPatch($entity, $type, $patch + $meta) as $field => $value) {
+            $patch[$field]   = $value;
+            $applied[$field] = $this->summarizeAppliedValue($value);
+        }
+
+        if (empty($meta['schema_json']) && !empty($approved['schema'])) {
             $schema = $this->generateSchema($entity, $type, $patch + $meta);
             if ($schema) {
-                $patch['schema_json'] = $schema;
-                $applied['schema_json'] = json_encode($schema, JSON_UNESCAPED_SLASHES);
+                $validation = (new \App\Services\Seo\Optimization\Features\SchemaValidatorService())->validate($schema);
+                if ($validation['valid']) {
+                    $patch['schema_json']   = $schema;
+                    $applied['schema_json'] = json_encode($schema, JSON_UNESCAPED_SLASHES);
+                }
             }
         }
 
@@ -263,15 +1374,52 @@ class AiSeoBoardService
             $this->persistMeta($entity, $type, $patch);
         }
 
+        $entity->refresh();
+        $afterScore = $this->scoreEntity($entity, $type);
+        $this->persistMeta($entity, $type, [
+            'seo_score'        => $afterScore['score'],
+            'seo_grade'        => $afterScore['grade'],
+            'analysis_checks'  => $afterScore['checks'],
+            'last_analyzed_at' => now(),
+        ]);
+        $this->recordScoreHistory($entity, $type, $afterScore);
+
         $afterRow = $this->buildRow($entity->refresh(), $type);
 
         return [
             'applied'      => $applied,
             'score_before' => $before['score'],
             'score_after'  => $afterRow['score'],
-            'source'       => $source,
+            'source'       => 'approved',
             'row'          => $afterRow,
         ];
+    }
+
+    protected function recordScoreHistory(Model $entity, string $type, array $score): void
+    {
+        if (!Schema::hasTable('seo_score_histories')) {
+            return;
+        }
+
+        try {
+            SeoScoreHistory::create([
+                'project_id' => optional(SeoProject::query()->first())->id,
+                'seo_run_id' => null,
+                'target_type' => $this->typeMap[$type]['class'],
+                'target_id' => $entity->getKey(),
+                'url' => $this->urlFor($entity, $type),
+                'score' => $score['score'],
+                'grade' => $score['grade'],
+                'metrics' => $score,
+                'recorded_at' => now(),
+            ]);
+        } catch (Throwable $e) {
+            logger()->warning('AI SEO Board score history write failed', [
+                'type' => $type,
+                'id' => $entity->getKey(),
+                'err' => $e->getMessage(),
+            ]);
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -283,6 +1431,22 @@ class AiSeoBoardService
         if (!isset($this->typeMap[$type])) {
             throw new \InvalidArgumentException("Unsupported SEO Board entity type: {$type}");
         }
+    }
+
+    protected function entityTableExists(string $type): bool
+    {
+        if (!isset($this->typeMap[$type])) {
+            return false;
+        }
+
+        $class = $this->typeMap[$type]['class'];
+        $table = (new $class())->getTable();
+
+        if (!array_key_exists($table, $this->tableExistsCache)) {
+            $this->tableExistsCache[$table] = Schema::hasTable($table);
+        }
+
+        return (bool) $this->tableExistsCache[$table];
     }
 
     protected function baseQuery(string $type): Builder
@@ -397,17 +1561,171 @@ class AiSeoBoardService
 
         $patch['seo_score'] = $patch['seo_score'] ?? null;
 
-        SeoMeta::updateOrCreate(
-            [
-                'model_type' => $class,
-                'model_id'   => $entity->getKey(),
-                'lang'       => config('app.locale', 'en'),
-            ],
-            $patch
-        );
+        // Skip page-cache purge observers during batch autopilot writes — the
+        // cache invalidation queries (currencies × locales × devices) add 3–5s
+        // per entity on localhost and are redundant during bulk processing.
+        SeoMeta::withoutEvents(function () use ($class, $entity, $patch) {
+            SeoMeta::updateOrCreate(
+                [
+                    'model_type' => $class,
+                    'model_id'   => $entity->getKey(),
+                    'lang'       => config('app.locale', 'en'),
+                ],
+                $patch
+            );
+        });
+    }
+
+    /**
+     * Fill page-level signals that are deterministic and safe to write without
+     * replacing curated values. Schema is handled separately after content so
+     * its FAQ markup stays aligned with the visible page.
+     */
+    protected function advancedMetaPatch(Model $entity, string $type, array $meta): array
+    {
+        $patch = [];
+        $title = trim((string) ($meta['meta_title'] ?? ''));
+        $description = trim((string) ($meta['meta_description'] ?? ''));
+        $image = $meta['og_image'] ?? $meta['twitter_image'] ?? $this->fallbackImage($entity, $type);
+        $desiredOgType = match ($type) {
+            'product' => 'product',
+            'blog' => 'article',
+            default => 'website',
+        };
+
+        if (empty($meta['canonical_url'])) {
+            $patch['canonical_url'] = $this->urlFor($entity, $type);
+        }
+        if (empty($meta['robots_meta'])) {
+            $patch['robots_meta'] = 'index, follow, max-image-preview:large, max-snippet:-1';
+        }
+        if (empty($meta['og_title']) && $title !== '') {
+            $patch['og_title'] = Str::limit($title, 80, '');
+        }
+        if (empty($meta['og_description']) && $description !== '') {
+            $patch['og_description'] = Str::limit($description, 200, '');
+        }
+        if (empty($meta['og_type']) || ($meta['og_type'] === 'website' && $desiredOgType !== 'website')) {
+            $patch['og_type'] = $desiredOgType;
+        }
+        if (empty($meta['twitter_card'])) {
+            $patch['twitter_card'] = 'summary_large_image';
+        }
+        if (empty($meta['twitter_title']) && $title !== '') {
+            $patch['twitter_title'] = Str::limit($title, 80, '');
+        }
+        if (empty($meta['twitter_description']) && $description !== '') {
+            $patch['twitter_description'] = Str::limit($description, 200, '');
+        }
+        if (empty($meta['twitter_image']) && $image) {
+            $patch['twitter_image'] = $image;
+        }
+        if (empty($meta['breadcrumbs_json']) && $breadcrumbs = $this->breadcrumbSchema($entity, $type)) {
+            $patch['breadcrumbs_json'] = $breadcrumbs;
+        }
+
+        return $patch;
+    }
+
+    protected function summarizeAppliedValue($value): string
+    {
+        if (is_array($value)) {
+            return Str::limit((string) json_encode($value, JSON_UNESCAPED_SLASHES), 120);
+        }
+
+        return Str::limit((string) $value, 120);
+    }
+
+    protected function shouldRollbackSeoMutation(array $before, array $after): bool
+    {
+        // Only rollback on a meaningful regression (>5 points). A 1-2 point drop
+        // often happens when AI adds content that temporarily shifts keyword density —
+        // rolling back on any regression wastes the AI call and blocks improvement.
+        $drop = (int) ($before['score'] ?? 0) - (int) ($after['score'] ?? 0);
+        return $drop > 5;
+    }
+
+    protected function mutationSnapshot(Model $entity, string $type): array
+    {
+        $contentFields = match ($type) {
+            'product' => ['description', 'short_description'],
+            'category' => ['top_description', 'bottom_description'],
+            'page' => ['content'],
+            'blog' => ['description', 'short_description'],
+            default => [],
+        };
+        $entityValues = [];
+        foreach ($contentFields as $field) {
+            if (Schema::hasColumn($entity->getTable(), $field)) {
+                $entityValues[$field] = $entity->getAttribute($field);
+            }
+        }
+
+        $meta = $this->metaQuery($entity, $type)->first();
+
+        return [
+            'entity_values' => $entityValues,
+            'meta_exists' => (bool) $meta,
+            'meta_values' => $meta?->getAttributes() ?? [],
+        ];
+    }
+
+    protected function restoreMutationSnapshot(Model $entity, string $type, array $snapshot): void
+    {
+        if (!empty($snapshot['entity_values'])) {
+            $entity->forceFill($snapshot['entity_values'])->save();
+        }
+
+        $query = $this->metaQuery($entity, $type);
+        if (empty($snapshot['meta_exists'])) {
+            $query->delete();
+            return;
+        }
+
+        $row = $query->first() ?: new SeoMeta([
+            'model_type' => $this->typeMap[$type]['class'],
+            'model_id' => $entity->getKey(),
+            'lang' => config('app.locale', 'en'),
+        ]);
+        $row->forceFill(Arr::except($snapshot['meta_values'] ?? [], ['id', 'created_at', 'updated_at']))->save();
+    }
+
+    protected function metaQuery(Model $entity, string $type): Builder
+    {
+        return SeoMeta::query()
+            ->where('model_type', $this->typeMap[$type]['class'])
+            ->where('model_id', $entity->getKey())
+            ->where('lang', config('app.locale', 'en'));
+    }
+
+    protected function countSeoDoneUrls(): int
+    {
+        return SeoMeta::query()
+            ->whereIn('model_type', array_column($this->typeMap, 'class'))
+            ->whereNotNull('meta_title')
+            ->whereNotNull('meta_description')
+            ->whereNotNull('focus_keyword')
+            ->whereNotNull('schema_json')
+            ->where('seo_score', '>=', self::SEO_DONE_SCORE)
+            ->count();
+    }
+
+    protected function countSeoPendingUrls(): int
+    {
+        $total = collect(array_keys($this->typeMap))
+            ->filter(fn($type) => $this->entityTableExists($type))
+            ->sum(fn($type) => $this->baseQuery($type)->count());
+
+        return max(0, $total - $this->countSeoDoneUrls());
     }
 
     protected function plainContent(Model $entity, string $type): string
+    {
+        return trim(preg_replace('/\s+/', ' ', strip_tags($this->rawContent($entity, $type))));
+    }
+
+    /** Raw (un-stripped) HTML so structural TruSEO checks see headings/links/images. */
+    protected function rawContent(Model $entity, string $type): string
     {
         $candidates = match ($type) {
             'product'  => [$entity->description ?? null, $entity->short_description ?? null],
@@ -417,8 +1735,37 @@ class AiSeoBoardService
             default    => [],
         };
 
-        $text = trim(implode("\n\n", array_filter($candidates)));
-        return trim(preg_replace('/\s+/', ' ', strip_tags($text)));
+        return trim(implode("\n\n", array_filter($candidates)));
+    }
+
+    /**
+     * Build the structural context the expanded TruSEO engine consumes:
+     * raw HTML, secondary keywords, image alts, and schema/OG/canonical flags.
+     */
+    protected function buildScoreContext(Model $entity, string $type, array $meta): array
+    {
+        $rawHtml = $this->rawContent($entity, $type);
+
+        $alts = [];
+        if ($rawHtml !== '' && preg_match_all('/<img\s[^>]*alt=["\']([^"\']*)["\']/i', $rawHtml, $m)) {
+            $alts = array_values(array_filter($m[1]));
+        }
+        if (empty($alts) && $this->fallbackImage($entity, $type)) {
+            $alts[] = (string) ($meta['focus_keyword'] ?? $this->displayName($entity, $type));
+        }
+
+        // Entity pages in this app always render a canonical via the layout,
+        // so a canonical is resolvable whenever we have a real slug/URL.
+        $hasCanonical = !empty($meta['canonical_url']) || !empty($entity->slug);
+
+        return [
+            'raw_html'           => $rawHtml,
+            'secondary_keywords' => $meta['secondary_keywords'] ?? [],
+            'image_alts'         => $alts,
+            'has_schema'         => !empty($meta['schema_json']),
+            'has_og'             => !empty($meta['og_image']) || !empty($meta['og_title']),
+            'has_canonical'      => $hasCanonical,
+        ];
     }
 
     protected function displayName(Model $entity, string $type): string
@@ -430,7 +1777,10 @@ class AiSeoBoardService
     protected function urlFor(Model $entity, string $type): string
     {
         $slug = $entity->slug ?? '';
-        $base = rtrim(url('/'), '/');
+        // Use seo.site_url so internal-link detection works correctly when the
+        // stored links use the production domain (bhssupplies.com) but APP_URL
+        // is localhost. Falls back to url('/') when not configured.
+        $base = rtrim(config('seo.site_url', url('/')), '/');
 
         return match ($type) {
             'product'  => $base . '/product/' . $slug,
@@ -480,51 +1830,399 @@ class AiSeoBoardService
         return null;
     }
 
+    /**
+     * Build a STACKED list of schema nodes for the entity — the AIOSEO "stack
+     * multiple schema types on one page" model. Always includes the primary
+     * type + a BreadcrumbList, and adds an FAQPage / HowTo when the AI returned
+     * structured Q&A or steps. Returns a list the resolver renders as separate
+     * <script type="ld+json"> blocks.
+     */
     protected function generateSchema(Model $entity, string $type, array $meta): ?array
     {
+        $primary = match ($type) {
+            'product'  => $this->productSchema($entity, $meta),
+            'category' => $this->collectionSchema($entity, $type, $meta),
+            'page'     => $this->pageSchema($entity, $type, $meta),
+            'blog'     => $this->articleSchema($entity, $type, $meta),
+            default    => null,
+        };
+
+        if (!$primary) {
+            return null;
+        }
+
+        $stack = [$this->pruneNulls($primary)];
+
+        if ($breadcrumb = $this->breadcrumbSchema($entity, $type)) {
+            $stack[] = $breadcrumb;
+        }
+        if ($faq = $this->faqSchema($meta['faqs'] ?? null)) {
+            $stack[] = $faq;
+        }
+        if ($howto = $this->howToSchema($entity, $type, $meta)) {
+            $stack[] = $howto;
+        }
+        if ($video = $this->videoSchema($entity, $type)) {
+            $stack[] = $video;
+        }
+
+        return $stack;
+    }
+
+    /** Deterministic BreadcrumbList: Home › Section › Entity. */
+    protected function breadcrumbSchema(Model $entity, string $type): ?array
+    {
+        $base = rtrim(url('/'), '/');
         $name = $this->displayName($entity, $type);
         $url  = $this->urlFor($entity, $type);
 
-        return match ($type) {
-            'product' => [
-                '@context'    => 'https://schema.org',
-                '@type'       => 'Product',
-                'name'        => $name,
-                'description' => $meta['meta_description'] ?? Str::limit($this->plainContent($entity, $type), 200, ''),
-                'image'       => $meta['og_image'] ?? null,
-                'url'         => $url,
-                'offers'      => [
-                    '@type'         => 'Offer',
-                    'price'         => $entity->unit_price ?? null,
-                    'priceCurrency' => $this->currencyCode(),
-                    'availability'  => 'https://schema.org/InStock',
-                    'url'           => $url,
-                ],
-            ],
-            'category' => [
-                '@context'    => 'https://schema.org',
-                '@type'       => 'CollectionPage',
-                'name'        => $name,
-                'description' => $meta['meta_description'] ?? null,
-                'url'         => $url,
-            ],
-            'page' => [
-                '@context'    => 'https://schema.org',
-                '@type'       => 'WebPage',
-                'name'        => $name,
-                'description' => $meta['meta_description'] ?? null,
-                'url'         => $url,
-            ],
-            'blog' => [
-                '@context'    => 'https://schema.org',
-                '@type'       => 'Article',
-                'headline'    => $name,
-                'description' => $meta['meta_description'] ?? null,
-                'image'       => $meta['og_image'] ?? null,
-                'url'         => $url,
-            ],
-            default => null,
+        $trail = [['name' => 'Home', 'url' => $base . '/']];
+
+        $section = match ($type) {
+            'product'  => ['name' => 'Shop', 'url' => $base . '/shop'],
+            'category' => ['name' => 'Categories', 'url' => $base . '/categories'],
+            'blog'     => ['name' => 'Blog', 'url' => $base . '/blog'],
+            default    => null,
         };
+        if ($section) {
+            $trail[] = $section;
+        }
+        $trail[] = ['name' => Str::limit($name, 80, ''), 'url' => $url];
+
+        $items = [];
+        foreach ($trail as $i => $crumb) {
+            $items[] = [
+                '@type'    => 'ListItem',
+                'position' => $i + 1,
+                'name'     => $crumb['name'],
+                'item'     => $crumb['url'],
+            ];
+        }
+
+        return [
+            '@context'        => 'https://schema.org',
+            '@type'           => 'BreadcrumbList',
+            'itemListElement' => $items,
+        ];
+    }
+
+    /** FAQPage from AI-provided [{question, answer}, …]. */
+    protected function faqSchema($faqs): ?array
+    {
+        if (!is_array($faqs) || empty($faqs)) {
+            return null;
+        }
+
+        $questions = [];
+        foreach ($faqs as $faq) {
+            $q = trim((string) ($faq['question'] ?? $faq['q'] ?? ''));
+            $a = trim(strip_tags((string) ($faq['answer'] ?? $faq['a'] ?? '')));
+            if ($q === '' || $a === '') {
+                continue;
+            }
+            $questions[] = [
+                '@type'          => 'Question',
+                'name'           => Str::limit($q, 200, ''),
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => Str::limit($a, 600, '')],
+            ];
+        }
+
+        if (count($questions) < 2) {
+            return null; // Google wants a genuine FAQ set, not a single Q.
+        }
+
+        return [
+            '@context'   => 'https://schema.org',
+            '@type'      => 'FAQPage',
+            'mainEntity' => $questions,
+        ];
+    }
+
+    /**
+     * Append a visible FAQ block to the entity's main content so the FAQPage
+     * schema reflects on-page content (a Google rich-results requirement).
+     * Idempotent — skips if an FAQ section already exists. Additive only;
+     * never removes curated content.
+     */
+    protected function injectFaqContent(Model $entity, string $type, $faqs): bool
+    {
+        $clean = $this->normalizeFaqs($faqs);
+        if (!$clean || count($clean) < 2) {
+            return false;
+        }
+
+        $field = match ($type) {
+            'product'  => 'description',
+            'category' => 'bottom_description',
+            'page'     => 'content',
+            'blog'     => 'description',
+            default    => null,
+        };
+        if (!$field || !Schema::hasColumn($entity->getTable(), $field)) {
+            return false;
+        }
+
+        $existing = (string) ($entity->{$field} ?? '');
+        if (stripos($existing, 'frequently asked') !== false) {
+            return true; // already visible — don't duplicate
+        }
+
+        $html = '<h2>Frequently Asked Questions</h2>';
+        foreach ($clean as $faq) {
+            $html .= '<h3>' . e($faq['question']) . '</h3><p>' . e($faq['answer']) . '</p>';
+        }
+
+        $entity->forceFill([$field => trim($existing . "\n" . $html)])->save();
+        return true;
+    }
+
+    /** Normalize AI faqs into a clean [{question, answer}] list. */
+    protected function normalizeFaqs($faqs): ?array
+    {
+        if (!is_array($faqs)) {
+            return null;
+        }
+        $clean = [];
+        foreach ($faqs as $faq) {
+            if (!is_array($faq)) {
+                continue;
+            }
+            $q = trim((string) ($faq['question'] ?? $faq['q'] ?? ''));
+            $a = trim((string) ($faq['answer'] ?? $faq['a'] ?? ''));
+            if ($q !== '' && $a !== '') {
+                $clean[] = ['question' => $q, 'answer' => $a];
+            }
+        }
+        return $clean ?: null;
+    }
+
+    /** HowTo only when the AI returned real, ordered steps — never fabricated. */
+    protected function howToSchema(Model $entity, string $type, array $meta): ?array
+    {
+        $steps = $meta['howto_steps'] ?? null;
+        if (!is_array($steps) || count($steps) < 2) {
+            return null;
+        }
+
+        $stepNodes = [];
+        foreach ($steps as $i => $step) {
+            $text = trim(strip_tags((string) (is_array($step) ? ($step['text'] ?? '') : $step)));
+            if ($text === '') {
+                continue;
+            }
+            $stepNodes[] = [
+                '@type'    => 'HowToStep',
+                'position' => $i + 1,
+                'name'     => Str::limit($text, 60, ''),
+                'text'     => Str::limit($text, 300, ''),
+            ];
+        }
+
+        if (count($stepNodes) < 2) {
+            return null;
+        }
+
+        return [
+            '@context' => 'https://schema.org',
+            '@type'    => 'HowTo',
+            'name'     => Str::limit('How to use ' . $this->displayName($entity, $type), 100, ''),
+            'step'     => $stepNodes,
+        ];
+    }
+
+    /** Extract video iframes from content and generate VideoObject schema. */
+    protected function videoSchema(Model $entity, string $type): ?array
+    {
+        $html = $this->rawContent($entity, $type);
+        if (!$html) return null;
+
+        if (preg_match('/<iframe[^>]+src=["\'](https:\/\/(www\.)?(youtube\.com\/embed\/|vimeo\.com\/video\/)[^"\']+)["\']/i', $html, $matches)) {
+            $videoUrl = $matches[1];
+            return [
+                '@context'     => 'https://schema.org',
+                '@type'        => 'VideoObject',
+                'name'         => 'Video about ' . $this->displayName($entity, $type),
+                'description'  => 'An informational video about ' . $this->displayName($entity, $type),
+                'thumbnailUrl' => $this->fallbackImage($entity, $type) ?: rtrim(url('/'), '/') . '/default-video-thumb.jpg',
+                'uploadDate'   => optional($entity->created_at)->toAtomString() ?: now()->toAtomString(),
+                'embedUrl'     => $videoUrl,
+            ];
+        }
+        return null;
+    }
+
+    /** Rich Product schema: brand, aggregateRating, stock-aware Offer, seller. */
+    protected function productSchema(Model $entity, array $meta): array
+    {
+        $name = $this->displayName($entity, 'product');
+        $url  = $this->urlFor($entity, 'product');
+
+        $inStock = ($entity->current_stock ?? 0) > 0
+            || ($entity->stock_visibility_state ?? null) !== 'hide';
+
+        $schema = [
+            '@context'    => 'https://schema.org',
+            '@type'       => 'Product',
+            'name'        => $name,
+            'description' => $meta['meta_description'] ?? Str::limit($this->plainContent($entity, 'product'), 200, ''),
+            'image'       => $meta['og_image'] ?? $this->fallbackImage($entity, 'product'),
+            'url'         => $url,
+            'sku'         => (string) $entity->getKey(),
+            'brand'       => $this->brandNode($entity),
+            'offers'      => [
+                '@type'           => 'Offer',
+                'price'           => $entity->unit_price !== null ? number_format((float) $entity->unit_price, 2, '.', '') : null,
+                'priceCurrency'   => $this->currencyCode(),
+                'availability'    => $inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+                'itemCondition'   => 'https://schema.org/NewCondition',
+                'url'             => $url,
+                'priceValidUntil' => now()->addYear()->toDateString(),
+                'seller'          => $this->organizationNode(),
+            ],
+        ];
+
+        $rating = $this->aggregateRatingNode($entity);
+        if ($rating) {
+            $schema['aggregateRating'] = $rating;
+        }
+
+        return $schema;
+    }
+
+    protected function collectionSchema(Model $entity, string $type, array $meta): array
+    {
+        return [
+            '@context'    => 'https://schema.org',
+            '@type'       => 'CollectionPage',
+            'name'        => $this->displayName($entity, $type),
+            'description' => $meta['meta_description'] ?? null,
+            'url'         => $this->urlFor($entity, $type),
+        ];
+    }
+
+    protected function pageSchema(Model $entity, string $type, array $meta): array
+    {
+        $name = $this->displayName($entity, $type);
+        $url  = $this->urlFor($entity, $type);
+        $slug = Str::lower((string) ($entity->slug ?? ''));
+
+        // About / Contact pages carry the business identity — emit LocalBusiness.
+        if (Str::contains($slug, ['about', 'contact', 'location', 'store'])) {
+            return $this->localBusinessNode($url, $meta['meta_description'] ?? null);
+        }
+
+        return [
+            '@context'    => 'https://schema.org',
+            '@type'       => 'WebPage',
+            'name'        => $name,
+            'description' => $meta['meta_description'] ?? null,
+            'url'         => $url,
+            'publisher'   => $this->organizationNode(),
+        ];
+    }
+
+    protected function articleSchema(Model $entity, string $type, array $meta): array
+    {
+        return [
+            '@context'      => 'https://schema.org',
+            '@type'         => 'Article',
+            'headline'      => Str::limit($this->displayName($entity, $type), 110, ''),
+            'description'   => $meta['meta_description'] ?? null,
+            'image'         => $meta['og_image'] ?? null,
+            'url'           => $this->urlFor($entity, $type),
+            'datePublished' => optional($entity->created_at)->toAtomString(),
+            'dateModified'  => optional($entity->updated_at)->toAtomString(),
+            'publisher'     => $this->organizationNode(),
+        ];
+    }
+
+    protected function brandNode(Model $entity): ?array
+    {
+        try {
+            $brand = method_exists($entity, 'brand') ? $entity->brand : null;
+            if ($brand && !empty($brand->name)) {
+                return ['@type' => 'Brand', 'name' => $brand->name];
+            }
+        } catch (Throwable $e) {
+            // ignore — brand is optional
+        }
+        return null;
+    }
+
+    protected function aggregateRatingNode(Model $entity): ?array
+    {
+        $rating = (float) ($entity->rating ?? 0);
+        if ($rating <= 0) {
+            return null;
+        }
+
+        $count = 0;
+        try {
+            if (method_exists($entity, 'reviews')) {
+                $count = (int) $entity->reviews()->where('status', 1)->count();
+            }
+        } catch (Throwable $e) {
+            $count = 0;
+        }
+
+        if ($count < 1) {
+            return null;
+        }
+
+        return [
+            '@type'       => 'AggregateRating',
+            'ratingValue' => round(min(5, max(1, $rating)), 1),
+            'reviewCount' => $count,
+            'bestRating'  => 5,
+            'worstRating' => 1,
+        ];
+    }
+
+    protected function organizationNode(): array
+    {
+        return [
+            '@type' => 'Organization',
+            'name'  => get_setting('website_name', config('app.name')),
+            'url'   => rtrim(url('/'), '/'),
+        ];
+    }
+
+    protected function localBusinessNode(string $url, ?string $description): array
+    {
+        $phone = get_setting('seo_local_phone', get_setting('contact_phone', config('seo.local_business.phone')));
+
+        return $this->pruneNulls([
+            '@context'    => 'https://schema.org',
+            '@type'       => config('seo.local_business.type', 'Store'),
+            'name'        => get_setting('website_name', config('app.name')),
+            'description' => $description,
+            'url'         => $url,
+            'telephone'   => $phone ?: null,
+            'image'       => get_setting('header_logo') ? uploaded_asset(get_setting('header_logo')) : null,
+            'address'     => [
+                '@type'           => 'PostalAddress',
+                'addressLocality' => config('seo.local_business.city'),
+                'addressRegion'   => config('seo.local_business.region'),
+                'addressCountry'  => config('seo.local_business.country'),
+            ],
+            'areaServed'  => config('seo.local_business.region', 'Ontario') . ', ' . config('seo.local_business.country', 'Canada'),
+        ]);
+    }
+
+    /** Recursively drop null / empty-string values so schema validates cleanly. */
+    protected function pruneNulls(array $data): array
+    {
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                $data[$key] = $this->pruneNulls($value);
+                if ($data[$key] === []) {
+                    unset($data[$key]);
+                }
+            } elseif ($value === null || $value === '') {
+                unset($data[$key]);
+            }
+        }
+        return $data;
     }
 
     protected function currencyCode(): string
@@ -537,21 +2235,216 @@ class AiSeoBoardService
         }
     }
 
-    protected function askAiForSeoBundle($ai, string $name, string $description, string $type): ?array
+    /**
+     * Try the selected AI first, then fall back through the strongest configured
+     * SEO writers. Weak/partial JSON is repaired once, but empty or unusable
+     * output moves to the next provider automatically.
+     */
+    protected function askBestAiForSeoBundle(?string $preferredProvider, string $name, string $description, string $type, ?string $competitorDomain = null): array
+    {
+        $tried = [];
+        $attemptDetails = [];
+        $reliability = app(SeoProviderReliability::class);
+
+        foreach ($this->providerFallbackOrder($preferredProvider) as $providerName) {
+            if ($reliability->shouldSkip($providerName)) {
+                $attemptDetails[] = $this->providerAttemptDetail($providerName, 'cooldown', 0, 0.0);
+                continue;
+            }
+
+            $ai = SeoProviderManager::makeDirect($providerName);
+            if (!$ai || !method_exists($ai, 'isConfigured') || !$ai->isConfigured()) {
+                continue;
+            }
+
+            $actualName = method_exists($ai, 'getName') ? $ai->getName() : $providerName;
+            $startedAt = microtime(true);
+            try {
+                $data = $this->askAiForSeoBundle($ai, $name, $description, $type, $competitorDomain);
+            } catch (\Throwable $e) {
+                logger()->error('AI SEO provider failed', [
+                    'provider' => $actualName,
+                    'error' => $e->getMessage(),
+                ]);
+                $data = [];
+            }
+            $tried[] = $actualName;
+
+            if (empty($data)) {
+                $durationMs = $this->providerDurationMs($startedAt);
+                $reliability->recordAttempt($actualName, 'empty', null, $durationMs);
+                $attemptDetails[] = $this->providerAttemptDetail(
+                    $actualName,
+                    'empty',
+                    $durationMs,
+                    $reliability->estimateAttemptCost($actualName)
+                );
+                logger()->info('AI SEO provider returned empty bundle or threw error; trying fallback', [
+                    'provider' => $actualName,
+                    'type' => $type,
+                    'name' => \Illuminate\Support\Str::limit($name, 80),
+                ]);
+                continue;
+            }
+
+            $data = $this->repairSeoBundle($data, $name, $type);
+            if ($this->seoBundleHasMinimumQuality($data)) {
+                $durationMs = $this->providerDurationMs($startedAt);
+                $reliability->recordAttempt($actualName, 'success', null, $durationMs);
+                $attemptDetails[] = $this->providerAttemptDetail(
+                    $actualName,
+                    'success',
+                    $durationMs,
+                    $reliability->estimateAttemptCost($actualName)
+                );
+                if (SeoProviderManager::normalizeName($actualName) !== SeoProviderManager::normalizeName($preferredProvider)) {
+                    $reliability->recordFallbackSelection($actualName);
+                }
+
+                return [
+                    'data' => $data,
+                    'provider' => $actualName,
+                    'tried' => $tried,
+                    'attempt_details' => $attemptDetails,
+                ];
+            }
+
+            $durationMs = $this->providerDurationMs($startedAt);
+            $reliability->recordAttempt($actualName, 'weak_bundle', null, $durationMs);
+            $attemptDetails[] = $this->providerAttemptDetail(
+                $actualName,
+                'weak_bundle',
+                $durationMs,
+                $reliability->estimateAttemptCost($actualName)
+            );
+            logger()->info('AI SEO provider bundle was too weak; trying fallback', [
+                'provider' => $actualName,
+                'type' => $type,
+                'name' => Str::limit($name, 80),
+            ]);
+        }
+
+        return ['data' => null, 'provider' => null, 'tried' => $tried, 'attempt_details' => $attemptDetails];
+    }
+
+    protected function providerAttemptDetail(string $provider, string $status, int $durationMs, float $estimatedCostUsd): array
+    {
+        return [
+            'provider' => $provider,
+            'status' => $status,
+            'duration_ms' => $durationMs,
+            'estimated_cost_usd' => round($estimatedCostUsd, 6),
+        ];
+    }
+
+    protected function providerDurationMs(float $startedAt): int
+    {
+        return max(0, (int) round((microtime(true) - $startedAt) * 1000));
+    }
+
+    protected function providerFallbackOrder(?string $preferredProvider): array
+    {
+        return SeoProviderManager::fallbackOrder($preferredProvider);
+    }
+
+    protected function seoBundleHasMinimumQuality(array $data): bool
+    {
+        $descLen = mb_strlen(trim((string) ($data['description'] ?? '')));
+        return !empty($data['title'])
+            && !empty($data['description'])
+            && $descLen >= 140
+            && !empty($data['focus_keyword'])
+            // Raised from 220 → 450 to match content_length_500 scoring gate.
+            // Bundles under 450 words get rejected and retried on the next provider.
+            && str_word_count(strip_tags((string) ($data['content_html'] ?? ''))) >= 450;
+    }
+
+    protected function repairSeoBundle(array $data, string $name, string $type): array
+    {
+        $focus = trim((string) ($data['focus_keyword'] ?? ''));
+        if ($focus === '') {
+            $focus = $this->primaryCanadaKeyword($name, $type);
+            $data['focus_keyword'] = $focus;
+        }
+
+        if (empty($data['title']) || mb_stripos((string) $data['title'], $focus) === false) {
+            $data['title'] = $this->titleWithFocus($focus, $name, $type);
+        }
+
+        $descVal = trim((string) ($data['description'] ?? ''));
+        $descLen = mb_strlen($descVal);
+        if ($descVal === '' || mb_stripos($descVal, $focus) === false
+            || $descLen < 140 || $descLen > 160
+        ) {
+            // Regenerate when missing, lacks focus keyword, or outside 140–160 scoring window.
+            $data['description'] = $this->descriptionWithFocus($focus, $name, $type);
+        } else {
+            $data['description'] = $this->fitDescription($descVal);
+        }
+
+        if (empty($data['secondary_keywords']) || !is_array($data['secondary_keywords'])) {
+            $data['secondary_keywords'] = $this->canadaKeywordSet($name, $type);
+        }
+
+        $html = trim((string) ($data['content_html'] ?? ''));
+        if ($html === '') {
+            $html = $this->templateContentHtml($name, $type, $data);
+        }
+        $data['content_html'] = $this->ensureSeoContentSignals($html, $name, $type, $data);
+
+        return $data;
+    }
+
+    protected function askAiForSeoBundle($ai, string $name, string $description, string $type, ?string $competitorDomain = null): ?array
     {
         $siteName = get_setting('website_name', config('app.name'));
         $entityLabel = $this->typeMap[$type]['label'];
+        $contentField = match ($type) {
+            'product' => 'product_description_html',
+            'category' => 'category_description_html',
+            'page' => 'page_content_html',
+            default => 'content_html',
+        };
+        $competitorContext = $this->competitorContext();
+        $strategy = match ($type) {
+            'product' => 'Use buyer intent, specs, applications, Canadian availability, B2B supply language, and conversion-focused benefits.',
+            'category' => 'Use collection intent, product range coverage, Canada supplier wording, selection guidance, and internal-link friendly copy.',
+            'page' => 'Use service/page intent, trust signals, Canada-focused value proposition, clear sections, and helpful explanatory content.',
+            'blog' => 'Use informational intent, practical Canadian buyer guidance, FAQ-style support, and topical authority.',
+            default => 'Use search intent and Canada-focused commercial relevance.',
+        };
 
-        $systemPrompt = 'You are an expert SEO copywriter. Output ONLY valid JSON, no markdown, no code fences, no extra commentary.';
+        $systemPrompt = 'You are an elite SEO and Semantic Entity expert. Output ONLY valid JSON, no markdown, no code fences, no extra commentary.';
 
-        $prompt = "Generate SEO metadata for an ecommerce {$entityLabel} on {$siteName}.\n"
+        $competitorGapPrompt = $competitorDomain 
+            ? "CRITICAL COMPETITOR GAP ANALYSIS: You are currently being outranked by {$competitorDomain} for this keyword. Perform an entity extraction on what they likely cover. You MUST aggressively inject those missing semantic entities into this new content to overtake them.\n"
+            : "";
+
+        $prompt = "Generate advanced Canada-focused SEO for an ecommerce {$entityLabel} on {$siteName}.\n"
             . "Name: \"{$name}\"\n"
             . ($description ? "Details: \"" . Str::limit($description, 400) . "\"\n" : '')
+            . "Algorithm: {$strategy}\n"
+            . $competitorGapPrompt
+            . "Local priority: primary targets are Mississauga, Brampton, Toronto, GTA, Ontario, Canada. Include Trade Account and Leave a Review intent only where natural.\n"
+            . "Focus keyword rules: the focus_keyword MUST be a short 2-4 word head term buyers actually type (brand + product type, e.g. \"knipex diagonal cutters\"). NEVER include sizes, dimensions, voltages, inch marks, or model numbers in it.\n"
+            . "Semantic SEO & Entity Rules (STRICT):\n"
+            . "  - You must utilize Latent Semantic Indexing (LSI). Do not just repeat the focus keyword; naturally weave in deeply related topical entities (e.g., if selling 'safety boots', mention 'steel toe', 'slip resistant', 'CSA approved', 'workplace safety standards').\n"
+            . "  - Analyze the user intent and provide comprehensive information that answers 'People Also Ask' questions directly in the content body.\n"
+            . "Keyword distribution rules (STRICT):\n"
+            . "  - Title MUST start with the exact focus keyword (first 4 words). Include one power word (Best/Top/Trusted/Wholesale/Certified) and the year 2026. Keep 50-60 chars.\n"
+            . "  - Meta description: 150-160 chars EXACTLY, NEVER under 150. Must contain focus keyword AND at least one secondary LSI keyword AND a clear CTA.\n"
+            . "  - Content: focus keyword must appear in at least one <h2> AND 5-8 times in the body (≈1% density — never stuffed).\n"
+            . "  - Content MUST have at least 3 <h2> subheadings and 500+ words total.\n"
+            . "  - At least 4 distinct secondary/LSI keywords must appear naturally in the content body.\n"
+            . "Writing style: short sentences under 20 words. Active voice only. Positive, benefit-driven tone. No fluff or filler paragraphs.\n"
+            . $competitorContext
+            . $this->keywordTargetingContext($type . ':' . $name)
+            . "Also return 4-6 genuine FAQs (question + answer) that match real Canadian buyer questions — specific, useful answers only.\n"
             . "Return ONLY this JSON shape with no other text:\n"
-            . '{"title":"SEO title 30-60 chars","description":"meta description 120-160 chars","focus_keyword":"primary keyword phrase"}';
+            . '{"title":"SEO title 50-60 chars, STARTS with focus keyword, power word + 2026","description":"meta description 150-160 chars EXACTLY, focus keyword + 1 secondary LSI keyword + CTA","focus_keyword":"2-4 word head keyword, no sizes/model numbers","secondary_keywords":["LSI keyword 1","LSI keyword 2","Entity 3","Entity 4","LSI 5"],"'.$contentField.'":"clean HTML; 500+ words; 3+ <h2> sections; focus keyword in first <h2> and 5-8x in body; 4+ secondary LSI keywords woven in; answers PAA questions; short active sentences; Canada GTA buyer intent","faqs":[{"question":"...","answer":"..."}]}';
 
         try {
-            $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 400]);
+            $raw = $ai->generate($prompt, $systemPrompt, ['max_tokens' => 2400]);
             if (!$raw) {
                 return null;
             }
@@ -570,11 +2463,924 @@ class AiSeoBoardService
                 'title'         => isset($decoded['title']) ? Str::limit(trim((string) $decoded['title']), 60, '') : null,
                 'description'   => isset($decoded['description']) ? Str::limit(trim((string) $decoded['description']), 160, '') : null,
                 'focus_keyword' => isset($decoded['focus_keyword']) ? Str::limit(trim((string) $decoded['focus_keyword']), 80, '') : null,
+                'secondary_keywords' => isset($decoded['secondary_keywords']) && is_array($decoded['secondary_keywords'])
+                    ? array_values(array_filter(array_map(fn($k) => Str::limit(trim((string) $k), 80, ''), $decoded['secondary_keywords'])))
+                    : null,
+                'content_html' => $decoded[$contentField] ?? $decoded['content_html'] ?? null,
+                'faqs'         => $this->normalizeFaqs($decoded['faqs'] ?? null),
+                'howto_steps'  => isset($decoded['howto_steps']) && is_array($decoded['howto_steps'])
+                    ? array_values(array_filter(array_map(fn($s) => trim(strip_tags((string) (is_array($s) ? ($s['text'] ?? '') : $s))), $decoded['howto_steps'])))
+                    : null,
             ];
         } catch (Throwable $e) {
             logger()->warning('AiSeoBoard ai bundle failed', ['e' => $e->getMessage()]);
             return null;
         }
+    }
+
+    protected function contentPatch(Model $entity, string $type, ?array $aiData, array $meta): array
+    {
+        $html = trim((string) ($aiData['content_html'] ?? ''));
+        if ($html === '') {
+            $html = $this->templateContentHtml($this->displayName($entity, $type), $type, $meta, $entity);
+        }
+
+        $name = $this->displayName($entity, $type);
+        $html = $this->ensureSeoContentSignals($html, $name, $type, $meta, $entity);
+        $html = $this->cleanGeneratedHtml($html);
+        if ($html === '') {
+            return [];
+        }
+
+        $table = $entity->getTable();
+        $patch = [];
+
+        if ($type === 'product') {
+            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 500)) {
+                $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta, $entity, $type);
+            }
+            // Short summary fields are filled once when empty, never refreshed on a
+            // word/keyword rule — a verbose focus keyword can never match a blurb.
+            if (Schema::hasColumn($table, 'short_description') && $this->isBlank($entity->short_description ?? null)) {
+                $patch['short_description'] = $this->shortSeoText($name, $type, $meta);
+            }
+        } elseif ($type === 'category') {
+            if (Schema::hasColumn($table, 'top_description') && $this->isBlank($entity->top_description ?? null)) {
+                $patch['top_description'] = $this->categoryIntroHtml($name, $meta);
+            }
+            if (Schema::hasColumn($table, 'bottom_description') && $this->needsSeoContentRefresh($entity->bottom_description ?? null, $meta, 500)) {
+                $patch['bottom_description'] = $this->mergeSeoHtml($entity->bottom_description ?? null, $html, $meta, $entity, $type);
+            }
+        } elseif ($type === 'page' && Schema::hasColumn($table, 'content') && $this->needsSeoContentRefresh($entity->content ?? null, $meta, 500)) {
+            $patch['content'] = $this->mergeSeoHtml($entity->content ?? null, $html, $meta, $entity, $type);
+        } elseif ($type === 'blog') {
+            if (Schema::hasColumn($table, 'description') && $this->needsSeoContentRefresh($entity->description ?? null, $meta, 500)) {
+                $patch['description'] = $this->mergeSeoHtml($entity->description ?? null, $html, $meta, $entity, $type);
+            }
+            if (Schema::hasColumn($table, 'short_description') && $this->isBlank($entity->short_description ?? null)) {
+                $patch['short_description'] = $this->shortSeoText($name, $type, $meta);
+            }
+        }
+
+        return $patch;
+    }
+
+    protected function isThinContent($value, int $minWords): bool
+    {
+        return str_word_count(strip_tags((string) $value)) < $minWords;
+    }
+
+    protected function needsSeoContentRefresh($value, array $meta, int $minWords, bool $needHeading = true): bool
+    {
+        $html = trim((string) $value);
+        $plain = trim(preg_replace('/\s+/', ' ', strip_tags($html)));
+        $focus = trim((string) ($meta['focus_keyword'] ?? ''));
+
+        if (str_word_count($plain) < $minWords) {
+            return true;
+        }
+
+        // Already SEO-processed once (has injected context links), meets the word
+        // target AND still carries the current focus keyword → treat as done ONLY
+        // when it also has proper heading structure and FAQ content, otherwise it
+        // will still fail the has_multiple_h2 (w=4) and has_faq (w=6) scoring checks.
+        $h2Count = $html !== '' ? preg_match_all('/<h2[\s>]/i', $html) : 0;
+        $hasFaq  = $html !== ''
+            && (preg_match('/<h[2-4][^>]*>\s*(frequently asked|faq|common question)/i', $html)
+                || preg_match('/frequently asked questions|FAQ/i', $plain)
+                || preg_match_all('/[^\.\?]{10,}\?/u', $plain) >= 2);
+        if (str_contains($html, 'data-seo-context-links')
+            && ($focus === '' || mb_stripos($plain, $focus) !== false)
+            && ($focus === '' || $this->htmlHeadingContains($html, $focus))
+            && $h2Count >= 3
+            && $hasFaq
+        ) {
+            return false;
+        }
+
+        if ($focus !== '' && mb_stripos($plain, $focus) === false) {
+            return true;
+        }
+        if ($needHeading && $focus !== '' && !$this->htmlHeadingContains($html, $focus)) {
+            return true;
+        }
+        if ($needHeading && !str_contains($html, 'data-seo-context-links')) {
+            return true;
+        }
+
+        // Even if previously processed, refresh if heading structure or FAQ is missing,
+        // since those are scored checks (has_multiple_h2 +4, has_faq +6, has_subheadings +5).
+        if ($h2Count < 2 || !$hasFaq) {
+            return true;
+        }
+
+        return false;
+    }
+
+    protected function mergeSeoHtml($current, string $generated, array $meta, ?Model $entity = null, ?string $type = null): string
+    {
+        $current = trim((string) $current);
+        if ($current === '') {
+            return $generated;
+        }
+
+        $focus = trim((string) ($meta['focus_keyword'] ?? ''));
+        $plain = trim(preg_replace('/\s+/', ' ', strip_tags($current)));
+
+        // Idempotency guard: once SEO content has been injected (marker present),
+        // never prepend the generated block again — otherwise the description
+        // doubles in size on every autopilot batch. When the focus keyword has
+        // CHANGED, or heading structure/FAQ is still missing, regenerate instead.
+        if (str_contains($current, 'data-seo-context-links')) {
+            $mergeH2Count = preg_match_all('/<h2[\s>]/i', $current);
+            $mergeFaq     = preg_match('/<h[2-4][^>]*>\s*(frequently asked|faq|common question)/i', $current)
+                || preg_match('/frequently asked questions|FAQ/i', $plain)
+                || preg_match_all('/[^\.\?]{10,}\?/u', $plain) >= 2;
+            if (($focus === '' || mb_stripos($plain, $focus) !== false)
+                && ($focus === '' || $this->htmlHeadingContains($current, $focus))
+                && $mergeH2Count >= 3
+                && $mergeFaq
+            ) {
+                return $current;
+            }
+
+            // Strip either the old template (H2 "...for Canada and GTA Buyers") or
+            // the current template (H2 "...Canadian Supply Guide") through the
+            // closing "Buying Guidance" H3, then also remove the link paragraph.
+            $stripped = preg_replace(
+                '/<h2[^>]*>[^<]*(?:Canadian Supply Guide|for Canada and GTA Buyers)[^<]*<\/h2>.*?<h3[^>]*>\s*Buying Guidance\s*<\/h3>\s*<p[^>]*>.*?<\/p>/su',
+                '',
+                $current,
+                1
+            );
+            $stripped = preg_replace('/<p[^>]*data-seo-context-links[^>]*>.*?<\/p>/su', '', (string) $stripped, 1);
+
+            return trim($generated . "\n\n" . trim((string) $stripped));
+        }
+        if ($focus !== '' && mb_stripos($plain, $focus) !== false && str_word_count($plain) >= 300 && $this->htmlHeadingContains($current, $focus)) {
+            if (!str_contains($current, 'data-seo-context-links')) {
+                return $current . "\n\n" . $this->seoLinkParagraph($meta, $entity, $type);
+            }
+            return $current;
+        }
+
+        return $generated . "\n\n" . $current;
+    }
+
+    protected function htmlHeadingContains(string $html, string $needle): bool
+    {
+        if ($html === '' || $needle === '') {
+            return false;
+        }
+
+        if (!preg_match_all('/<h[23][^>]*>(.*?)<\/h[23]>/is', $html, $matches)) {
+            return false;
+        }
+
+        foreach ($matches[1] as $heading) {
+            if (mb_stripos(strip_tags($heading), $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function cleanGeneratedHtml(string $html): string
+    {
+        $html = preg_replace('/```(?:html)?|```/', '', $html);
+        $html = trim($html);
+        $html = preg_replace('/\s(on\w+|style)=["\'][^"\']*["\']/i', '', $html);
+        $html = preg_replace('/href=["\']\s*javascript:[^"\']*["\']/i', 'href="#"', $html);
+        return strip_tags($html, '<h2><h3><p><ul><ol><li><strong><em><br><a>');
+    }
+
+    protected function ensureSeoContentSignals(string $html, string $name, string $type, array $meta, ?Model $entity = null): string
+    {
+        $focus = trim((string) ($meta['focus_keyword'] ?? ''));
+        if ($focus === '') {
+            $focus = $this->primaryCanadaKeyword($name, $type);
+            $meta['focus_keyword'] = $focus;
+        }
+
+        $plain = trim(preg_replace('/\s+/', ' ', strip_tags($html)));
+        // Never prepend a core block when the html is already the template output
+        // (has the context-links marker), as that would double the keyword density.
+        $alreadyHasTemplate = str_contains($html, 'data-seo-context-links');
+        $needsCoreBlock = !$alreadyHasTemplate
+            && (str_word_count($plain) < 500
+                || mb_stripos($plain, $focus) === false
+                || !$this->htmlHeadingContains($html, $focus));
+
+        if ($needsCoreBlock) {
+            return $this->seoSupportHtml($name, $type, $meta, $entity) . ($html !== '' ? "\n\n" . $html : '');
+        }
+
+        if (!str_contains($html, 'data-seo-context-links')) {
+            $html .= "\n\n" . $this->seoLinkParagraph($meta, $entity, $type);
+        }
+
+        return $html;
+    }
+
+    protected function seoSupportHtml(string $name, string $type, array $meta, ?Model $entity = null): string
+    {
+        $focus       = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
+        // For long keywords (4+ words), use a short pronoun in secondary mentions to
+        // keep keyword density in the 0.5–2.5% range and avoid the stuffing penalty.
+        $shortRef = (str_word_count($focus) >= 4)
+            ? match ($type) { 'product' => 'this product', 'category' => 'this category', default => 'this' }
+            : $focus;
+        $rawSecondaries = $meta['secondary_keywords'] ?? null;
+        if (is_string($rawSecondaries)) {
+            $rawSecondaries = array_filter(array_map('trim', preg_split('/[\r\n,]+/', $rawSecondaries)));
+        }
+        // Strip the focus keyword prefix from secondary keywords before display so
+        // long-tail phrases like "focus keyword Mississauga, focus keyword Brampton"
+        // don't inflate the focus keyword density into the stuffing range (> 3%).
+        $rawKeywords = array_slice($rawSecondaries ?: $this->canadaKeywordSet($name, $type), 0, 15);
+        $focusLower  = mb_strtolower($focus);
+        $dedupedKeywords = array_map(function (string $kw) use ($focusLower): string {
+            $stripped = trim(mb_substr($kw, mb_stripos($kw, $focusLower) === 0 ? mb_strlen($focusLower) : 0));
+            return $stripped !== '' ? $stripped : $kw;
+        }, $rawKeywords);
+        $keywordList = implode(', ', array_filter($dedupedKeywords));
+        $areaText    = 'Mississauga, Brampton, Toronto and the wider GTA';
+
+        $intro = match ($type) {
+            'product'  => "{$focus} is available for Canadian buyers who need reliable supply, clear product details, and fast purchasing support. BHS Supplies helps contractors, maintenance teams, and trade customers compare fit, availability, and value across {$areaText}. Whether you are ordering a single unit or sourcing for a larger project, this page covers the key selection points and purchasing steps.",
+            'category' => "{$focus} options help Canadian buyers compare product families, availability, and trade purchasing needs in one place. This category supports sourcing for contractors, maintenance teams, and local buyers across {$areaText}. Organized by application, so the right product is easier to find for any commercial, residential, or industrial job.",
+            'page'     => "{$focus} information is organized for Canadian customers who need clear next steps, local trust signals, and practical support from BHS Supplies across {$areaText}. Contact details, trade account options, and common purchasing questions are addressed here.",
+            default    => "{$focus} is covered with Canadian search intent, buyer questions, and practical guidance for customers across {$areaText}. BHS Supplies stocks a broad range to serve both one-off purchases and ongoing supply needs.",
+        };
+
+        $whyList = match ($type) {
+            'product'  => '<li>Quality HVAC, plumbing, water systems, and tools available for Canadian contractors and trade buyers.</li>'
+                        . '<li>Fast shipping and same-day pickup available in the GTA region for urgent supply needs.</li>'
+                        . '<li>Trade account pricing for volume buyers, maintenance teams, and repeat business customers.</li>'
+                        . '<li>Knowledgeable staff who can assist with product matching and compatibility questions.</li>',
+            'category' => '<li>Wide selection across HVAC, plumbing, water treatment, and tools for Canadian trade buyers.</li>'
+                        . '<li>Organized by application so contractors and maintenance teams find compatible products faster.</li>'
+                        . '<li>Bulk order support and trade account discounts available for qualifying businesses.</li>'
+                        . '<li>Serving commercial, residential, and industrial buyers across the GTA.</li>',
+            default    => '<li>Canada-focused supply for HVAC, plumbing, water systems, and tools.</li>'
+                        . '<li>Trade account support for bulk and repeat business orders across the GTA.</li>'
+                        . '<li>Fast local fulfillment in Mississauga, Brampton, and Toronto.</li>'
+                        . '<li>Competitive pricing with volume discounts for trade customers.</li>',
+        };
+
+        $selectionNotes = match ($type) {
+            'product'  => "Selecting the right {$focus} depends on application requirements, site conditions, and compatibility with existing systems. Canadian buyers should confirm the material grade, pressure or capacity rating, and any local code requirements before ordering. BHS Supplies can assist with product matching when specifications are unclear. Always check installation requirements and whether accessories or adapters are needed before finalizing your order.",
+            'category' => "Choosing the right {$focus} product starts with defining the application: commercial, residential, or industrial. Review compatibility with existing equipment, required certifications, and order quantity before finalizing a purchase. Trade buyers can open a BHS Supplies account to streamline repeat purchasing and access volume pricing across the full product range.",
+            'page'     => "Getting the most from {$focus} requires understanding what information or service is available and how to take the next step. Canadian customers can contact BHS Supplies directly for clarification, trade account setup, or to request a product quote. Response times are fast for trade inquiries during business hours.",
+            default    => "Selecting the right {$focus} option depends on technical requirements, application context, and budget. Review specifications carefully before ordering and contact BHS Supplies with any compatibility questions. The team is available to help match products to specific job requirements.",
+        };
+
+        $faqQ1 = match ($type) {
+            'product'  => "What should I check before ordering {$shortRef}?",
+            'category' => "How do I find the right {$shortRef} for my application?",
+            default    => "How do I get started with {$shortRef} at BHS Supplies?",
+        };
+        $faqA1 = match ($type) {
+            'product'  => "Confirm the size, material grade, pressure rating, and compatibility with your existing system. Review local code requirements if applicable. BHS Supplies can assist with product matching when specifications are unclear — contact the team with your job site details for a faster answer.",
+            'category' => "Start by defining your application — commercial, residential, or industrial. Filter by required certifications, material type, and operating conditions. Use the product detail pages to compare specifications side by side before adding to your order.",
+            default    => "Contact BHS Supplies through the website or visit the trade counter directly. Trade account holders receive priority support and access to volume pricing across the full range.",
+        };
+        $faqQ2 = "Does BHS Supplies serve customers in Mississauga, Brampton, and Toronto?";
+        $faqA2 = "Yes. BHS Supplies serves contractors, maintenance teams, and trade buyers across Mississauga, Brampton, Toronto, and the wider GTA. Same-day pickup and fast local delivery options are available depending on stock availability and order size. Call ahead to confirm stock before making a trip.";
+        $faqQ3 = "Can I open a trade account for {$shortRef} purchases?";
+        $faqA3 = "Yes. BHS Supplies offers trade accounts for contractors, facility managers, and volume buyers. Trade accounts provide access to volume pricing, priority order processing, and streamlined repeat ordering. Apply through the website or speak to the team at the trade counter to get started.";
+
+        return
+            // H2 #1 — primary topic introduction
+            '<h2>' . e(Str::title($focus)) . ' — Canadian Supply Guide</h2>'
+            . '<p>' . e($intro) . '</p>'
+            // H2 #2 — trust and differentiation
+            . '<h2>' . e('Why Canadian Buyers Choose BHS Supplies for ' . Str::title($focus)) . '</h2>'
+            . '<p>BHS Supplies is a Canadian trade supply house serving HVAC technicians, plumbers, contractors, and facility managers across the GTA. Buyers rely on BHS Supplies for consistent stock levels, transparent pricing, and responsive support.</p>'
+            . '<ul>' . $whyList . '</ul>'
+            // H2 #3 — selection and buying information
+            . '<h2>' . e('How to Select the Right ' . Str::title($focus)) . '</h2>'
+            . '<p>' . e($selectionNotes) . '</p>'
+            . '<h3>Local Availability and Coverage</h3>'
+            . '<p>This page is optimized for buyers searching in ' . e($areaText) . '. BHS Supplies stocks products for both trade and retail customers with pickup available at the main location and delivery across the region.</p>'
+            . '<h3>Related Products and Keywords</h3>'
+            . '<p>' . e($keywordList) . '</p>'
+            // H2 #4 — FAQ (triggers has_faq scoring check)
+            . '<h2>Frequently Asked Questions</h2>'
+            . '<p><strong>' . e($faqQ1) . '</strong><br>' . e($faqA1) . '</p>'
+            . '<p><strong>' . e($faqQ2) . '</strong><br>' . e($faqA2) . '</p>'
+            . '<p><strong>' . e($faqQ3) . '</strong><br>' . e($faqA3) . '</p>'
+            . '<h3>Buying Guidance</h3>'
+            . '<p>' . e("First, confirm the {$shortRef} specifications, application, material, and compatibility. Next, compare delivery timelines or local pickup availability. For trade buyers, a BHS Supplies account simplifies repeat ordering and unlocks volume pricing.") . '</p>'
+            . $this->seoLinkParagraph($meta, $entity, $type);
+    }
+
+    protected function seoLinkParagraph(array $meta, ?Model $entity = null, ?string $type = null): string
+    {
+        $focus = trim((string) ($meta['focus_keyword'] ?? 'products'));
+        $shortRef = (str_word_count($focus) >= 4)
+            ? match ($type ?? '') { 'product' => 'this product', 'category' => 'this category', default => 'these' }
+            : $focus;
+        $focus = $shortRef;
+        $links = $this->contextualInternalLinks($entity, $type);
+        $anchors = array_map(
+            fn(array $link) => '<a href="' . e($link['url']) . '">' . e($link['label']) . '</a>',
+            $links
+        );
+
+        return '<p data-seo-context-links="1">For related ' . e($focus) . ' options and next steps, review '
+            . implode(', ', $anchors)
+            . '. Canadian business buyers can also review general small business guidance from <a href="https://www.canada.ca/en/services/business.html" rel="nofollow noopener" target="_blank">Canada.ca</a> while comparing purchasing requirements.</p>';
+    }
+
+    protected function contextualInternalLinks(?Model $entity, ?string $type): array
+    {
+        $links = [];
+
+        $siteBase = rtrim(config('seo.site_url', url('/')), '/');
+
+        try {
+            if ($entity && $type === 'product' && $category = $entity->main_category) {
+                if (!empty($category->slug)) {
+                    $links[] = [
+                        'url' => $siteBase . '/category/' . ltrim((string) $category->slug, '/'),
+                        'label' => Str::limit((string) ($category->name ?: 'related category'), 70, ''),
+                    ];
+                }
+            } elseif ($entity && $type === 'category' && $parent = $entity->parentCategory) {
+                if (!empty($parent->slug)) {
+                    $links[] = [
+                        'url' => $siteBase . '/category/' . ltrim((string) $parent->slug, '/'),
+                        'label' => Str::limit((string) ($parent->name ?: 'parent category'), 70, ''),
+                    ];
+                }
+            }
+        } catch (Throwable $e) {
+            // The core internal-link set below is still useful if a relation is unavailable.
+        }
+
+        $base = rtrim(config('seo.site_url', url('/')), '/');
+        $links[] = ['url' => $base . '/shop', 'label' => 'BHS Supplies products'];
+        $links[] = ['url' => $base . '/contractor-trade-account', 'label' => 'contractor trade account'];
+        $links[] = ['url' => $base . '/review', 'label' => 'leave a review'];
+        $links[] = $this->localLandingLink($entity, $type);
+
+        return collect($links)->unique('url')->values()->all();
+    }
+
+    protected function localLandingLink(?Model $entity, ?string $type): array
+    {
+        $locations = [
+            ['slug' => 'mississauga', 'label' => 'HVAC supplies Mississauga'],
+            ['slug' => 'brampton', 'label' => 'HVAC supplies Brampton'],
+            ['slug' => 'toronto', 'label' => 'HVAC supplies Toronto'],
+        ];
+        $seed = ($type ?: 'page') . ':' . ($entity?->getKey() ?: ($entity?->slug ?? 'default'));
+        $location = $locations[abs(crc32($seed)) % count($locations)];
+
+        $base = rtrim(config('seo.site_url', url('/')), '/');
+        return [
+            'url' => $base . '/hvac-supplies-' . $location['slug'],
+            'label' => $location['label'],
+        ];
+    }
+
+    protected function hasAnyLink(string $html): bool
+    {
+        return (bool) preg_match('/<a\s[^>]*href=["\'][^"\']+["\']/i', $html);
+    }
+
+    protected function titleWithFocus(string $focus, string $name, string $type): string
+    {
+        $focusTitle = Str::title(trim($focus));
+
+        // Every tail carries a power word + positive-sentiment word ("Trusted",
+        // "Top", "Best") and a number ("2026") — three separate analyzer checks.
+        // The focus keyword leads so it lands inside the first four title words.
+        $tails = match ($type) {
+            'product'  => ['Trusted Canada Supplier 2026', 'Trusted Supplier 2026', 'Top Canada 2026', 'Best 2026'],
+            'category' => ['Best Wholesale Canada 2026', 'Top Wholesale 2026', 'Top Canada 2026', 'Best 2026'],
+            'page'     => ['Trusted Canada Guide 2026', 'Top Canada Guide 2026', 'Top Guide 2026', 'Best 2026'],
+            default    => ['Trusted Canada Guide 2026', 'Top Guide 2026', 'Best 2026'],
+        };
+
+        $title = '';
+        foreach ($tails as $tail) {
+            $candidate = trim($focusTitle . ' | ' . $tail);
+            if (mb_strlen($candidate) <= 60) {
+                $title = $candidate;
+                break;
+            }
+        }
+        if ($title === '') {
+            $title = trim(Str::limit($focusTitle, 48, '') . ' | Best 2026');
+        }
+        if (mb_strlen($title) < 30) {
+            $title .= ' | BHS Supplies';
+        }
+
+        return Str::limit($title, 60, '');
+    }
+
+    protected function descriptionWithFocus(string $focus, string $name, string $type): string
+    {
+        $focusTitle = Str::title(trim($focus));
+        // Include a secondary keyword phrase naturally to pass TruSEO's secondary_kw_in_desc check.
+        $secondary = match ($type) {
+            'product'  => Str::lower($name) . ' supplier',
+            'category' => Str::lower($name) . ' wholesale',
+            'page'     => Str::lower($name) . ' Canada',
+            'blog'     => Str::lower($name) . ' guide',
+            default    => Str::lower($name),
+        };
+        $secondaryTitle = Str::title($secondary);
+        $text = "Shop {$focusTitle} — trusted {$secondaryTitle} for Mississauga, Brampton, Toronto and GTA buyers. Trade pricing, stock, fast pickup. Order from BHS Supplies.";
+
+        return $this->fitDescription($text);
+    }
+
+    protected function shortSeoText(string $name, string $type, array $meta): string
+    {
+        $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, $type)));
+        return Str::limit(strip_tags($this->descriptionWithFocus($focus, $name, $type)), 240, '');
+    }
+
+    protected function templateTitle(string $name, string $type): string
+    {
+        return $this->titleWithFocus($this->primaryCanadaKeyword($name, $type), $name, $type);
+    }
+
+    protected function templateDescription(string $name, string $type): string
+    {
+        $site = get_setting('website_name', config('app.name'));
+        $text = match ($type) {
+            'product'  => 'Shop ' . $name . ' in Canada with reliable supply, clear specs, competitive trade pricing, and expert support for buyers in Mississauga, Brampton, Toronto and the GTA.',
+            'category' => 'Explore ' . $name . ' in Canada. Compare options, request trade pricing, and source dependable products for business and industrial needs across the GTA.',
+            'page'     => 'Learn about ' . $name . ' for Canadian customers, including helpful details, trusted support, trade account options, and clear next steps from ' . $site . '.',
+            default    => 'Find practical Canada-focused information about ' . $name . ' with expert guidance, trade support, and useful next steps from ' . $site . '.',
+        };
+
+        return $this->fitDescription($text);
+    }
+
+    /**
+     * Keep a meta description inside Google's 150–160 char sweet spot: pad short
+     * copy with a natural suffix, hard-trim anything over 160 on a word boundary.
+     */
+    protected function fitDescription(string $text, int $min = 150, int $max = 160): string
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $text));
+
+        if (mb_strlen($text) < $min) {
+            foreach ([' Fast Canada-wide shipping and trade accounts available.', ' Trusted Canadian supplier with bulk and trade pricing.', ' Order online or request a quote today.'] as $suffix) {
+                if (mb_strlen($text) >= $min) {
+                    break;
+                }
+                $text = rtrim($text, '.') . '.' . $suffix;
+            }
+        }
+
+        if (mb_strlen($text) > $max) {
+            $text = mb_substr($text, 0, $max);
+            $lastSpace = mb_strrpos($text, ' ');
+            if ($lastSpace !== false && $lastSpace > $min - 15) {
+                $text = mb_substr($text, 0, $lastSpace);
+            }
+            $text = rtrim($text, " ,.;:") . '.';
+        }
+
+        return $text;
+    }
+
+    protected function normalizeFocusKeyword($value, string $name, string $type): string
+    {
+        $keyword = trim(preg_replace('/\s+/', ' ', strip_tags((string) $value)));
+        if ($keyword === '') {
+            $keyword = $this->primaryCanadaKeyword($name, $type);
+        }
+
+        $keyword = preg_replace('/\s+\|\s+.*$/', '', $keyword);
+        $keyword = $this->headTermKeyword($keyword);
+
+        if ($keyword === '') {
+            $keyword = $this->headTermKeyword($this->primaryCanadaKeyword($name, $type));
+        }
+        if ($keyword === '') {
+            $keyword = Str::lower(trim($name)) ?: 'bhs supplies';
+        }
+
+        return Str::lower($keyword);
+    }
+
+    /**
+     * Reduce a verbose product/category name to a 2-4 word head term buyers
+     * actually search ("knipex diagonal cutters", not the full 58-char spec name).
+     * The analyzer requires the focus keyword inside the FIRST FOUR words of the
+     * title and at 0.5%+ content density — both impossible for long spec names,
+     * which is exactly why optimized URLs were stalling at 74-77.
+     */
+    protected function headTermKeyword(string $keyword): string
+    {
+        $keyword = Str::lower(trim($keyword));
+
+        // Keep only the head segment before connector words / separators.
+        $keyword = preg_split('/\s+(?:with|for|featuring|including)\s+|[,|]/', $keyword)[0] ?? $keyword;
+
+        // Strip SKU parentheses, inch marks, dimension/spec tokens and stray symbols.
+        $keyword = preg_replace('/\([^)]*\)/', ' ', $keyword);
+        $keyword = str_replace(['"', '″', '“', '”', '®', '™'], ' ', $keyword);
+        $keyword = str_replace('-', ' ', $keyword);
+        $keyword = preg_replace('/\b\d+(?:[\/.x×*]\d+)*(?:\s?(?:v|volt|volts|va|w|kw|hz|mm|cm|m|in|inch|inches|ft|kn|amp|amps|a|btu|gal|gpm|l|lb|lbs|kg|oz|pc|pcs|pack|gauge|awg))?\b/u', ' ', $keyword);
+        $keyword = preg_replace('/[^\p{L}\p{N} ]+/u', ' ', $keyword);
+        $keyword = trim(preg_replace('/\s+/', ' ', $keyword));
+
+        $words = array_values(array_filter(explode(' ', $keyword), fn($w) => mb_strlen($w) > 1));
+        if (count($words) > 4) {
+            // Brand usually leads; the head noun usually ends ("... water pump pliers").
+            $words = array_merge([$words[0]], array_slice($words, -3));
+        }
+        $keyword = implode(' ', $words);
+
+        if (mb_strlen($keyword) > 42) {
+            $keyword = mb_substr($keyword, 0, 42);
+            $lastSpace = mb_strrpos($keyword, ' ');
+            if ($lastSpace !== false && $lastSpace > 12) {
+                $keyword = mb_substr($keyword, 0, $lastSpace);
+            }
+        }
+
+        return trim($keyword, " \t\n\r\0\x0B-_,.;:");
+    }
+
+    /**
+     * True only when a billable AI request could actually change something the
+     * AI is the source for (title / description / focus / secondary keywords /
+     * on-page content / missing schema). When false, the autopilot still applies
+     * the free template-derived meta below, but skips the paid AI call — so it no
+     * longer burns budget on URLs that re-score with no change every batch.
+     */
+    protected function aiFixWouldHelp(Model $entity, string $type, array $meta): bool
+    {
+        $focus = trim((string) ($meta['focus_keyword'] ?? ''));
+
+        if ($this->needsFocusKeywordRefresh($meta['focus_keyword'] ?? null)) {
+            return true;
+        }
+        if ($this->needsMetaTitleRefresh($meta['meta_title'] ?? null, $focus)) {
+            return true;
+        }
+        if ($this->needsMetaDescriptionRefresh($meta['meta_description'] ?? null, $focus)) {
+            return true;
+        }
+        if ($this->needsSecondaryKeywordsRefresh($meta['secondary_keywords'] ?? null)) {
+            return true;
+        }
+        if (empty($meta['schema_json'])) {
+            return true;
+        }
+
+        // Schema exists but was generated for a different focus keyword — needs refresh.
+        if ($focus !== '' && !empty($meta['schema_json'])) {
+            $schemaStr = is_array($meta['schema_json'])
+                ? json_encode($meta['schema_json'])
+                : (string) $meta['schema_json'];
+            if (!Str::contains(mb_strtolower($schemaStr), mb_strtolower($focus))) {
+                return true;
+            }
+        }
+
+        // Even when meta is complete, check content-level scoring signals that
+        // still keep the score below 80: 500+ word check (w=8), 3 H2s (w=4), FAQ (w=6).
+        // Without this, entities with short/thin content get source='complete' and
+        // never receive a billable AI call — stuck below DONE score forever.
+        $rawHtml = trim((string) $this->rawContent($entity, $type));
+        if ($rawHtml !== '') {
+            $wordCount = str_word_count(strip_tags($rawHtml));
+            if ($wordCount < 500) {
+                return true;
+            }
+            if (preg_match_all('/<h2[\s>]/i', $rawHtml) < 3) {
+                return true;
+            }
+            $plainCheck = trim(preg_replace('/\s+/', ' ', strip_tags($rawHtml)));
+            $hasFaqCheck = preg_match('/<h[2-4][^>]*>\s*(frequently asked|faq|common question)/i', $rawHtml)
+                || preg_match('/frequently asked questions|FAQ/i', $plainCheck)
+                || preg_match_all('/[^\.\?]{10,}\?/u', $plainCheck) >= 2;
+            if (!$hasFaqCheck) {
+                return true;
+            }
+        }
+
+        return $this->autopilotContentNeedsWork($entity, $type, $meta);
+    }
+
+    /**
+     * Does the entity's PRIMARY long-form content still need AI work? Only the
+     * main body field gates the paid AI call — short/summary fields are filled
+     * for free when empty (see contentPatch) and must never force a billable
+     * request, or a verbose focus keyword re-bills "complete" URLs every batch.
+     */
+    protected function autopilotContentNeedsWork(Model $entity, string $type, array $meta): bool
+    {
+        $table = $entity->getTable();
+
+        [$field, $minWords] = match ($type) {
+            // 500 words aligns with the TruSEO content_length_500 scoring check (weight 8).
+            // 300 was too low — content at 350 words was "done" to autopilot but still failing scoring.
+            'product'  => ['description', 500],
+            'category' => ['bottom_description', 500],
+            'page'     => ['content', 500],
+            'blog'     => ['description', 500],
+            default    => [null, 0],
+        };
+
+        return $field !== null
+            && Schema::hasColumn($table, $field)
+            && $this->needsSeoContentRefresh($entity->{$field} ?? null, $meta, $minWords);
+    }
+
+    /** True when a content field is effectively empty (no visible text). */
+    protected function isBlank($value): bool
+    {
+        return trim(preg_replace('/\s+/', ' ', strip_tags((string) $value))) === '';
+    }
+
+    protected function needsFocusKeywordRefresh($value): bool
+    {
+        // Verbose spec-name keywords (> 4 words / > 42 chars) can never satisfy the
+        // density + title-start analyzer checks, capping pages at ~77 forever —
+        // flag them so they get regenerated as short head terms.
+        $value = trim((string) $value);
+        return $value === '' || mb_strlen($value) > 42 || str_word_count($value) > 4;
+    }
+
+    protected function needsMetaTitleRefresh($value, string $focus): bool
+    {
+        $value = trim((string) $value);
+        $len = mb_strlen($value);
+
+        if ($value === '' || $len < 30 || $len > 60) {
+            return true;
+        }
+        if ($focus !== '' && mb_stripos($value, $focus) === false) {
+            return true;
+        }
+        // Refresh when title lacks a power word, positive-sentiment word, OR number —
+        // these are scored by TruSEO (5+4+4=13 pts) and the template title includes all three.
+        $hasPower    = (bool) preg_match('/\b(best|top|ultimate|proven|essential|complete|expert|professional|premium|quality|trusted|reliable|affordable|official|genuine|wholesale|bulk|fast|guaranteed|certified|leading)\b/i', $value);
+        $hasPositive = (bool) preg_match('/\b(best|top|trusted|proven|quality|reliable|premium|expert|leading|essential|complete|fast|guaranteed|professional|affordable|certified)\b/i', $value);
+        $hasNumber   = (bool) preg_match('/\d/', $value);
+        return !$hasPower || !$hasPositive || !$hasNumber;
+    }
+
+    protected function needsMetaDescriptionRefresh($value, string $focus, array $secondaries = []): bool
+    {
+        $value = trim((string) $value);
+        $len = mb_strlen($value);
+
+        // Min is 140 to match TruSEO desc_length scoring check (140–160 chars).
+        if ($value === '' || $len < 140 || $len > 160) {
+            return true;
+        }
+        if ($focus !== '' && mb_stripos($value, $focus) === false) {
+            return true;
+        }
+        // Refresh when NO secondary keyword appears in the description — TruSEO awards
+        // 5 pts for secondary_kw_in_desc, which every template description now satisfies.
+        if (!empty($secondaries)) {
+            $valueLower = mb_strtolower($value);
+            $hasSecondary = false;
+            foreach (array_slice($secondaries, 0, 10) as $kw) {
+                $kw = mb_strtolower(trim((string) $kw));
+                if ($kw !== '' && mb_stripos($valueLower, $kw) !== false) {
+                    $hasSecondary = true;
+                    break;
+                }
+            }
+            if (!$hasSecondary) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    protected function needsSecondaryKeywordsRefresh($value): bool
+    {
+        if (is_string($value)) {
+            $value = preg_split('/[\r\n,]+/', $value);
+        }
+
+        return !is_array($value) || count(array_filter($value)) < 5;
+    }
+
+    protected function bestTitleForFocus($aiTitle, string $focus, string $name, string $type): string
+    {
+        $aiTitle = trim((string) $aiTitle);
+        $len = mb_strlen($aiTitle);
+
+        // Accept the AI title only when it passes the same bar the analyzer scores:
+        // 30-60 chars, focus keyword within the FIRST FOUR words, and a power word.
+        $titleStart = mb_strtolower(implode(' ', array_slice(explode(' ', $aiTitle), 0, 4)));
+        $hasPowerWord = (bool) preg_match(
+            '/\b(best|top|ultimate|proven|essential|complete|expert|professional|premium|quality|trusted|reliable|affordable|official|genuine|wholesale|bulk|free|fast|guaranteed|certified|authorized|leading)\b/i',
+            $aiTitle
+        );
+
+        if ($aiTitle !== '' && $len >= 30 && $len <= 60
+            && $focus !== '' && mb_stripos($titleStart, $focus) !== false
+            && $hasPowerWord
+        ) {
+            return $aiTitle;
+        }
+
+        return $this->titleWithFocus($focus, $name, $type);
+    }
+
+    protected function bestDescriptionForFocus($aiDescription, string $focus, string $name, string $type): string
+    {
+        $aiDescription = trim((string) $aiDescription);
+        if ($aiDescription !== '' && mb_stripos($aiDescription, $focus) !== false) {
+            return $this->fitDescription($aiDescription);
+        }
+
+        return $this->descriptionWithFocus($focus, $name, $type);
+    }
+
+    protected function primaryCanadaKeyword(string $name, string $type): string
+    {
+        $keyword = match ($type) {
+            'category' => trim($name . ' supplier'),
+            default => trim($name),
+        };
+
+        return Str::limit(Str::lower($keyword), 80, '');
+    }
+
+    protected function canadaKeywordSet(string $name, string $type): array
+    {
+        $base = Str::lower($name);
+        $intent = $type === 'category' ? 'supplier' : ($type === 'product' ? 'buy' : 'services');
+
+        // Geo modifiers — primary GTA service areas.
+        $geo = [
+            "{$base} Mississauga",
+            "{$base} Brampton",
+            "{$base} Toronto",
+            "{$base} GTA",
+            "{$base} Ontario",
+            "{$base} Canada",
+            "{$base} near me",
+        ];
+
+        // Commercial / buyer-intent modifiers — what trade & retail buyers search.
+        $intentKeywords = [
+            "buy {$base} online",
+            "{$base} for sale",
+            "{$base} best price",
+            "{$base} price Canada",
+            "cheap {$base}",
+            "{$base} deals",
+            "order {$base} online",
+            "{$base} same day pickup",
+        ];
+
+        // Industry / supply-chain modifiers — BHS positioning as a wholesale distributor.
+        $industry = [
+            "{$base} wholesale",
+            "{$base} distributor",
+            "{$base} supplier",
+            "{$base} supplies",
+            "wholesale {$base} Canada",
+            "{$base} wholesale distributor",
+            "{$base} trade account",
+            "{$base} for contractors",
+            "{$base} Canadian supplier",
+            "{$intent} {$base} Mississauga",
+        ];
+
+        // Admin-defined related + competitor target keywords (site-wide) so they
+        // appear even when the AI is skipped and template keywords are used.
+        return array_values(array_unique(array_merge(
+            $geo,
+            $intentKeywords,
+            $industry,
+            $this->globalTargetKeywords(),
+            $this->competitorKeywords()
+        )));
+    }
+
+    protected function competitorContext(): string
+    {
+        $raw = (string) get_setting('seo_competitor_urls', get_setting('ai_blog_competitor_urls', ''));
+        $urls = $this->parseCompetitorUrls($raw);
+
+        if (empty($urls)) {
+            return '';
+        }
+
+        return "Competitor websites to outrank/reference for keyword gaps and content angles: "
+            . implode(', ', array_slice($urls, 0, 8))
+            . ". Do not copy their wording. Do not mention competitor brand names.\n";
+    }
+
+    /** Admin-defined site-wide related keywords to target across all entities. */
+    protected function globalTargetKeywords(): array
+    {
+        return $this->parseKeywordList((string) get_setting('seo_target_keywords', ''));
+    }
+
+    /** Competitor keywords the autopilot should compete for and try to outrank. */
+    protected function competitorKeywords(): array
+    {
+        return $this->parseKeywordList((string) get_setting('seo_competitor_keywords', ''));
+    }
+
+    /** Split a newline / comma separated keyword blob into a clean, unique list. */
+    protected function parseKeywordList(string $raw): array
+    {
+        if (trim($raw) === '') {
+            return [];
+        }
+
+        $out = [];
+        foreach (preg_split('/[\r\n,]+/', $raw) as $part) {
+            $kw = trim($part);
+            if ($kw !== '') {
+                $out[] = $kw;
+            }
+        }
+
+        return array_values(array_unique($out));
+    }
+
+    /** Prompt block instructing the AI to target admin related + competitor keywords. */
+    /**
+     * Rotate which 25 keywords appear in the AI prompt so that across many entities
+     * all 81 keywords eventually get targeted, not just the same first 20 every time.
+     * The rotation offset is derived from the entity seed so results are deterministic
+     * per entity (re-running the same entity always picks the same slice).
+     */
+    protected function keywordTargetingContext(string $seed = ''): string
+    {
+        $out = '';
+
+        if ($target = $this->globalTargetKeywords()) {
+            $total  = count($target);
+            $offset = $seed !== '' ? (abs(crc32($seed)) % $total) : 0;
+            $rotated = array_merge(array_slice($target, $offset), array_slice($target, 0, $offset));
+            $out .= "Priority related keywords to weave in naturally where relevant: "
+                . implode(', ', array_slice($rotated, 0, 25)) . ".\n";
+        }
+
+        if ($competitor = $this->competitorKeywords()) {
+            $total2  = count($competitor);
+            $offset2 = $seed !== '' ? (abs(crc32($seed . '_c')) % $total2) : 0;
+            $rotated2 = array_merge(array_slice($competitor, $offset2), array_slice($competitor, 0, $offset2));
+            $out .= "Competitor keywords to compete for and outrank — use naturally, never keyword-stuff: "
+                . implode(', ', array_slice($rotated2, 0, 25)) . ".\n";
+        }
+
+        return $out;
+    }
+
+    protected function parseCompetitorUrls(string $raw): array
+    {
+        if (trim($raw) === '') {
+            return [];
+        }
+
+        $normalized = preg_replace('/(https?:\/\/)/', '|||$1', $raw);
+        $parts = str_contains($normalized, '|||')
+            ? explode('|||', $normalized)
+            : preg_split('/[\r\n,]+/', $raw);
+
+        $urls = [];
+        foreach ($parts as $part) {
+            $url = trim($part);
+            if ($url === '') {
+                continue;
+            }
+            if (!preg_match('#^https?://#i', $url)) {
+                $url = 'https://' . ltrim($url, '/');
+            }
+            if (filter_var($url, FILTER_VALIDATE_URL)) {
+                $urls[] = rtrim($url, '/');
+            }
+        }
+
+        return array_values(array_unique($urls));
+    }
+
+    protected function templateContentHtml(string $name, string $type, array $meta, ?Model $entity = null): string
+    {
+        return $this->seoSupportHtml($name, $type, $meta, $entity);
+    }
+
+    protected function categoryIntroHtml(string $name, array $meta): string
+    {
+        $focus = trim((string) ($meta['focus_keyword'] ?? $this->primaryCanadaKeyword($name, 'category')));
+        return '<p>' . e(Str::title($focus) . ' in Canada with focused selection, helpful product details, trade account support, and local buying coverage for Mississauga, Brampton, Toronto and the GTA.') . '</p>';
     }
 
     protected function grade(int $score): string
@@ -607,9 +3413,10 @@ class AiSeoBoardService
         $count    = count($targets);
         $provider = $providerName ?: get_setting('seo_suite_default_provider', config('seo.default_provider', 'openai'));
 
-        // Per-entity token estimate: ~600 input + 250 output (title+desc+focus_kw)
-        $inPerEntity  = 600;
-        $outPerEntity = 250;
+        // Per-entity estimate covers title, description, keywords, content HTML,
+        // FAQs, and possible provider fallback.
+        $inPerEntity  = 900;
+        $outPerEntity = 1200;
 
         $rates = $this->providerRates($provider);
 
@@ -672,7 +3479,7 @@ class AiSeoBoardService
         $this->assertType($type);
 
         $filters = $payload['filters'] ?? [];
-        $limit   = min((int) ($payload['limit'] ?? 500), 5000);
+        $limit   = max(1, min((int) ($payload['limit'] ?? self::MAX_AUTO_BATCH_TARGETS), self::MAX_AUTO_BATCH_TARGETS));
 
         $query = $this->baseQuery($type);
         $this->applySearch($query, $type, $filters['search'] ?? null);
@@ -697,13 +3504,19 @@ class AiSeoBoardService
     /**
      * Create a SeoFixBatch row and dispatch the worker job. Returns the batch.
      */
-    public function createBatch(array $targets, ?string $providerName = null, ?int $userId = null, ?string $label = null): SeoFixBatch
+    public function createBatch(array $targets, ?string $providerName = null, ?int $userId = null, ?string $label = null, bool $dispatch = true): SeoFixBatch
     {
+        $targets = $this->normalizeNewBatchTargets($targets);
+        if (empty($targets)) {
+            throw new \InvalidArgumentException('All selected URLs are already queued or invalid. Let the active cron batches finish first.');
+        }
+
         $estimate = $this->estimateBatchCost($targets, $providerName);
+        $cronChunked = config('queue.default') === 'sync';
 
         $batch = SeoFixBatch::create([
             'project_id'         => null,
-            'label'              => $label ?: 'AI SEO Board batch — ' . now()->format('Y-m-d H:i'),
+            'label'              => $label ?: 'AI SEO Board batch - ' . now()->format('Y-m-d H:i'),
             'status'             => SeoFixBatch::STATUS_QUEUED,
             'provider'           => $estimate['provider'],
             'total'              => count($targets),
@@ -711,19 +3524,60 @@ class AiSeoBoardService
             'succeeded'          => 0,
             'failed'             => 0,
             'skipped'            => 0,
+            'current_label'      => $cronChunked ? 'Queued for cron chunk processor' : null,
             'estimated_cost_usd' => $estimate['usd'],
             'actual_cost_usd'    => 0,
             'target_ids'         => $targets,
             'options'            => [
                 'ai_call' => $estimate['ai_call'],
                 'rates'   => $this->providerRates($estimate['provider']),
+                'cron_chunked' => $cronChunked,
             ],
             'created_by'         => $userId,
         ]);
 
-        AiAutoFixSeoJob::dispatch($batch->id);
+        if ($dispatch && !$cronChunked) {
+            AiAutoFixSeoJob::dispatch($batch->id);
+        }
 
         return $batch->fresh();
+    }
+
+    protected function normalizeNewBatchTargets(array $targets): array
+    {
+        $activeTargetKeys = [];
+        if (Schema::hasTable('seo_fix_batches')) {
+            $activeTargetKeys = SeoFixBatch::query()
+                ->whereIn('status', [SeoFixBatch::STATUS_QUEUED, SeoFixBatch::STATUS_RUNNING])
+                ->get()
+                ->flatMap(fn(SeoFixBatch $batch) => $batch->target_ids ?? [])
+                ->mapWithKeys(fn(array $target) => [$this->targetKey($target) => true])
+                ->all();
+        }
+
+        $seen = [];
+
+        return collect($targets)
+            ->filter(function ($target) use (&$seen, $activeTargetKeys): bool {
+                if (!is_array($target)) {
+                    return false;
+                }
+
+                $type = (string) ($target['type'] ?? '');
+                $id = (int) ($target['id'] ?? 0);
+                $key = $type . ':' . $id;
+
+                if (!$id || !isset($this->typeMap[$type]) || isset($seen[$key]) || isset($activeTargetKeys[$key])) {
+                    return false;
+                }
+
+                $seen[$key] = true;
+
+                return true;
+            })
+            ->map(fn(array $target) => ['type' => (string) $target['type'], 'id' => (int) $target['id']])
+            ->values()
+            ->all();
     }
 
     public function cancelBatch(SeoFixBatch $batch): SeoFixBatch
@@ -731,6 +3585,7 @@ class AiSeoBoardService
         if (!$batch->isTerminal()) {
             $batch->update([
                 'status'       => SeoFixBatch::STATUS_CANCELLED,
+                'current_label' => null,
                 'completed_at' => now(),
             ]);
         }
@@ -743,9 +3598,12 @@ class AiSeoBoardService
      */
     protected function providerRates(string $provider): array
     {
+        // Rates priced against the model each provider is actually configured to
+        // call in config/seo.php — keep these aligned when the model env changes.
         return match (strtolower($provider)) {
             'openai', 'chatgpt' => ['in_usd_per_1m' => 0.15,  'out_usd_per_1m' => 0.60,  'note' => 'gpt-4o-mini'],
-            'claude', 'anthropic' => ['in_usd_per_1m' => 1.00,  'out_usd_per_1m' => 5.00, 'note' => 'claude-haiku 4.5'],
+            // config/seo.php defaults claude → claude-sonnet-4-6 ($3 in / $15 out).
+            'claude', 'anthropic' => ['in_usd_per_1m' => 3.00,  'out_usd_per_1m' => 15.00, 'note' => 'claude-sonnet-4-6'],
             'gemini', 'google'  => ['in_usd_per_1m' => 0.075, 'out_usd_per_1m' => 0.30,  'note' => 'gemini-1.5-flash'],
             'grok', 'xai'       => ['in_usd_per_1m' => 0.50,  'out_usd_per_1m' => 1.50,  'note' => 'grok-3-mini'],
             default             => ['in_usd_per_1m' => 0.20,  'out_usd_per_1m' => 0.80,  'note' => 'fallback estimate'],

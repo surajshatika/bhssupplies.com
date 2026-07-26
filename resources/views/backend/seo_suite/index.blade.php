@@ -4,7 +4,15 @@
 @include('backend.partials.modern_module_styles')
 @php
     $activeTab    = request('tab', 'dashboard');
-    $providers    = ['openai' => 'OpenAI (ChatGPT)', 'claude' => 'Claude (Anthropic)', 'gemini' => 'Gemini (Google)', 'grok' => 'Grok (xAI)'];
+    $providers    = [
+        'openai' => 'OpenAI (ChatGPT)',
+        'claude' => 'Claude (Anthropic)',
+        'gemini' => 'Gemini (Google)',
+        'grok' => 'Grok (xAI)',
+        'perplexity' => 'Perplexity AI (Live Web Search)',
+        'mistral' => 'Mistral AI',
+        'deepseek' => 'DeepSeek (Cost-Effective Bulk SEO)',
+    ];
     $totalFeatures= collect($features)->flatten()->count();
     $advancedDashboard = $advancedDashboard ?? [];
     $siteHealth   = $advancedDashboard['site_health'] ?? [];
@@ -175,7 +183,7 @@
 @elseif(!$aiAnyWorking && !$setupRequired)
 <div class="alert alert-warning py-2 mb-3 small">
     <i class="las la-exclamation-circle mr-1"></i>
-    {{ translate('No AI provider keys detected. Add an OpenAI, Claude, Gemini, or Grok key in SEO Settings → AI Providers to enable AI-powered score improvements.') }}
+    {{ translate('No AI provider keys detected. Add an OpenAI, Claude, Gemini, Grok, Perplexity, Mistral, or DeepSeek key in SEO Settings → AI Providers to enable AI-powered score improvements.') }}
 </div>
 @endif
 
@@ -403,7 +411,7 @@
                                 {{ !empty($settings['ai_failover_enabled']) ? translate('Automatic failover ON') : translate('Automatic failover OFF') }}
                             </span>
                             @if(!empty($settings['ai_failover_enabled']))
-                                <span class="d-block text-muted mt-1">{{ $settings['ai_failover_order'] ?? 'claude,openai,gemini,grok' }}</span>
+                                <span class="d-block text-muted mt-1">{{ $settings['ai_failover_order'] ?? 'claude,openai,gemini,grok,perplexity,mistral,deepseek' }}</span>
                             @endif
                         </div>
                         <a href="{{ route('admin.seo-suite.settings.view') }}" class="btn btn-xs btn-soft-primary mt-2">

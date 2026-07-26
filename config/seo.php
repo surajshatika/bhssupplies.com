@@ -9,7 +9,7 @@ return [
 
     'provider_failover' => [
         'enabled' => env('SEO_AI_FAILOVER_ENABLED', true),
-        'order' => array_values(array_filter(array_map('trim', explode(',', env('SEO_AI_FAILOVER_ORDER', 'claude,openai,gemini,grok'))))),
+        'order' => array_values(array_filter(array_map('trim', explode(',', env('SEO_AI_FAILOVER_ORDER', 'claude,openai,gemini,grok,perplexity,mistral,deepseek'))))),
         'max_attempts' => env('SEO_AI_FAILOVER_MAX_ATTEMPTS', 4),
         'cooldown_enabled' => env('SEO_AI_PROVIDER_COOLDOWN_ENABLED', true),
         'failure_threshold' => env('SEO_AI_PROVIDER_FAILURE_THRESHOLD', 3),
@@ -22,6 +22,9 @@ return [
             'claude' => env('SEO_CLAUDE_ESTIMATED_REQUEST_USD', 0.0207),
             'gemini' => env('SEO_GEMINI_ESTIMATED_REQUEST_USD', 0.0004),
             'grok' => env('SEO_GROK_ESTIMATED_REQUEST_USD', 0.0023),
+            'perplexity' => env('SEO_PERPLEXITY_ESTIMATED_REQUEST_USD', 0.0030),
+            'mistral' => env('SEO_MISTRAL_ESTIMATED_REQUEST_USD', 0.0006),
+            'deepseek' => env('SEO_DEEPSEEK_ESTIMATED_REQUEST_USD', 0.0003),
         ],
         'database_settings' => true,
     ],
@@ -46,6 +49,21 @@ return [
             'model' => env('GROK_MODEL', 'grok-3-mini'),
             'api_key' => env('GROK_API_KEY'),
             'endpoint' => env('GROK_API_ENDPOINT', 'https://api.x.ai/v1/chat/completions'),
+        ],
+        'perplexity' => [
+            'model' => env('PERPLEXITY_MODEL', 'sonar-pro'),
+            'api_key' => env('PERPLEXITY_API_KEY'),
+            'endpoint' => env('PERPLEXITY_API_ENDPOINT', 'https://api.perplexity.ai/chat/completions'),
+        ],
+        'mistral' => [
+            'model' => env('MISTRAL_MODEL', 'mistral-small-latest'),
+            'api_key' => env('MISTRAL_API_KEY'),
+            'endpoint' => env('MISTRAL_API_ENDPOINT', 'https://api.mistral.ai/v1/chat/completions'),
+        ],
+        'deepseek' => [
+            'model' => env('DEEPSEEK_MODEL', 'deepseek-chat'),
+            'api_key' => env('DEEPSEEK_API_KEY'),
+            'endpoint' => env('DEEPSEEK_API_ENDPOINT', 'https://api.deepseek.com/chat/completions'),
         ],
     ],
 

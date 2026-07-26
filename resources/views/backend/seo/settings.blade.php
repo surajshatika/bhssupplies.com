@@ -3,7 +3,15 @@
 @section('content')
 @include('backend.partials.modern_module_styles')
 @php
-    $providers = ['openai' => 'OpenAI (ChatGPT)', 'claude' => 'Claude (Anthropic)', 'gemini' => 'Gemini (Google)', 'grok' => 'Grok (xAI)'];
+    $providers = [
+        'openai' => 'OpenAI (ChatGPT)',
+        'claude' => 'Claude (Anthropic)',
+        'gemini' => 'Gemini (Google)',
+        'grok' => 'Grok (xAI)',
+        'perplexity' => 'Perplexity AI (Live Web Search)',
+        'mistral' => 'Mistral AI',
+        'deepseek' => 'DeepSeek (Cost-Effective Bulk SEO)',
+    ];
 @endphp
 
 <div class="mm-hero mm-hero--seo">
@@ -69,7 +77,7 @@
                     <small class="text-muted d-block mb-3">{{ translate('If the selected AI is unavailable, times out, or returns unusable JSON, SEO automation tries the next configured provider.') }}</small>
                     <div class="form-group">
                         <label>{{ translate('Fallback quality order') }}</label>
-                        <input type="text" class="form-control" name="ai_failover_order" value="{{ $settings['ai_failover_order'] ?? 'claude,openai,gemini,grok' }}" placeholder="claude,openai,gemini,grok">
+                        <input type="text" class="form-control" name="ai_failover_order" value="{{ $settings['ai_failover_order'] ?? 'claude,openai,gemini,grok,perplexity,mistral,deepseek' }}" placeholder="claude,openai,gemini,grok,perplexity,mistral,deepseek">
                         <small class="text-muted">{{ translate('The selected default provider is always attempted first. Use comma-separated provider names.') }}</small>
                     </div>
                     <div class="form-group mb-0">
@@ -140,7 +148,7 @@
                     <small class="text-muted">{{ translate('Used for: Multimodal content, structured data') }}</small>
                 </div>
 
-                <div class="form-group mb-0">
+                <div class="form-group">
                     <label>
                         <span class="badge badge-warning mr-1">Grok</span>
                         {{ translate('Grok API Key (xAI)') }}
@@ -148,6 +156,36 @@
                     <input type="password" class="form-control" name="grok_api_key"
                         value="{{ $settings['grok_api_key'] ?? '' }}" placeholder="xai-...">
                     <small class="text-muted">{{ translate('Used for: Real-time SEO insights, competitive analysis') }}</small>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <span class="badge badge-secondary mr-1">Perplexity</span>
+                        {{ translate('Perplexity API Key') }}
+                    </label>
+                    <input type="password" class="form-control" name="perplexity_api_key"
+                        value="{{ $settings['perplexity_api_key'] ?? '' }}" placeholder="pplx-...">
+                    <small class="text-muted">{{ translate('Used for: Live-web-search-backed semantic gap analysis and competitor research') }}</small>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <span class="badge badge-dark mr-1">Mistral</span>
+                        {{ translate('Mistral API Key') }}
+                    </label>
+                    <input type="password" class="form-control" name="mistral_api_key"
+                        value="{{ $settings['mistral_api_key'] ?? '' }}" placeholder="...">
+                    <small class="text-muted">{{ translate('Used for: General-purpose SEO content generation') }}</small>
+                </div>
+
+                <div class="form-group mb-0">
+                    <label>
+                        <span class="badge badge-light border mr-1">DeepSeek</span>
+                        {{ translate('DeepSeek API Key') }}
+                    </label>
+                    <input type="password" class="form-control" name="deepseek_api_key"
+                        value="{{ $settings['deepseek_api_key'] ?? '' }}" placeholder="sk-...">
+                    <small class="text-muted">{{ translate('Used for: High-volume/bulk SEO tasks at low cost') }}</small>
                 </div>
             </div>
         </div>

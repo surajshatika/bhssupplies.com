@@ -904,6 +904,9 @@ class SeoSuiteController extends Controller
             'anthropic_len' => strlen((string) $request->anthropic_api_key),
             'gemini_len'    => strlen((string) $request->gemini_api_key),
             'grok_len'      => strlen((string) $request->grok_api_key),
+            'perplexity_len'=> strlen((string) $request->perplexity_api_key),
+            'mistral_len'   => strlen((string) $request->mistral_api_key),
+            'deepseek_len'  => strlen((string) $request->deepseek_api_key),
         ]);
 
         $failoverOrder = collect(preg_split('/[\s,]+/', (string) $request->input('ai_failover_order', '')))
@@ -912,7 +915,7 @@ class SeoSuiteController extends Controller
             ->unique()
             ->implode(',');
         if ($failoverOrder === '') {
-            $failoverOrder = implode(',', config('seo.provider_failover.order', ['claude', 'openai', 'gemini', 'grok']));
+            $failoverOrder = implode(',', config('seo.provider_failover.order', ['claude', 'openai', 'gemini', 'grok', 'perplexity', 'mistral', 'deepseek']));
         }
 
         $pairs = [
@@ -989,6 +992,9 @@ class SeoSuiteController extends Controller
             'seo_anthropic_api_key'     => $request->anthropic_api_key,
             'seo_gemini_api_key'        => $request->gemini_api_key,
             'seo_grok_api_key'          => $request->grok_api_key,
+            'seo_perplexity_api_key'    => $request->perplexity_api_key,
+            'seo_mistral_api_key'       => $request->mistral_api_key,
+            'seo_deepseek_api_key'      => $request->deepseek_api_key,
             'seo_gsc_client_secret'     => $request->gsc_client_secret,
             'seo_gsc_refresh_token'     => $request->gsc_refresh_token,
             'seo_serpapi_key'           => $request->serpapi_key,
@@ -1018,6 +1024,9 @@ class SeoSuiteController extends Controller
             'ANTHROPIC_API_KEY'               => $request->anthropic_api_key,
             'GEMINI_API_KEY'                  => $request->gemini_api_key,
             'GROK_API_KEY'                    => $request->grok_api_key,
+            'PERPLEXITY_API_KEY'              => $request->perplexity_api_key,
+            'MISTRAL_API_KEY'                 => $request->mistral_api_key,
+            'DEEPSEEK_API_KEY'                => $request->deepseek_api_key,
             'SEO_INDEXNOW_KEY'                => $request->indexnow_key,
         ];
 
@@ -1261,7 +1270,7 @@ class SeoSuiteController extends Controller
         return [
             'default_provider'       => get_setting('seo_suite_default_provider', config('seo.default_provider')),
             'ai_failover_enabled'    => (int) get_setting('seo_ai_failover_enabled', config('seo.provider_failover.enabled', true) ? 1 : 0),
-            'ai_failover_order'      => get_setting('seo_ai_failover_order', implode(',', config('seo.provider_failover.order', ['claude', 'openai', 'gemini', 'grok']))),
+            'ai_failover_order'      => get_setting('seo_ai_failover_order', implode(',', config('seo.provider_failover.order', ['claude', 'openai', 'gemini', 'grok', 'perplexity', 'mistral', 'deepseek']))),
             'ai_failover_max_attempts' => (int) get_setting('seo_ai_failover_max_attempts', config('seo.provider_failover.max_attempts', 4)),
             'ai_provider_cooldown_enabled' => (int) get_setting('seo_ai_provider_cooldown_enabled', config('seo.provider_failover.cooldown_enabled', true) ? 1 : 0),
             'ai_provider_failure_threshold' => (int) get_setting('seo_ai_provider_failure_threshold', config('seo.provider_failover.failure_threshold', 3)),
@@ -1284,6 +1293,9 @@ class SeoSuiteController extends Controller
             'anthropic_api_key'      => env('ANTHROPIC_API_KEY') ?? get_setting('seo_anthropic_api_key'),
             'gemini_api_key'         => env('GEMINI_API_KEY') ?? get_setting('seo_gemini_api_key'),
             'grok_api_key'           => env('GROK_API_KEY') ?? get_setting('seo_grok_api_key'),
+            'perplexity_api_key'     => env('PERPLEXITY_API_KEY') ?? get_setting('seo_perplexity_api_key'),
+            'mistral_api_key'        => env('MISTRAL_API_KEY') ?? get_setting('seo_mistral_api_key'),
+            'deepseek_api_key'       => env('DEEPSEEK_API_KEY') ?? get_setting('seo_deepseek_api_key'),
 
             // GSC
             'gsc_client_id'          => get_setting('seo_gsc_client_id'),
@@ -1357,6 +1369,9 @@ class SeoSuiteController extends Controller
             'claude' => !empty($settings['anthropic_api_key']),
             'gemini' => !empty($settings['gemini_api_key']),
             'grok' => !empty($settings['grok_api_key']),
+            'perplexity' => !empty($settings['perplexity_api_key']),
+            'mistral' => !empty($settings['mistral_api_key']),
+            'deepseek' => !empty($settings['deepseek_api_key']),
         ];
         $providerReliability = app(SeoProviderReliability::class)->dashboard();
 
@@ -1627,12 +1642,18 @@ class SeoSuiteController extends Controller
             'claude' => 'Claude',
             'gemini' => 'Gemini',
             'grok'   => 'Grok',
+            'perplexity' => 'Perplexity',
+            'mistral'    => 'Mistral',
+            'deepseek'   => 'DeepSeek',
         ];
         $modelMap = [
             'openai' => config('seo.providers.openai.model', 'gpt-4o-mini'),
             'claude' => config('seo.providers.claude.model', 'claude-sonnet-4-6'),
             'gemini' => config('seo.providers.gemini.model', 'gemini-2.0-flash'),
             'grok'   => config('seo.providers.grok.model', 'grok-3-mini'),
+            'perplexity' => config('seo.providers.perplexity.model', 'sonar-pro'),
+            'mistral'    => config('seo.providers.mistral.model', 'mistral-small-latest'),
+            'deepseek'   => config('seo.providers.deepseek.model', 'deepseek-chat'),
         ];
 
         try {
@@ -1701,7 +1722,10 @@ class SeoSuiteController extends Controller
             $anyWorking = !empty($settings['openai_api_key'])
                 || !empty($settings['anthropic_api_key'])
                 || !empty($settings['seo_gemini_api_key'])
-                || !empty($settings['seo_grok_api_key']);
+                || !empty($settings['seo_grok_api_key'])
+                || !empty($settings['seo_perplexity_api_key'])
+                || !empty($settings['seo_mistral_api_key'])
+                || !empty($settings['seo_deepseek_api_key']);
         }
 
         return ['providers' => $results, 'any_working' => $anyWorking];

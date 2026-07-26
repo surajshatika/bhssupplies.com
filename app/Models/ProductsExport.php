@@ -35,6 +35,8 @@ class ProductsExport implements FromCollection, WithMapping, WithHeadings
             'est_shipping_days',
             'meta_title',
             'meta_description',
+            'thumbnail_image_url',
+            'photos_urls',
         ];
     }
 
@@ -47,6 +49,20 @@ class ProductsExport implements FromCollection, WithMapping, WithHeadings
         foreach ($product->stocks as $key => $stock) {
             $qty += $stock->qty;
         }
+
+        $photo_urls = [];
+        if ($product->photos) {
+            $photos = explode(',', $product->photos);
+            foreach($photos as $photo){
+                if(trim($photo) != ''){
+                    $photo_urls[] = uploaded_asset(trim($photo));
+                }
+            }
+        }
+        $photos_url_str = implode(', ', $photo_urls);
+
+        $thumbnail_url = uploaded_asset($product->thumbnail_img);
+
         return [
             $product->name,
             $product->description,
@@ -62,6 +78,8 @@ class ProductsExport implements FromCollection, WithMapping, WithHeadings
             $product->est_shipping_days,
             $product->meta_title,
             $product->meta_description,
+            $thumbnail_url,
+            $photos_url_str,
         ];
     }
 }

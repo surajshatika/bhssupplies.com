@@ -150,6 +150,9 @@ class OptimizationController extends Controller
             'anthropic_api_key' => env('ANTHROPIC_API_KEY') ?? get_setting('seo_anthropic_api_key'),
             'gemini_api_key' => env('GEMINI_API_KEY') ?? get_setting('seo_gemini_api_key'),
             'grok_api_key' => env('GROK_API_KEY') ?? get_setting('seo_grok_api_key'),
+            'perplexity_api_key' => env('PERPLEXITY_API_KEY') ?? get_setting('seo_perplexity_api_key'),
+            'mistral_api_key' => env('MISTRAL_API_KEY') ?? get_setting('seo_mistral_api_key'),
+            'deepseek_api_key' => env('DEEPSEEK_API_KEY') ?? get_setting('seo_deepseek_api_key'),
         ];
     }
 
@@ -177,6 +180,9 @@ class OptimizationController extends Controller
             $settings['anthropic_api_key'] ?? null,
             $settings['gemini_api_key'] ?? null,
             $settings['grok_api_key'] ?? null,
+            $settings['perplexity_api_key'] ?? null,
+            $settings['mistral_api_key'] ?? null,
+            $settings['deepseek_api_key'] ?? null,
         ])->filter()->count();
 
         $readinessParts = [

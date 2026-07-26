@@ -30,6 +30,12 @@ class SeoProviderManager
                 return new OpenAIProvider();
             case 'grok':
                 return new GrokProvider();
+            case 'perplexity':
+                return new PerplexityProvider();
+            case 'mistral':
+                return new MistralProvider();
+            case 'deepseek':
+                return new DeepSeekProvider();
             default:
                 return new NullProvider();
         }
@@ -44,7 +50,7 @@ class SeoProviderManager
 
         $configuredOrder = static::setting(
             'seo_ai_failover_order',
-            config('seo.provider_failover.order', ['claude', 'openai', 'gemini', 'grok'])
+            config('seo.provider_failover.order', ['claude', 'openai', 'gemini', 'grok', 'perplexity', 'mistral', 'deepseek'])
         );
         $order = is_array($configuredOrder)
             ? $configuredOrder
@@ -76,7 +82,8 @@ class SeoProviderManager
             'google' => 'gemini',
             'chatgpt' => 'openai',
             'xai' => 'grok',
-            default => in_array($name, ['claude', 'gemini', 'openai', 'grok'], true) ? $name : null,
+            'x.ai' => 'grok',
+            default => in_array($name, ['claude', 'gemini', 'openai', 'grok', 'perplexity', 'mistral', 'deepseek'], true) ? $name : null,
         };
     }
 

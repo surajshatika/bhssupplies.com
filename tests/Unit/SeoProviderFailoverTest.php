@@ -25,6 +25,10 @@ class SeoProviderFailoverTest extends TestCase
             'seo.provider_failover.cooldown_enabled' => true,
             'seo.provider_failover.failure_threshold' => 3,
             'seo.provider_failover.cooldown_minutes' => 15,
+            // These tests assert exact HTTP call counts to prove failover
+            // behaviour. Transport-level retries are a separate concern and
+            // would otherwise multiply those counts, so pin them off here.
+            'seo.provider_failover.http_retries' => 0,
             'seo.provider_failover.attempt_cost_usd.openai' => 0.0009,
             'seo.provider_failover.attempt_cost_usd.claude' => 0.0207,
             'seo.providers.openai.api_key' => 'openai-test-key',

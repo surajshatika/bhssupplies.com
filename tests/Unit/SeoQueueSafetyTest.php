@@ -143,7 +143,7 @@ class SeoQueueSafetyTest extends TestCase
         $this->assertSame(0.0216, $cost);
     }
 
-    public function test_next_entity_budget_reserve_covers_the_available_fallback_chain(): void
+    public function test_next_entity_budget_reserve_uses_only_the_first_healthy_provider(): void
     {
         $job = new AiAutoFixSeoJob(1);
         $method = new ReflectionMethod($job, 'reservedCostForNextEntity');
@@ -151,7 +151,10 @@ class SeoQueueSafetyTest extends TestCase
 
         $cost = $method->invoke($job, new SeoFixBatch(['provider' => 'openai']));
 
-        $this->assertSame(0.0243, $cost);
+        // Only the first healthy configured provider is reserved. Reserving the
+        // whole chain (0.0243 here) assumed every provider would be billed for
+        // every entity, which paused batches long before the cap was reached.
+        $this->assertSame(0.0009, $cost);
     }
 
     public function test_on_page_advanced_patch_fills_safe_metadata_without_overwriting_curated_values(): void
@@ -216,15 +219,20 @@ class SeoQueueSafetyTest extends TestCase
         $this->assertFalse($method->invoke($resolver, $schemas, 'FAQPage'));
     }
 
-    public function test_unattended_on_page_quality_gate_rolls_back_only_score_regressions(): void
+    public function test_unattended_on_page_quality_gate_rolls_back_only_meaningful_regressions(): void
     {
         $board = new AiSeoBoardService();
         $method = new ReflectionMethod($board, 'shouldRollbackSeoMutation');
         $method->setAccessible(true);
 
-        $this->assertTrue($method->invoke($board, ['score' => 52], ['score' => 51]));
-        $this->assertFalse($method->invoke($board, ['score' => 52], ['score' => 52]));
-        $this->assertFalse($method->invoke($board, ['score' => 52], ['score' => 73]));
+        // Rollback only past a >5 point drop. Small dips are normal when AI adds
+        // content that shifts keyword density, and rolling back on those wastes
+        // the AI call and blocks any improvement.
+        $this->assertTrue($method->invoke($board, ['score' => 52], ['score' => 46]));  // -6, rolls back
+        $this->assertFalse($method->invoke($board, ['score' => 52], ['score' => 47])); // -5, tolerated
+        $this->assertFalse($method->invoke($board, ['score' => 52], ['score' => 51])); // -1, tolerated
+        $this->assertFalse($method->invoke($board, ['score' => 52], ['score' => 52])); // unchanged
+        $this->assertFalse($method->invoke($board, ['score' => 52], ['score' => 73])); // improved
     }
 
     public function test_manual_bulk_and_automated_queue_limits_are_intentionally_separate(): void

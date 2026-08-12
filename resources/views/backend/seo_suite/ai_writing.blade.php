@@ -91,6 +91,16 @@
                     </select>
                 </div>
 
+                <div class="custom-control custom-switch mb-2">
+                    <input type="checkbox" class="custom-control-input" id="wa-stream" checked>
+                    <label class="custom-control-label small" for="wa-stream">
+                        {{ translate('Stream output live') }}
+                    </label>
+                    <small class="text-muted d-block" id="wa-stream-note">
+                        {{ translate('OpenAI, Claude, DeepSeek, Mistral and Grok stream token-by-token. Gemini and Perplexity return the whole response at once.') }}
+                    </small>
+                </div>
+
                 <button id="wa-run" class="btn btn-primary btn-block">
                     <i class="las la-magic mr-1"></i>{{ translate('Generate') }}
                     <span id="wa-spinner" class="spinner-border spinner-border-sm ml-1 d-none"></span>
@@ -212,6 +222,11 @@
             return;
         }
 
+        if ($('wa-stream').checked) {
+            runStreaming(task, content);
+            return;
+        }
+
         setLoading(true);
         fetch(endpoint, {
             method: 'POST',
@@ -236,6 +251,113 @@
         })
         .catch(err => { setLoading(false); showError(err.message || 'Network error'); });
     });
+
+    const streamEndpoint = '{{ route('admin.seo-suite.stream') }}';
+
+    /**
+     * Streamed generation. Reads the SSE body incrementally via the fetch
+     * stream reader so text appears as the model produces it.
+     */
+    function runStreaming(task, content) {
+        setLoading(true);
+        $('wa-error').classList.add('d-none');
+        $('wa-empty').classList.add('d-none');
+
+        const out = $('wa-output');
+        out.classList.remove('d-none');
+        out.textContent = '';
+        lastFormat = 'text';
+
+        const meta = $('wa-out-meta');
+        meta.textContent = '{{ translate("streaming…") }}';
+        meta.classList.remove('d-none');
+
+        fetch(streamEndpoint, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'text/event-stream' },
+            body: JSON.stringify({
+                prompt: buildStreamPrompt(task, content),
+                system: 'You are an expert SEO copywriter. Return only the requested content.',
+                provider: $('wa-provider').value,
+            })
+        })
+        .then(response => {
+            if (!response.ok) { throw new Error('HTTP ' + response.status); }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            function pump() {
+                return reader.read().then(({ done, value }) => {
+                    if (done) { finishStream(); return; }
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // SSE frames are separated by a blank line.
+                    const frames = buffer.split('\n\n');
+                    buffer = frames.pop();
+
+                    frames.forEach(frame => {
+                        const eventMatch = frame.match(/^event: (.+)$/m);
+                        const dataMatch = frame.match(/^data: (.+)$/m);
+                        if (!eventMatch || !dataMatch) return;
+
+                        let payload;
+                        try { payload = JSON.parse(dataMatch[1]); } catch (e) { return; }
+
+                        if (eventMatch[1] === 'delta' && payload.text) {
+                            out.textContent += payload.text;
+                            out.scrollTop = out.scrollHeight;
+                        } else if (eventMatch[1] === 'error') {
+                            showError(payload.message || 'Streaming failed.');
+                        } else if (eventMatch[1] === 'done') {
+                            const words = (out.textContent.match(/\S+/g) || []).length;
+                            // Say plainly when the provider did not actually stream.
+                            meta.textContent = words + ' words'
+                                + (payload.streamed ? ' · streamed' : ' · returned in one piece');
+                            if (payload.note) {
+                                meta.title = payload.note;
+                            }
+                        }
+                    });
+
+                    return pump();
+                });
+            }
+
+            return pump();
+        })
+        .catch(err => { showError(err.message || 'Network error'); })
+        .finally(() => { setLoading(false); $('wa-copy').classList.remove('d-none'); });
+    }
+
+    function finishStream() {
+        setLoading(false);
+        if (!$('wa-output').textContent.trim()) {
+            showError('{{ translate("The provider returned no content.") }}');
+        }
+    }
+
+    /** Compose the same instruction the non-streaming endpoint would build. */
+    function buildStreamPrompt(task, content) {
+        const keyword = $('wa-keyword').value.trim();
+        const tone = $('wa-tone').value;
+        const length = $('wa-length').value;
+        const label = $('wa-task').options[$('wa-task').selectedIndex].text;
+
+        let prompt = label + '.';
+        if (keyword) prompt += '\nTarget keyword: ' + keyword + '.';
+        if (tone) prompt += '\nTone: ' + tone + '.';
+        if (length) prompt += '\nLength: ' + length + '.';
+        if ($('wa-language').value && !$('wa-lang-wrap').classList.contains('d-none')) {
+            prompt += '\nTarget language: ' + $('wa-language').value + '.';
+        }
+        if (content) prompt += '\n\nCONTENT:\n' + content;
+
+        return prompt;
+    }
 
     let lastFormat = 'text';
 

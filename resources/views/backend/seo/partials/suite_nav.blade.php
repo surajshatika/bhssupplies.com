@@ -1,33 +1,54 @@
 @include('backend.seo.partials.module_styles')
 @php
     $settings = $settings ?? [];
-    $seoSuiteNavItems = [
-        ['route' => 'admin.seo-suite.index', 'icon' => 'la-tachometer-alt', 'label' => 'Suite'],
-        ['route' => 'admin.seo_on_page.index', 'icon' => 'la-file-alt', 'label' => 'On-Page'],
-        ['route' => 'admin.seo_off_page.index', 'icon' => 'la-bullhorn', 'label' => 'Off-Page'],
-        ['route' => 'admin.seo_optimization.index', 'icon' => 'la-cogs', 'label' => 'Optimization'],
-        ['route' => 'admin.seo.ai_board.index', 'icon' => 'la-brain', 'label' => 'AI Board'],
-        ['route' => 'admin.seo.monitoring.index', 'icon' => 'la-heartbeat', 'label' => 'Monitoring'],
-        ['route' => 'admin.seo-suite.ai_assistant', 'icon' => 'la-robot', 'label' => 'Assistant'],
-        ['route' => 'admin.seo-suite.ai_writing_page', 'icon' => 'la-pen-nib', 'label' => 'Writer'],
-        ['route' => 'admin.seo-suite.keyword_tracker', 'icon' => 'la-chart-line', 'label' => 'Keywords'],
-        ['route' => 'admin.seo-suite.semantic_gap', 'icon' => 'la-brain', 'label' => 'Semantic Gap'],
-        ['route' => 'admin.seo-suite.content_decay', 'icon' => 'la-project-diagram', 'label' => 'Content Decay'],
-        ['route' => 'admin.seo-suite.link_graph', 'icon' => 'la-network-wired', 'label' => 'Link Graph'],
-        ['route' => 'admin.seo-suite.core_web_vitals', 'icon' => 'la-tachometer-alt', 'label' => 'Web Vitals'],
-        ['route' => 'admin.seo-suite.predictive_traffic', 'icon' => 'la-chart-area', 'label' => 'Predict ROI'],
-        ['route' => 'admin.seo-suite.search_stats', 'icon' => 'la-chart-bar', 'label' => 'Stats'],
-        ['route' => 'admin.seo-suite.webmaster', 'icon' => 'la-tools', 'label' => 'Webmaster'],
-        ['route' => 'admin.seo-suite.link_assistant', 'icon' => 'la-link', 'label' => 'Links'],
-        ['route' => 'admin.seo-suite.revisions', 'icon' => 'la-history', 'label' => 'Revisions'],
-        ['route' => 'admin.seo-suite.settings.view', 'icon' => 'la-sliders-h', 'label' => 'Settings'],
+    // Grouped by workflow stage rather than one flat 23-item strip — a flat
+    // list at this size reads as undifferentiated noise.
+    $seoSuiteNavGroups = [
+        'Overview' => [
+            ['route' => 'admin.seo-suite.index', 'icon' => 'la-tachometer-alt', 'label' => 'Suite'],
+            ['route' => 'admin.seo.ai_board.index', 'icon' => 'la-brain', 'label' => 'AI Board'],
+            ['route' => 'admin.seo.monitoring.index', 'icon' => 'la-heartbeat', 'label' => 'Monitoring'],
+            ['route' => 'admin.seo-suite.search_stats', 'icon' => 'la-chart-bar', 'label' => 'Stats'],
+        ],
+        'Create' => [
+            ['route' => 'admin.seo-suite.ai_writing_page', 'icon' => 'la-pen-nib', 'label' => 'Writer'],
+            ['route' => 'admin.seo-suite.ai_assistant', 'icon' => 'la-robot', 'label' => 'Assistant'],
+            ['route' => 'admin.seo_on_page.index', 'icon' => 'la-file-alt', 'label' => 'On-Page'],
+            ['route' => 'admin.seo_off_page.index', 'icon' => 'la-bullhorn', 'label' => 'Off-Page'],
+        ],
+        'Optimize' => [
+            ['route' => 'admin.seo_optimization.index', 'icon' => 'la-cogs', 'label' => 'Optimization'],
+            ['route' => 'admin.seo-suite.geo_readiness', 'icon' => 'la-robot', 'label' => 'GEO Readiness'],
+            ['route' => 'admin.seo-suite.field_data', 'icon' => 'la-users', 'label' => 'Field Data'],
+            ['route' => 'admin.seo-suite.core_web_vitals', 'icon' => 'la-tachometer-alt', 'label' => 'Web Vitals'],
+        ],
+        'Research' => [
+            ['route' => 'admin.seo-suite.keyword_tracker', 'icon' => 'la-chart-line', 'label' => 'Keywords'],
+            ['route' => 'admin.seo-suite.keyword_clusters', 'icon' => 'la-project-diagram', 'label' => 'Clusters'],
+            ['route' => 'admin.seo-suite.research_agent', 'icon' => 'la-brain', 'label' => 'Research Agent'],
+            ['route' => 'admin.seo-suite.semantic_gap', 'icon' => 'la-search-plus', 'label' => 'Semantic Gap'],
+            ['route' => 'admin.seo-suite.content_decay', 'icon' => 'la-chart-line', 'label' => 'Content Decay'],
+            ['route' => 'admin.seo-suite.predictive_traffic', 'icon' => 'la-chart-area', 'label' => 'Predict ROI'],
+        ],
+        'Links & History' => [
+            ['route' => 'admin.seo-suite.link_assistant', 'icon' => 'la-link', 'label' => 'Links'],
+            ['route' => 'admin.seo-suite.link_graph', 'icon' => 'la-network-wired', 'label' => 'Link Graph'],
+            ['route' => 'admin.seo-suite.revisions', 'icon' => 'la-history', 'label' => 'Revisions'],
+            ['route' => 'admin.seo-suite.webmaster', 'icon' => 'la-tools', 'label' => 'Webmaster'],
+            ['route' => 'admin.seo-suite.settings.view', 'icon' => 'la-sliders-h', 'label' => 'Settings'],
+        ],
     ];
-    $configuredProviders = collect([
+    $seoProviderKeys = [
         'openai' => $settings['openai_api_key'] ?? env('OPENAI_API_KEY') ?? get_setting('seo_openai_api_key'),
         'claude' => $settings['anthropic_api_key'] ?? env('ANTHROPIC_API_KEY') ?? get_setting('seo_anthropic_api_key'),
         'gemini' => $settings['gemini_api_key'] ?? env('GEMINI_API_KEY') ?? get_setting('seo_gemini_api_key'),
         'grok' => $settings['grok_api_key'] ?? env('GROK_API_KEY') ?? get_setting('seo_grok_api_key'),
-    ])->filter()->count();
+        'perplexity' => $settings['perplexity_api_key'] ?? env('PERPLEXITY_API_KEY') ?? get_setting('seo_perplexity_api_key'),
+        'mistral' => $settings['mistral_api_key'] ?? env('MISTRAL_API_KEY') ?? get_setting('seo_mistral_api_key'),
+        'deepseek' => $settings['deepseek_api_key'] ?? env('DEEPSEEK_API_KEY') ?? get_setting('seo_deepseek_api_key'),
+    ];
+    $seoProviderTotal = count($seoProviderKeys);
+    $configuredProviders = collect($seoProviderKeys)->filter()->count();
     $seoAutopilotEnabled = (int) get_setting('seo_auto_seo_enabled', 1) === 1;
     $seoAutopilotPending = null;
     $seoActiveBatch = null;
@@ -49,8 +70,11 @@
 @endphp
 
 <style>
-.seo-suite-strip { border: 1px solid #e6eaf0; border-radius: 8px; background: #fff; box-shadow: 0 2px 8px rgba(23,33,43,.035); overflow: hidden; }
-.seo-suite-strip .seo-nav-row { padding: .42rem .5rem .28rem; border-bottom: 1px solid #edf0f4; }
+.seo-suite-strip { border: 1px solid #e6eaf0; border-radius: 10px; background: linear-gradient(180deg,#fff 0%,#fbfcfd 100%); box-shadow: 0 4px 14px rgba(23,33,43,.06); overflow: hidden; }
+.seo-suite-strip .seo-nav-row { padding: .5rem .55rem .38rem; border-bottom: 1px solid #edf0f4; }
+.seo-suite-strip .seo-nav-group { display: inline-flex; align-items: center; padding: 0 .5rem 0 .55rem; margin-right: .1rem; border-right: 1px solid #e9edf2; }
+.seo-suite-strip .seo-nav-group:last-child { border-right: 0; }
+.seo-suite-strip .seo-nav-group-label { margin-right: .4rem; color: #97a1af; font-size: .62rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
 .seo-suite-strip .nav-scroll { overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: thin; }
 .seo-suite-strip .seo-nav-link { display: inline-flex; align-items: center; padding: 8px 10px; border-radius: 6px; color: #52606d; font-size: .79rem; font-weight: 700; }
 .seo-suite-strip .seo-nav-link:hover { background: #f4f8f9; color: #164f5b; text-decoration: none; }
@@ -71,12 +95,20 @@
 <div class="seo-suite-strip mb-4">
     <div class="seo-nav-row">
         <div class="nav-scroll">
-            @foreach($seoSuiteNavItems as $item)
-                @if(Route::has($item['route']))
-                    <a href="{{ route($item['route']) }}"
-                       class="seo-nav-link {{ request()->routeIs($item['route']) ? 'active' : '' }}">
-                        <i class="las {{ $item['icon'] }}"></i>{{ translate($item['label']) }}
-                    </a>
+            @foreach($seoSuiteNavGroups as $groupLabel => $groupItems)
+                @php
+                    $visibleItems = array_filter($groupItems, fn($item) => Route::has($item['route']));
+                @endphp
+                @if(!empty($visibleItems))
+                    <span class="seo-nav-group">
+                        <span class="seo-nav-group-label">{{ translate($groupLabel) }}</span>
+                        @foreach($visibleItems as $item)
+                            <a href="{{ route($item['route']) }}"
+                               class="seo-nav-link {{ request()->routeIs($item['route']) ? 'active' : '' }}">
+                                <i class="las {{ $item['icon'] }}"></i>{{ translate($item['label']) }}
+                            </a>
+                        @endforeach
+                    </span>
                 @endif
             @endforeach
         </div>
@@ -91,7 +123,7 @@
                 <i class="las la-list-ol mr-1"></i>{{ $seoAutopilotPending }} {{ translate('pending') }}
             </span>
         @endif
-        <span class="seo-chip {{ $configuredProviders > 0 ? 'good' : 'bad' }}"><i class="las la-key mr-1"></i>{{ $configuredProviders }}/4 {{ translate('AI keys') }}</span>
+        <span class="seo-chip {{ $configuredProviders > 0 ? 'good' : 'bad' }}"><i class="las la-key mr-1"></i>{{ $configuredProviders }}/{{ $seoProviderTotal }} {{ translate('AI keys') }}</span>
         <span class="seo-chip {{ file_exists(base_path('sitemap.xml')) ? 'good' : 'bad' }}"><i class="las la-sitemap mr-1"></i>{{ file_exists(base_path('sitemap.xml')) ? translate('Sitemap ready') : translate('Sitemap missing') }}</span>
         <span class="seo-chip {{ file_exists(public_path('robots.txt')) ? 'good' : 'bad' }}"><i class="las la-robot mr-1"></i>{{ file_exists(public_path('robots.txt')) ? translate('Robots ready') : translate('Robots missing') }}</span>
         @if($seoActiveBatch)

@@ -464,6 +464,23 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         });
     });
 
+    // Advanced AI SEO — GEO readiness, CrUX field data, embedding clustering,
+    // research agent, and SSE streaming.
+    Route::controller(\App\Http\Controllers\Seo\AdvancedSeoController::class)->group(function () {
+        Route::get('/seo-suite/geo-readiness',          'geoReadiness')->name('admin.seo-suite.geo_readiness');
+        Route::get('/seo-suite/field-data',             'fieldData')->name('admin.seo-suite.field_data');
+        Route::get('/seo-suite/keyword-clusters',       'keywordClusters')->name('admin.seo-suite.keyword_clusters');
+        Route::get('/seo-suite/research-agent',         'researchAgent')->name('admin.seo-suite.research_agent');
+
+        // AI-spending endpoints — rate-limited.
+        Route::middleware('seo.rate')->group(function () {
+            Route::post('/seo-suite/geo-readiness/run',    'runGeoReadiness')->name('admin.seo-suite.geo_readiness.run');
+            Route::post('/seo-suite/keyword-clusters/run', 'runKeywordClusters')->name('admin.seo-suite.keyword_clusters.run');
+            Route::post('/seo-suite/research-agent/run',   'runResearchAgent')->name('admin.seo-suite.research_agent.run');
+            Route::post('/seo-suite/stream',               'streamGenerate')->name('admin.seo-suite.stream');
+        });
+    });
+
     // AI SEO Monitoring — telemetry dashboard
     Route::get('/seo-suite/monitoring', [SeoMonitoringController::class, 'index'])
         ->name('admin.seo.monitoring.index');

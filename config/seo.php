@@ -25,6 +25,13 @@ return [
             'perplexity' => env('SEO_PERPLEXITY_ESTIMATED_REQUEST_USD', 0.0030),
             'mistral' => env('SEO_MISTRAL_ESTIMATED_REQUEST_USD', 0.0006),
             'deepseek' => env('SEO_DEEPSEEK_ESTIMATED_REQUEST_USD', 0.0003),
+            'groq' => env('SEO_GROQ_ESTIMATED_REQUEST_USD', 0.0004),
+            'openrouter' => env('SEO_OPENROUTER_ESTIMATED_REQUEST_USD', 0.0090),
+            'together' => env('SEO_TOGETHER_ESTIMATED_REQUEST_USD', 0.0005),
+            'fireworks' => env('SEO_FIREWORKS_ESTIMATED_REQUEST_USD', 0.0005),
+            'qwen' => env('SEO_QWEN_ESTIMATED_REQUEST_USD', 0.0004),
+            'moonshot' => env('SEO_MOONSHOT_ESTIMATED_REQUEST_USD', 0.0012),
+            'cohere' => env('SEO_COHERE_ESTIMATED_REQUEST_USD', 0.0025),
         ],
         'database_settings' => true,
     ],
@@ -64,6 +71,45 @@ return [
             'model' => env('DEEPSEEK_MODEL', 'deepseek-chat'),
             'api_key' => env('DEEPSEEK_API_KEY'),
             'endpoint' => env('DEEPSEEK_API_ENDPOINT', 'https://api.deepseek.com/chat/completions'),
+        ],
+        // Groq — LPU inference, fastest tokens/sec. NOT the same as xAI's Grok.
+        'groq' => [
+            'model' => env('GROQ_MODEL', 'llama-3.3-70b-versatile'),
+            'api_key' => env('GROQ_API_KEY'),
+            'endpoint' => env('GROQ_API_ENDPOINT', 'https://api.groq.com/openai/v1/chat/completions'),
+        ],
+        // OpenRouter — one key fronting 300+ models; swap models via env alone.
+        'openrouter' => [
+            'model' => env('OPENROUTER_MODEL', 'anthropic/claude-sonnet-4.5'),
+            'api_key' => env('OPENROUTER_API_KEY'),
+            'endpoint' => env('OPENROUTER_API_ENDPOINT', 'https://openrouter.ai/api/v1/chat/completions'),
+        ],
+        'together' => [
+            'model' => env('TOGETHER_MODEL', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'),
+            'api_key' => env('TOGETHER_API_KEY'),
+            'endpoint' => env('TOGETHER_API_ENDPOINT', 'https://api.together.xyz/v1/chat/completions'),
+        ],
+        'fireworks' => [
+            'model' => env('FIREWORKS_MODEL', 'accounts/fireworks/models/llama-v3p3-70b-instruct'),
+            'api_key' => env('FIREWORKS_API_KEY'),
+            'endpoint' => env('FIREWORKS_API_ENDPOINT', 'https://api.fireworks.ai/inference/v1/chat/completions'),
+        ],
+        // Qwen via Alibaba DashScope OpenAI-compatible mode (intl endpoint).
+        'qwen' => [
+            'model' => env('QWEN_MODEL', 'qwen-plus'),
+            'api_key' => env('QWEN_API_KEY'),
+            'endpoint' => env('QWEN_API_ENDPOINT', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions'),
+        ],
+        'moonshot' => [
+            'model' => env('MOONSHOT_MODEL', 'kimi-k2-0905-preview'),
+            'api_key' => env('MOONSHOT_API_KEY'),
+            'endpoint' => env('MOONSHOT_API_ENDPOINT', 'https://api.moonshot.ai/v1/chat/completions'),
+        ],
+        // Cohere via its OpenAI-compatibility endpoint.
+        'cohere' => [
+            'model' => env('COHERE_MODEL', 'command-a-03-2025'),
+            'api_key' => env('COHERE_API_KEY'),
+            'endpoint' => env('COHERE_API_ENDPOINT', 'https://api.cohere.ai/compatibility/v1/chat/completions'),
         ],
     ],
 

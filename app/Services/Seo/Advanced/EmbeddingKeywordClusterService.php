@@ -24,11 +24,16 @@ class EmbeddingKeywordClusterService
 {
     use ResilientProviderHttp;
 
-    /** Providers that expose a real embeddings endpoint (chat models cannot embed). */
+    /**
+     * Providers that expose a real embeddings endpoint. A chat-only provider
+     * cannot embed, so those are rejected rather than silently downgraded.
+     */
     public const SUPPORTED = [
-        'openai'  => ['label' => 'OpenAI',  'model' => 'text-embedding-3-small'],
-        'gemini'  => ['label' => 'Gemini',  'model' => 'text-embedding-004'],
-        'mistral' => ['label' => 'Mistral', 'model' => 'mistral-embed'],
+        'openai'   => ['label' => 'OpenAI',     'model' => 'text-embedding-3-small'],
+        'gemini'   => ['label' => 'Gemini',     'model' => 'text-embedding-004'],
+        'mistral'  => ['label' => 'Mistral',    'model' => 'mistral-embed'],
+        'cohere'   => ['label' => 'Cohere',     'model' => 'embed-v4.0'],
+        'together' => ['label' => 'Together AI','model' => 'BAAI/bge-large-en-v1.5'],
     ];
 
     public const MAX_KEYWORDS = 300;
@@ -233,9 +238,12 @@ class EmbeddingKeywordClusterService
     {
         try {
             return match ($provider) {
-                'openai'  => $this->embedOpenAi($keywords),
-                'mistral' => $this->embedMistral($keywords),
-                'gemini'  => $this->embedGemini($keywords),
+                // Together exposes an OpenAI-shaped /v1/embeddings endpoint.
+                'openai'   => $this->embedOpenAiShaped($keywords, 'openai', 'https://api.openai.com/v1/embeddings'),
+                'mistral'  => $this->embedOpenAiShaped($keywords, 'mistral', 'https://api.mistral.ai/v1/embeddings'),
+                'together' => $this->embedOpenAiShaped($keywords, 'together', 'https://api.together.xyz/v1/embeddings'),
+                'gemini'   => $this->embedGemini($keywords),
+                'cohere'   => $this->embedCohere($keywords),
             };
         } catch (Throwable $e) {
             Log::warning('[SEO][Embeddings] failed', ['provider' => $provider, 'error' => $e->getMessage()]);
@@ -244,44 +252,52 @@ class EmbeddingKeywordClusterService
         }
     }
 
-    protected function embedOpenAi(array $keywords): array
+    /**
+     * OpenAI, Mistral and Together all expose the same `/v1/embeddings`
+     * contract: `{model, input[]}` in, `data[].embedding` out.
+     */
+    protected function embedOpenAiShaped(array $keywords, string $provider, string $endpoint): array
     {
-        $key = $this->key('openai');
+        $key = $this->key($provider);
         if (!$key) {
-            return ['error' => 'No OpenAI API key configured.'];
+            return ['error' => 'No ' . self::SUPPORTED[$provider]['label'] . ' API key configured.'];
         }
 
-        $response = $this->providerHttp()->withToken($key)->post('https://api.openai.com/v1/embeddings', [
-            'model' => self::SUPPORTED['openai']['model'],
+        $response = $this->providerHttp()->withToken($key)->post($endpoint, [
+            'model' => self::SUPPORTED[$provider]['model'],
             'input' => $keywords,
         ]);
 
         if (!$response->successful()) {
-            return ['error' => 'OpenAI embeddings error: ' . data_get($response->json(), 'error.message', 'HTTP ' . $response->status())];
+            return ['error' => self::SUPPORTED[$provider]['label'] . ' embeddings error: '
+                . data_get($response->json(), 'error.message', 'HTTP ' . $response->status())];
         }
 
-        $vectors = array_map(fn($row) => $row['embedding'], $response->json('data', []));
+        $vectors = array_map(fn($row) => $row['embedding'] ?? [], $response->json('data', []));
 
         return $this->validateVectors($vectors, $keywords);
     }
 
-    protected function embedMistral(array $keywords): array
+    /** Cohere's native embed API — needs input_type and returns float arrays. */
+    protected function embedCohere(array $keywords): array
     {
-        $key = $this->key('mistral');
+        $key = $this->key('cohere');
         if (!$key) {
-            return ['error' => 'No Mistral API key configured.'];
+            return ['error' => 'No Cohere API key configured.'];
         }
 
-        $response = $this->providerHttp()->withToken($key)->post('https://api.mistral.ai/v1/embeddings', [
-            'model' => self::SUPPORTED['mistral']['model'],
-            'input' => $keywords,
+        $response = $this->providerHttp()->withToken($key)->post('https://api.cohere.ai/v2/embed', [
+            'model'           => self::SUPPORTED['cohere']['model'],
+            'texts'           => $keywords,
+            'input_type'      => 'clustering',
+            'embedding_types' => ['float'],
         ]);
 
         if (!$response->successful()) {
-            return ['error' => 'Mistral embeddings error: ' . data_get($response->json(), 'error.message', 'HTTP ' . $response->status())];
+            return ['error' => 'Cohere embeddings error: ' . data_get($response->json(), 'message', 'HTTP ' . $response->status())];
         }
 
-        $vectors = array_map(fn($row) => $row['embedding'], $response->json('data', []));
+        $vectors = $response->json('embeddings.float', []);
 
         return $this->validateVectors($vectors, $keywords);
     }
@@ -340,17 +356,11 @@ class EmbeddingKeywordClusterService
             return $configured;
         }
 
-        $settingMap = [
-            'openai'  => 'seo_openai_api_key',
-            'gemini'  => 'seo_gemini_api_key',
-            'mistral' => 'seo_mistral_api_key',
-        ];
-
-        if (function_exists('get_setting') && isset($settingMap[$provider])) {
-            return get_setting($settingMap[$provider]) ?: null;
+        if (!function_exists('get_setting')) {
+            return null;
         }
 
-        return null;
+        return get_setting("seo_{$provider}_api_key") ?: null;
     }
 
     /** @return string[] */

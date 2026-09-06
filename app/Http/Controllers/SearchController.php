@@ -269,7 +269,13 @@ class SearchController extends Controller
 
         $products = filter_products($products)->with(['taxes', 'brand', 'stocks', 'thumbnail'])->paginate(24)->appends(request()->query());
         if ($request->ajax()) {
-            return view('frontend.product_listing_products', compact('products'));
+            // Infinite scroll relies on this header rather than sniffing an
+            // empty response body, since an empty body is not a reliable
+            // "no more pages" signal (any incidental markup added to the
+            // partial later would make it non-empty even on the last page).
+            return response()
+                ->view('frontend.product_listing_products', compact('products'))
+                ->header('X-Has-More-Pages', $products->hasMorePages() ? '1' : '0');
         }
         return view('frontend.product_listing', compact('products', 'query', 'category', 'categories', 'category_id', 'brand_id', 'brand', 'sort_by', 'seller_id', 'min_price', 'max_price', 'attributes', 'selected_attribute_values', 'colors', 'selected_color', 'product_type', 'is_available', 'preorder_categories', 'filterBrands', 'priceRange'));
     }

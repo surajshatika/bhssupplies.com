@@ -35,6 +35,7 @@
                     {{translate('Bulk Action')}}
                 </button>
                 <div class="dropdown-menu dropdown-menu-right">
+                    <a class="dropdown-item" href="#" onclick="open_bulk_category_modal()"> {{translate('Assign Category')}}</a>
                     <a class="dropdown-item" href="#" onclick="bulk_delete()"> {{translate('Delete selection')}}</a>
                 </div>
             </div>
@@ -248,6 +249,41 @@
 
 @section('modal')
     @include('modals.delete_modal')
+
+    <div class="modal fade" id="bulk_category_modal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">{{ translate('Assign Category to Selected Products') }}</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">
+                        <span id="bulk_category_selected_count">0</span> {{ translate('product(s) selected.') }}
+                        {{ translate('Choosing categories here will replace the selected products\' current categories.') }}
+                    </p>
+                    <div class="form-group">
+                        <label>{{ translate('Category') }} <span class="text-danger">*</span></label>
+                        <select class="form-control aiz-selectpicker" id="bulk_category_ids" data-live-search="true" data-selected-text-format="count > 2" multiple>
+                            @foreach ($categoriesTree ?? [] as $category)
+                                <option value="{{ $category->id }}">{{ $category->getTranslation('name') }}</option>
+                                @foreach ($category->childrenCategories as $childCategory)
+                                    @include('categories.child_category', ['child_category' => $childCategory])
+                                @endforeach
+                            @endforeach
+                        </select>
+                        <small class="text-muted">{{ translate('You can select multiple categories. The first selected category becomes each product\'s primary category.') }}</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-dismiss="modal">{{ translate('Cancel') }}</button>
+                    <button type="button" class="btn btn-primary" id="bulk_category_submit_btn" onclick="bulk_assign_category()">{{ translate('Assign Category') }}</button>
+                </div>
+            </div>
+        </div>
+    </div>
 @endsection
 
 
@@ -373,6 +409,10 @@
         }
         
         function bulk_delete() {
+            if ($('.check-one:checked').length == 0) {
+                AIZ.plugins.notify('danger', '{{ translate('Please select at least one product') }}');
+                return;
+            }
             var data = new FormData($('#sort_products')[0]);
             $.ajax({
                 headers: {
@@ -388,6 +428,58 @@
                     if(response == 1) {
                         location.reload();
                     }
+                }
+            });
+        }
+
+        function open_bulk_category_modal() {
+            var checked = $('.check-one:checked').length;
+            if (checked == 0) {
+                AIZ.plugins.notify('danger', '{{ translate('Please select at least one product') }}');
+                return;
+            }
+            $('#bulk_category_selected_count').text(checked);
+            $('#bulk_category_ids').selectpicker('deselectAll');
+            $('#bulk_category_modal').modal('show');
+        }
+
+        function bulk_assign_category() {
+            var category_ids = $('#bulk_category_ids').val();
+            if (!category_ids || category_ids.length == 0) {
+                AIZ.plugins.notify('danger', '{{ translate('Please select at least one category') }}');
+                return;
+            }
+
+            var data = new FormData($('#sort_products')[0]);
+            category_ids.forEach(function (id) {
+                data.append('category_ids[]', id);
+            });
+
+            var $btn = $('#bulk_category_submit_btn');
+            $btn.prop('disabled', true);
+
+            $.ajax({
+                headers: {
+                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                },
+                url: "{{ route('bulk-product-category-update') }}",
+                type: 'POST',
+                data: data,
+                cache: false,
+                contentType: false,
+                processData: false,
+                success: function (response) {
+                    if (response.success) {
+                        AIZ.plugins.notify('success', response.message);
+                        location.reload();
+                    } else {
+                        AIZ.plugins.notify('danger', response.message || '{{ translate('Something went wrong') }}');
+                        $btn.prop('disabled', false);
+                    }
+                },
+                error: function () {
+                    AIZ.plugins.notify('danger', '{{ translate('Request failed. Please try again.') }}');
+                    $btn.prop('disabled', false);
                 }
             });
         }

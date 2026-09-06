@@ -86,10 +86,11 @@ class ProductController extends Controller
         $back_to = null;
         $seller_id = null;
         $categories = \App\Models\Category::all();
+        $categoriesTree = \App\Models\Category::where('parent_id', 0)->with('childrenCategories')->get();
         $products = Product::where('auction_product', 0)->where('wholesale_product', 0)
             ->where('added_by', 'admin')->orderBy('created_at', 'desc')->paginate(15);
 
-        return view('backend.product.products.index', compact('seller_type', 'type', 'product_types', 'brand_id', 'category_id', 'subcategory_id', 'back_to', 'categories', 'products', 'seller_id'));
+        return view('backend.product.products.index', compact('seller_type', 'type', 'product_types', 'brand_id', 'category_id', 'subcategory_id', 'back_to', 'categories', 'categoriesTree', 'products', 'seller_id'));
     }
 
     /**
@@ -120,10 +121,11 @@ class ProductController extends Controller
         $back_to = null;
         $seller_id = null;
         $categories = \App\Models\Category::all();
+        $categoriesTree = \App\Models\Category::where('parent_id', 0)->with('childrenCategories')->get();
         $products = Product::where('auction_product', 0)->where('wholesale_product', 0)
             ->where('added_by', 'seller')->orderBy('created_at', 'desc')->paginate(15);
 
-        return view('backend.product.products.index', compact('seller_type', 'type', 'product_types', 'brand_id', 'category_id', 'subcategory_id', 'back_to', 'categories', 'products', 'seller_id'));
+        return view('backend.product.products.index', compact('seller_type', 'type', 'product_types', 'brand_id', 'category_id', 'subcategory_id', 'back_to', 'categories', 'categoriesTree', 'products', 'seller_id'));
     }
 
     public function all_products(Request $request)
@@ -193,8 +195,9 @@ class ProductController extends Controller
         $products = $products->orderBy('created_at', 'desc')->paginate(15);
         $type = 'All';
         $categories = \App\Models\Category::all();
+        $categoriesTree = \App\Models\Category::where('parent_id', 0)->with('childrenCategories')->get();
 
-        return view('backend.product.products.index', compact('type', 'seller_type', 'product_types', 'brand_id', 'category_id', 'subcategory_id', 'back_to', 'categories', 'products', 'seller_id', 'sort_search', 'col_name', 'query'));
+        return view('backend.product.products.index', compact('type', 'seller_type', 'product_types', 'brand_id', 'category_id', 'subcategory_id', 'back_to', 'categories', 'categoriesTree', 'products', 'seller_id', 'sort_search', 'col_name', 'query'));
     }
 
     public function get_filter_products(Request $request)
@@ -1207,6 +1210,42 @@ class ProductController extends Controller
         }
     }
     
+    /**
+     * Assign/replace categories on multiple selected products at once.
+     * The first category in the submitted list becomes each product's
+     * primary category (category_id); the full list replaces the
+     * product's category assignments (product_categories pivot), matching
+     * how a single product's category is set on the edit form.
+     */
+    public function bulk_product_category_update(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|array|min:1',
+            'id.*' => 'integer|exists:products,id',
+            'category_ids' => 'required|array|min:1',
+            'category_ids.*' => 'integer|exists:categories,id',
+        ]);
+
+        foreach ($request->id as $product_id) {
+            $product = Product::find($product_id);
+            if (!$product) {
+                continue;
+            }
+
+            $product->category_id = $request->category_ids[0];
+            $product->save();
+            $product->categories()->sync($request->category_ids);
+        }
+
+        Artisan::call('view:clear');
+        Artisan::call('cache:clear');
+
+        return response()->json([
+            'success' => true,
+            'message' => count($request->id) . ' ' . translate('product(s) updated with the selected category'),
+        ]);
+    }
+
     public function get_products_byCategory(Request $request)
     {
         $products = $this->productService->products_search($request->except(['_token']));

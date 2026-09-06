@@ -987,14 +987,15 @@ class SeoSuiteController extends Controller
             $this->saveSetting('seo_keywords_updated_at', now()->toIso8601String());
         }
 
-        $secretPairs = [
-            'seo_openai_api_key'        => $request->openai_api_key,
-            'seo_anthropic_api_key'     => $request->anthropic_api_key,
-            'seo_gemini_api_key'        => $request->gemini_api_key,
-            'seo_grok_api_key'          => $request->grok_api_key,
-            'seo_perplexity_api_key'    => $request->perplexity_api_key,
-            'seo_mistral_api_key'       => $request->mistral_api_key,
-            'seo_deepseek_api_key'      => $request->deepseek_api_key,
+        // Provider keys are derived from the registry so a newly added provider
+        // is saved automatically — a hand-maintained list here previously meant
+        // a missed line silently discarded that provider's key on every save.
+        $secretPairs = [];
+        foreach (SeoProviderManager::meta() as $meta) {
+            $secretPairs[$meta['setting']] = $request->input($meta['field']);
+        }
+
+        $secretPairs += [
             'seo_gsc_client_secret'     => $request->gsc_client_secret,
             'seo_gsc_refresh_token'     => $request->gsc_refresh_token,
             'seo_serpapi_key'           => $request->serpapi_key,
@@ -1020,15 +1021,15 @@ class SeoSuiteController extends Controller
             'SEO_LOCAL_BUSINESS_NAME'         => $request->local_business_name,
             'SEO_LOCAL_BUSINESS_TYPE'         => $request->local_business_type,
             'SEO_GOOGLE_SEARCH_CONSOLE_SITE'  => $request->search_console_site,
-            'OPENAI_API_KEY'                  => $request->openai_api_key,
-            'ANTHROPIC_API_KEY'               => $request->anthropic_api_key,
-            'GEMINI_API_KEY'                  => $request->gemini_api_key,
-            'GROK_API_KEY'                    => $request->grok_api_key,
-            'PERPLEXITY_API_KEY'              => $request->perplexity_api_key,
-            'MISTRAL_API_KEY'                 => $request->mistral_api_key,
-            'DEEPSEEK_API_KEY'                => $request->deepseek_api_key,
             'SEO_INDEXNOW_KEY'                => $request->indexnow_key,
         ];
+
+        // Mirror each provider key into .env under its conventional name
+        // (ANTHROPIC_API_KEY for Claude, otherwise <PROVIDER>_API_KEY).
+        foreach (SeoProviderManager::meta() as $name => $meta) {
+            $envName = $name === 'claude' ? 'ANTHROPIC_API_KEY' : strtoupper($name) . '_API_KEY';
+            $envPairs[$envName] = $request->input($meta['field']);
+        }
 
         $this->overWriteEnvFileMany($envPairs);
 
@@ -1289,13 +1290,8 @@ class SeoSuiteController extends Controller
             'indexnow_key'           => get_setting('seo_indexnow_key', config('seo.indexnow.key')),
             'google_search_api_key'  => get_setting('seo_google_search_api_key', env('GOOGLE_SEARCH_API_KEY')),
             'google_search_cx'       => get_setting('seo_google_search_cx', env('GOOGLE_SEARCH_CX')),
-            'openai_api_key'         => env('OPENAI_API_KEY') ?? get_setting('seo_openai_api_key'),
-            'anthropic_api_key'      => env('ANTHROPIC_API_KEY') ?? get_setting('seo_anthropic_api_key'),
-            'gemini_api_key'         => env('GEMINI_API_KEY') ?? get_setting('seo_gemini_api_key'),
-            'grok_api_key'           => env('GROK_API_KEY') ?? get_setting('seo_grok_api_key'),
-            'perplexity_api_key'     => env('PERPLEXITY_API_KEY') ?? get_setting('seo_perplexity_api_key'),
-            'mistral_api_key'        => env('MISTRAL_API_KEY') ?? get_setting('seo_mistral_api_key'),
-            'deepseek_api_key'       => env('DEEPSEEK_API_KEY') ?? get_setting('seo_deepseek_api_key'),
+            // Every registered provider's key, keyed by its form field name.
+            ...$this->providerKeySettings(),
 
             // GSC
             'gsc_client_id'          => get_setting('seo_gsc_client_id'),
@@ -1338,6 +1334,22 @@ class SeoSuiteController extends Controller
         ];
     }
 
+    /**
+     * Current API key for every registered provider, keyed by form field name.
+     * Config (env) wins over the stored business setting, matching the
+     * precedence the provider drivers themselves use.
+     */
+    protected function providerKeySettings(): array
+    {
+        $keys = [];
+        foreach (SeoProviderManager::meta() as $name => $meta) {
+            $keys[$meta['field']] = config("seo.providers.{$name}.api_key")
+                ?: get_setting($meta['setting']);
+        }
+
+        return $keys;
+    }
+
     protected function buildAdvancedDashboard($runs, $histories, $redirects, array $settings, array $dashboard, array $siteSummary = []): array
     {
         $runs = collect($runs);
@@ -1364,15 +1376,10 @@ class SeoSuiteController extends Controller
             ? ((int) $newestHistory->score - (int) $oldestHistory->score)
             : 0;
 
-        $providers = [
-            'openai' => !empty($settings['openai_api_key']),
-            'claude' => !empty($settings['anthropic_api_key']),
-            'gemini' => !empty($settings['gemini_api_key']),
-            'grok' => !empty($settings['grok_api_key']),
-            'perplexity' => !empty($settings['perplexity_api_key']),
-            'mistral' => !empty($settings['mistral_api_key']),
-            'deepseek' => !empty($settings['deepseek_api_key']),
-        ];
+        $providers = [];
+        foreach (SeoProviderManager::meta() as $name => $meta) {
+            $providers[$name] = !empty($settings[$meta['field']]);
+        }
         $providerReliability = app(SeoProviderReliability::class)->dashboard();
 
         $files = [
@@ -1637,24 +1644,12 @@ class SeoSuiteController extends Controller
 
     protected function quickProviderHealthCheck(array $settings): array
     {
-        $labelMap = [
-            'openai' => 'OpenAI',
-            'claude' => 'Claude',
-            'gemini' => 'Gemini',
-            'grok'   => 'Grok',
-            'perplexity' => 'Perplexity',
-            'mistral'    => 'Mistral',
-            'deepseek'   => 'DeepSeek',
-        ];
-        $modelMap = [
-            'openai' => config('seo.providers.openai.model', 'gpt-4o-mini'),
-            'claude' => config('seo.providers.claude.model', 'claude-sonnet-4-6'),
-            'gemini' => config('seo.providers.gemini.model', 'gemini-2.0-flash'),
-            'grok'   => config('seo.providers.grok.model', 'grok-3-mini'),
-            'perplexity' => config('seo.providers.perplexity.model', 'sonar-pro'),
-            'mistral'    => config('seo.providers.mistral.model', 'mistral-small-latest'),
-            'deepseek'   => config('seo.providers.deepseek.model', 'deepseek-chat'),
-        ];
+        $labelMap = [];
+        $modelMap = [];
+        foreach (SeoProviderManager::meta() as $name => $meta) {
+            $labelMap[$name] = $meta['label'];
+            $modelMap[$name] = config("seo.providers.{$name}.model", '');
+        }
 
         try {
             $raw = app(SeoProviderReliability::class)->dashboard();
@@ -1719,13 +1714,11 @@ class SeoSuiteController extends Controller
 
         // If no reliability data at all (fresh install or cache cleared), fall back to key presence
         if (empty($raw)) {
-            $anyWorking = !empty($settings['openai_api_key'])
-                || !empty($settings['anthropic_api_key'])
-                || !empty($settings['seo_gemini_api_key'])
-                || !empty($settings['seo_grok_api_key'])
-                || !empty($settings['seo_perplexity_api_key'])
-                || !empty($settings['seo_mistral_api_key'])
-                || !empty($settings['seo_deepseek_api_key']);
+            // $settings is keyed by form field name. The previous version mixed
+            // in seo_*_api_key setting keys, which are never present here, so
+            // those checks silently never matched.
+            $anyWorking = collect(SeoProviderManager::meta())
+                ->contains(fn($meta) => !empty($settings[$meta['field']]));
         }
 
         return ['providers' => $results, 'any_working' => $anyWorking];

@@ -625,11 +625,28 @@
 
     /* Infinite scroll */
     var page = {{ request()->get('page', 1) }}, loading = false, noMoreProducts = {{ $products->hasMorePages() ? 'false' : 'true' }};
-    $(window).scroll(function() {
-        if ($(window).scrollTop() + $(window).height() >= $(document).height() - 600) {
-            if (!loading && !noMoreProducts) loadMoreProducts();
-        }
-    });
+
+    // The scroll check itself only reads layout (scrollTop/height), so it's
+    // cheap, but running it on every raw scroll event (which can fire dozens
+    // of times per second) is what caused the jank. Gate it to once per
+    // animation frame instead, and use a passive listener so the browser
+    // never blocks scrolling to wait for this handler.
+    var scrollTicking = false;
+    window.addEventListener('scroll', function() {
+        if (scrollTicking) return;
+        scrollTicking = true;
+        requestAnimationFrame(function() {
+            maybeLoadMoreProducts();
+            scrollTicking = false;
+        });
+    }, { passive: true });
+
+    function maybeLoadMoreProducts() {
+        if (loading || noMoreProducts) return;
+        var scrollBottom = window.scrollY + window.innerHeight;
+        var docHeight = document.documentElement.scrollHeight;
+        if (scrollBottom >= docHeight - 600) loadMoreProducts();
+    }
 
     function loadMoreProducts() {
         page++; loading = true;
@@ -637,10 +654,15 @@
         var url = window.location.href;
         url += (url.indexOf('?') > -1 ? '&' : '?') + 'page=' + page;
         $.ajax({ url: url, type: 'get' })
-        .done(function(data) {
+        .done(function(data, textStatus, jqXHR) {
             $('#load-more').hide();
-            if (!data.trim()) { noMoreProducts = true; return; }
-            $('#product-listing-row').append(data);
+            var hasMoreHeader = jqXHR.getResponseHeader('X-Has-More-Pages');
+            // Prefer the explicit server signal; fall back to the old
+            // empty-body check only if the header is missing for any reason.
+            noMoreProducts = (hasMoreHeader !== null) ? (hasMoreHeader === '0') : !data.trim();
+            if (data.trim()) {
+                $('#product-listing-row').append(data);
+            }
             loading = false;
         })
         .fail(function() { $('#load-more').hide(); loading = false; });

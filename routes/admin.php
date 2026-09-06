@@ -200,6 +200,7 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         Route::post('/bulk-product-featured', 'bulk_product_featured')->name('bulk-product-featured');
         Route::post('/bulk-product-todays-deal', 'bulk_product_todays_deal')->name('bulk-product-todays-deal');
         Route::post('/bulk-product-stock-update', 'bulk_product_stock_update')->name('bulk-product-stock-update');
+        Route::post('/bulk-product-category-update', 'bulk_product_category_update')->name('bulk-product-category-update');
 
         Route::post('/products/sku_combination', 'sku_combination')->name('products.sku_combination');
         Route::post('/products/sku_combination_edit', 'sku_combination_edit')->name('products.sku_combination_edit');

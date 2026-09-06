@@ -22,6 +22,7 @@ Key capabilities:
 - Sitemap, robots.txt, RSS, IndexNow, and LLMs.txt generation.
 - Google Search Console integration, keyword rank tracking, and PageSpeed/Core Web Vitals sync.
 - Advanced analytics: semantic gap analysis, content decay detection, internal link graph, predictive traffic forecasting.
+- Advanced AI tooling: GEO/AI-search readiness scoring, real Chrome-user field data (CrUX), embedding-based keyword clustering, an autonomous research agent, and SSE token streaming.
 - Internal link building assistance (with automated auto-linker engine) and SEO revision history.
 - Webmaster verification management for Google, Bing, Yandex, Pinterest, Baidu.
 - Redirect manager and automated SEO run queue control.
@@ -45,6 +46,12 @@ Related admin pages:
 - `/admin/seo-suite/revisions`
 - `/admin/seo-suite/settings`
 - `/admin/seo-suite/ai-board`
+
+Advanced AI tool pages:
+- `/admin/seo-suite/geo-readiness`
+- `/admin/seo-suite/field-data`
+- `/admin/seo-suite/keyword-clusters`
+- `/admin/seo-suite/research-agent`
 
 Advanced analytics pages:
 - `/admin/seo-suite/semantic-gap`
@@ -154,13 +161,33 @@ Admin settings page includes:
 - Cool down unhealthy AI providers toggle.
 - Failures before cooldown.
 - Cooldown duration.
-- OpenAI API key.
-- Claude API key.
-- Google Gemini API key.
-- Grok API key.
-- Perplexity API key (live-web-search-backed research, strong for gap analysis).
-- Mistral API key.
-- DeepSeek API key (cost-effective for high-volume/bulk SEO tasks).
+**14 supported AI providers.** All are defined once in `SeoProviderManager::PROVIDERS` / `::META`; the settings form, dropdowns, save/load maps, `.env` mirroring, and health panel all read from that registry, so adding a provider is a single entry rather than edits in five files.
+
+| Provider | Best for |
+|---|---|
+| OpenAI (ChatGPT) | Content generation, images, TruSEO analysis |
+| Claude (Anthropic) | Advanced content, schema markup, SEO strategy |
+| Gemini (Google) | Multimodal content, structured data, embeddings |
+| Grok (xAI) | Real-time insights with X/Twitter data |
+| Perplexity | Live-web-grounded answers — best for gap/competitor research |
+| Mistral | European-hosted; also provides embeddings |
+| DeepSeek | Lowest cost per token — the value pick for bulk passes |
+| Groq | LPU inference, highest tokens/sec — best for streaming |
+| OpenRouter | One key fronting 300+ models; swap model via env alone |
+| Together AI | Hosted open-weight models, cheap bulk generation |
+| Fireworks AI | Fast hosted open-weight models |
+| Qwen (Alibaba) | Strong multilingual coverage for non-English SEO |
+| Moonshot (Kimi) | Long context — whole-page/multi-document analysis |
+| Cohere | Chat plus embeddings and reranking |
+
+Notes:
+- **Grok (xAI) and Groq (LPU inference) are different vendors** whose names differ by one letter. They are deliberately kept distinct with no cross-aliasing — silently routing one to the other would send traffic and spend to the wrong company. A test enforces this.
+- Claude's form field and setting key remain `anthropic_api_key` / `seo_anthropic_api_key`; renaming them would orphan every existing install's stored key. Also test-enforced.
+- Accepted aliases: `anthropic`→claude, `google`→gemini, `chatgpt`→openai, `xai`/`x.ai`→grok, `kimi`→moonshot, `dashscope`/`alibaba`→qwen, `togetherai`→together, `open-router`→openrouter.
+- All 14 keys are encrypted at rest via the generic `_api_key$` pattern in `BusinessSetting`.
+- Eleven of the fourteen share one `OpenAiCompatibleProvider` base class (~24 lines each) instead of duplicated ~68-line drivers, so a behaviour fix lands everywhere at once.
+- **Streaming:** 12 providers stream genuinely; Gemini and Perplexity return a single chunk and say so.
+- **Embeddings** (for keyword clustering): OpenAI, Gemini, Mistral, Cohere, Together. Chat-only providers are rejected with a clear message rather than silently downgraded.
 
 ### Search & Tracking
 - Google Search Console site URL.
@@ -542,6 +569,55 @@ Beyond the scheduled jobs above, these commands are available for manual operati
 - `seo:cleanup-injected-content [--dry-run]` — removes AI-injected content that needs to be rolled back.
 - `seo:restart-ai-queue` — restarts/recovers stuck AI SEO Board batch queue workers.
 - `seo:auto-linker` — CLI equivalent of the Link Assistant's "Run Auto-Linker Now" button.
+
+## Advanced AI Tools
+
+Five newer capabilities built around what actually moves rankings in AI-mediated search. Services live in `app/Services/Seo/Advanced/`, wired through `App\Http\Controllers\Seo\AdvancedSeoController`. All AI-spending endpoints are rate-limited via `seo.rate`.
+
+### AI Search (GEO) Readiness — `/admin/seo-suite/geo-readiness`
+Scores how citable a page is by ChatGPT Search, Perplexity, and Google AI Overviews — a different problem from ranking ten blue links, since answer engines extract and attribute discrete passages.
+
+- **Uses zero AI calls.** All 8 factors are measured directly from the fetched HTML, so the score is deterministic, free, instant, and reproducible — the same page always scores the same. This is verified by a test.
+- Weighted factors (100 pts total): Answer-First Content (18), Extractable Facts (16), Structured Data/JSON-LD (15), Heading Structure (13), Question-Shaped Sections (12), Author & Entity Attribution (10), Freshness Signals (8), AI Crawler Access (8).
+- Every factor reports the **evidence** behind its score plus a concrete fix — no black-box numbers.
+- "Fix These First" panel ranks gaps by points recoverable.
+- Detects real problems: duplicate H1s, `noindex`/`nosnippet` blocking answer-engine excerpting, JS-only content invisible to non-executing crawlers, missing machine-readable dates.
+
+### Real User Field Data (CrUX) — `/admin/seo-suite/field-data`
+Reads the Chrome UX Report API: the 28-day rolling distribution of measurements from real Chrome users.
+
+- **This is the data Google actually ranks on.** The existing PageSpeed/Lighthouse page shows *lab* data — a simulated load on synthetic hardware. Both are now available and clearly labelled as distinct.
+- Reports LCP, INP, CLS, FCP, and TTFB at the 75th percentile, with the full good/needs-improvement/poor distribution bar rather than a single number.
+- Core Web Vitals pass/fail assessment (LCP + INP + CLS must all be "good"); returns "incomplete" rather than claiming a pass when data is missing.
+- **Honest about missing data:** low-traffic URLs get an explicit "not enough real Chrome traffic yet" state, never substituted lab numbers. Falls back to origin-level data only with a visible notice saying so.
+- Requires the Chrome UX Report API to be enabled on the Google Cloud project that owns the PageSpeed key.
+
+### Semantic Keyword Clustering — `/admin/seo-suite/keyword-clusters`
+Groups keywords by meaning so each cluster maps to one page — the fix for cannibalisation and the basis for topical authority.
+
+- **The AI supplies embeddings only; it never picks the groups.** Clustering is deterministic cosine-similarity union-find. Asking a chat model to "group these keywords" gives a different answer each run, silently drops inputs, and can't be verified.
+- Supports OpenAI (`text-embedding-3-small`), Gemini (`text-embedding-004`), and Mistral (`mistral-embed`) — the providers with real embeddings endpoints. Chat-only providers are rejected with a clear message.
+- Adjustable similarity threshold; single-link clustering so transitive relationships group correctly.
+- Each cluster names a **head term** (the member closest to the cluster centroid) as the page target, plus a cohesion score.
+- Refuses to cluster on a partial embedding response rather than silently misaligning keywords to wrong vectors.
+
+### Autonomous Research Agent — `/admin/seo-suite/research-agent`
+A ReAct-style loop: each turn the model reviews what it has gathered and decides which page to read next, or that it has enough to write up.
+
+- **Hard security boundary — the agent may only fetch URLs from the admin-supplied seed list, and cannot follow links it discovers.** An agent that fetches model-chosen URLs is an SSRF primitive: text injected into a fetched page could steer it into requesting internal addresses (`169.254.169.254`, `127.0.0.1`, intranet hosts) and echoing the response back. Seeds are validated as public HTTP(S) before any request; localhost, private ranges, and metadata addresses are rejected up front. Covered by a test.
+- Capped at 8 fetches / 10 turns.
+- Full **reasoning trace** is shown: each turn's thought, chosen action, observation, and any guard interventions.
+- Reports fetch failures (paywalls, blocks, JS-only pages) honestly instead of inventing content, and the final report is instructed to state what the sources did not cover.
+
+### Streaming AI Output (SSE)
+Token-by-token streaming for the AI Writing Assistant, via `POST /admin/seo-suite/stream`.
+
+- Genuine incremental streaming for OpenAI, DeepSeek, Mistral, Grok (OpenAI-compatible SSE) and Claude (Anthropic event format).
+- **Gemini and Perplexity degrade honestly** — they return the whole response in one chunk and the UI says "returned in one piece". No simulated typewriter effect, which would look identical to real streaming while misrepresenting how fast the model actually responded.
+- Server-side output buffering is torn down and each frame flushed explicitly, with `X-Accel-Buffering: no` so nginx doesn't buffer the stream.
+
+### Navigation
+The nav strip is grouped into five workflow stages — Overview, Create, Optimize, Research, Links & History — rather than one flat 23-item row, which read as undifferentiated noise at that size. The AI-keys health chip now counts all seven configured providers.
 
 ## Frontend / Public-Facing SEO Layer
 

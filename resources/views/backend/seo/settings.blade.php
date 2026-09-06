@@ -3,15 +3,9 @@
 @section('content')
 @include('backend.partials.modern_module_styles')
 @php
-    $providers = [
-        'openai' => 'OpenAI (ChatGPT)',
-        'claude' => 'Claude (Anthropic)',
-        'gemini' => 'Gemini (Google)',
-        'grok' => 'Grok (xAI)',
-        'perplexity' => 'Perplexity AI (Live Web Search)',
-        'mistral' => 'Mistral AI',
-        'deepseek' => 'DeepSeek (Cost-Effective Bulk SEO)',
-    ];
+    // Single source of truth — see App\Services\Seo\Providers\SeoProviderManager::META
+    $providerMeta = \App\Services\Seo\Providers\SeoProviderManager::meta();
+    $providers = \App\Services\Seo\Providers\SeoProviderManager::labels();
 @endphp
 
 <div class="mm-hero mm-hero--seo">
@@ -118,75 +112,18 @@
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label>
-                        <span class="badge badge-success mr-1">OpenAI</span>
-                        {{ translate('OpenAI API Key (ChatGPT / DALL-E)') }}
-                    </label>
-                    <input type="password" class="form-control" name="openai_api_key"
-                        value="{{ $settings['openai_api_key'] ?? '' }}" placeholder="sk-...">
-                    <small class="text-muted">{{ translate('Used for: Content generation, image generation, TruSEO analysis') }}</small>
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <span class="badge badge-primary mr-1">Claude</span>
-                        {{ translate('Anthropic API Key (Claude)') }}
-                    </label>
-                    <input type="password" class="form-control" name="anthropic_api_key"
-                        value="{{ $settings['anthropic_api_key'] ?? '' }}" placeholder="sk-ant-...">
-                    <small class="text-muted">{{ translate('Used for: Advanced content, schema markup, SEO strategies') }}</small>
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <span class="badge badge-info mr-1">Gemini</span>
-                        {{ translate('Google Gemini API Key') }}
-                    </label>
-                    <input type="password" class="form-control" name="gemini_api_key"
-                        value="{{ $settings['gemini_api_key'] ?? '' }}" placeholder="AIza...">
-                    <small class="text-muted">{{ translate('Used for: Multimodal content, structured data') }}</small>
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <span class="badge badge-warning mr-1">Grok</span>
-                        {{ translate('Grok API Key (xAI)') }}
-                    </label>
-                    <input type="password" class="form-control" name="grok_api_key"
-                        value="{{ $settings['grok_api_key'] ?? '' }}" placeholder="xai-...">
-                    <small class="text-muted">{{ translate('Used for: Real-time SEO insights, competitive analysis') }}</small>
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <span class="badge badge-secondary mr-1">Perplexity</span>
-                        {{ translate('Perplexity API Key') }}
-                    </label>
-                    <input type="password" class="form-control" name="perplexity_api_key"
-                        value="{{ $settings['perplexity_api_key'] ?? '' }}" placeholder="pplx-...">
-                    <small class="text-muted">{{ translate('Used for: Live-web-search-backed semantic gap analysis and competitor research') }}</small>
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <span class="badge badge-dark mr-1">Mistral</span>
-                        {{ translate('Mistral API Key') }}
-                    </label>
-                    <input type="password" class="form-control" name="mistral_api_key"
-                        value="{{ $settings['mistral_api_key'] ?? '' }}" placeholder="...">
-                    <small class="text-muted">{{ translate('Used for: General-purpose SEO content generation') }}</small>
-                </div>
-
-                <div class="form-group mb-0">
-                    <label>
-                        <span class="badge badge-light border mr-1">DeepSeek</span>
-                        {{ translate('DeepSeek API Key') }}
-                    </label>
-                    <input type="password" class="form-control" name="deepseek_api_key"
-                        value="{{ $settings['deepseek_api_key'] ?? '' }}" placeholder="sk-...">
-                    <small class="text-muted">{{ translate('Used for: High-volume/bulk SEO tasks at low cost') }}</small>
-                </div>
+                {{-- Rendered from SeoProviderManager::META so a new provider needs no blade edit. --}}
+                @foreach($providerMeta as $key => $meta)
+                    <div class="form-group {{ $loop->last ? 'mb-0' : '' }}">
+                        <label>
+                            <span class="badge badge-{{ $meta['badge'] }} {{ $meta['badge'] === 'light' ? 'border' : '' }} mr-1">{{ $meta['label'] }}</span>
+                        </label>
+                        <input type="password" class="form-control" name="{{ $meta['field'] }}"
+                            value="{{ $settings[$meta['field']] ?? '' }}" placeholder="{{ $meta['placeholder'] }}"
+                            autocomplete="new-password">
+                        <small class="text-muted">{{ translate($meta['hint']) }}</small>
+                    </div>
+                @endforeach
             </div>
         </div>
 

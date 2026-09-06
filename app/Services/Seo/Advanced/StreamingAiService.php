@@ -23,8 +23,17 @@ use Throwable;
  */
 class StreamingAiService
 {
-    /** Providers with a real incremental SSE token stream. */
-    public const STREAMING_PROVIDERS = ['openai', 'deepseek', 'mistral', 'grok', 'claude'];
+    /**
+     * Providers with a real incremental SSE token stream.
+     *
+     * Everything except Claude here speaks the OpenAI-compatible
+     * `data: {...}` / `[DONE]` wire format. Gemini and Perplexity are
+     * deliberately absent — see the class docblock.
+     */
+    public const STREAMING_PROVIDERS = [
+        'openai', 'deepseek', 'mistral', 'grok', 'claude',
+        'groq', 'openrouter', 'together', 'fireworks', 'qwen', 'moonshot', 'cohere',
+    ];
 
     /**
      * Stream a completion, invoking $onDelta for each text fragment.
@@ -231,18 +240,14 @@ class StreamingAiService
             return $configured;
         }
 
-        $map = [
-            'openai'   => 'seo_openai_api_key',
-            'claude'   => 'seo_anthropic_api_key',
-            'grok'     => 'seo_grok_api_key',
-            'mistral'  => 'seo_mistral_api_key',
-            'deepseek' => 'seo_deepseek_api_key',
-        ];
-
-        if (function_exists('get_setting') && isset($map[$provider])) {
-            return get_setting($map[$provider]) ?: null;
+        if (!function_exists('get_setting')) {
+            return null;
         }
 
-        return null;
+        // Claude is the one provider whose setting key does not follow the
+        // seo_<provider>_api_key convention (it predates it as "anthropic").
+        $key = $provider === 'claude' ? 'seo_anthropic_api_key' : "seo_{$provider}_api_key";
+
+        return get_setting($key) ?: null;
     }
 }

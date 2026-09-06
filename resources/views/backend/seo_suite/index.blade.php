@@ -4,15 +4,8 @@
 @include('backend.partials.modern_module_styles')
 @php
     $activeTab    = request('tab', 'dashboard');
-    $providers    = [
-        'openai' => 'OpenAI (ChatGPT)',
-        'claude' => 'Claude (Anthropic)',
-        'gemini' => 'Gemini (Google)',
-        'grok' => 'Grok (xAI)',
-        'perplexity' => 'Perplexity AI (Live Web Search)',
-        'mistral' => 'Mistral AI',
-        'deepseek' => 'DeepSeek (Cost-Effective Bulk SEO)',
-    ];
+    // Single source of truth — see App\Services\Seo\Providers\SeoProviderManager::META
+    $providers    = \App\Services\Seo\Providers\SeoProviderManager::labels();
     $totalFeatures= collect($features)->flatten()->count();
     $advancedDashboard = $advancedDashboard ?? [];
     $siteHealth   = $advancedDashboard['site_health'] ?? [];

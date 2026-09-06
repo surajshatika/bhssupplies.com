@@ -125,9 +125,9 @@
                         <label>{{ translate('AI Provider') }}</label>
                         <select name="provider" class="form-control">
                             <option value="">{{ translate('System Default') }}</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="claude">Claude</option>
-                            <option value="gemini">Gemini</option>
+                            @foreach(\App\Services\Seo\Providers\SeoProviderManager::labels() as $pKey => $pLabel)
+                                <option value="{{ $pKey }}">{{ $pLabel }}</option>
+                            @endforeach
                         </select>
                     </div>
 

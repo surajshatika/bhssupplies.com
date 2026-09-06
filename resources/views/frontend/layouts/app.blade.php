@@ -282,6 +282,10 @@
         .bhs-product-img-link.has-hover-image:hover .bhs-product-img-hover { opacity: 1 !important; }
         /* On hover: keep main image fully visible underneath */
         .bhs-product-img-link.has-hover-image:hover .bhs-product-img:first-child { opacity: 1 !important; }
+        /* Cards with no second image: hovering must never touch the main image's
+           opacity. Without this, a single-image card falls back to whatever a
+           later stylesheet's :hover rule leaves .bhs-product-img at. */
+        .bhs-product-img-link:not(.has-hover-image):hover .bhs-product-img { opacity: 1 !important; }
 
         /* pc-card variant */
         .pc-img-hover {
@@ -294,6 +298,7 @@
         }
         .pc-card:hover .pc-img-link.has-hover-image .pc-img-hover { opacity: 1 !important; }
         .pc-card:hover .pc-img-link.has-hover-image .pc-img:not(.pc-img-hover) { opacity: 1 !important; }
+        .pc-card:hover .pc-img-link:not(.has-hover-image) .pc-img:not(.pc-img-hover) { opacity: 1 !important; }
 
         /* image-hover-effect variant (flash deal, older cards) */
         .product-hover-image {

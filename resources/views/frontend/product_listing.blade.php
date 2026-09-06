@@ -565,6 +565,17 @@
                         </div>
                     </div>
 
+                    {{--
+                        Infinite-scroll trigger point. Placed right after the
+                        grid (not measured against full document height),
+                        because this page has a lot of content below the grid
+                        — newsletter signup, footer widgets, etc. Triggering
+                        off document height meant the user had to scroll past
+                        all of that before the next page loaded, which read as
+                        "infinite scroll only works right at the very bottom".
+                    --}}
+                    <div id="infinite-scroll-sentinel" style="height:1px;"></div>
+
                     {{-- Pagination --}}
                     <div class="aiz-pagination aiz-pagination-center mt-4 d-none">
                         {{ $products->appends(request()->input())->links() }}
@@ -626,26 +637,20 @@
     /* Infinite scroll */
     var page = {{ request()->get('page', 1) }}, loading = false, noMoreProducts = {{ $products->hasMorePages() ? 'false' : 'true' }};
 
-    // The scroll check itself only reads layout (scrollTop/height), so it's
-    // cheap, but running it on every raw scroll event (which can fire dozens
-    // of times per second) is what caused the jank. Gate it to once per
-    // animation frame instead, and use a passive listener so the browser
-    // never blocks scrolling to wait for this handler.
-    var scrollTicking = false;
-    window.addEventListener('scroll', function() {
-        if (scrollTicking) return;
-        scrollTicking = true;
-        requestAnimationFrame(function() {
-            maybeLoadMoreProducts();
-            scrollTicking = false;
-        });
-    }, { passive: true });
-
-    function maybeLoadMoreProducts() {
-        if (loading || noMoreProducts) return;
-        var scrollBottom = window.scrollY + window.innerHeight;
-        var docHeight = document.documentElement.scrollHeight;
-        if (scrollBottom >= docHeight - 600) loadMoreProducts();
+    // Trigger off a sentinel placed right after the product grid, not off
+    // overall document height/scroll position — this page has a footer,
+    // newsletter block, etc. below the grid, so a document-height-based
+    // check only fired once the user had scrolled past all of that too.
+    // IntersectionObserver is also passive by nature (no scroll handler
+    // running on every scroll tick), which fixes the earlier jank as well.
+    var sentinel = document.getElementById('infinite-scroll-sentinel');
+    if (sentinel && 'IntersectionObserver' in window) {
+        var observer = new IntersectionObserver(function(entries) {
+            if (entries[0].isIntersecting && !loading && !noMoreProducts) {
+                loadMoreProducts();
+            }
+        }, { rootMargin: '600px 0px' }); // start loading 600px before it's reached
+        observer.observe(sentinel);
     }
 
     function loadMoreProducts() {

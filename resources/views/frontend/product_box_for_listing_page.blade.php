@@ -56,15 +56,21 @@
                 width="300" height="300"
                 onerror="this.onerror=null;this.src='{{ $placeholderImage }}';">
             @if($showHoverImage)
-            <img class="lazyload pc-img pc-img-hover position-absolute"
-                src="{{ $mainImage }}"
-                data-src="{{ $hoverImage }}"
+            {{-- Not "lazyload" here: this image is already conditionally
+                 rendered only when a real second photo exists, so there's
+                 nothing to save by deferring it further — and doing so via
+                 the custom lazyload class raced against native `loading=lazy`
+                 (both trying to manage the same src), which was why the
+                 overlay sometimes never received its real image and just
+                 sat blank on top of the main photo. --}}
+            <img class="pc-img pc-img-hover position-absolute"
+                src="{{ $hoverImage }}"
                 alt="{{ $product->getTranslation('name') }}"
                 loading="lazy"
                 decoding="async"
                 sizes="(max-width: 575px) 50vw, (max-width: 991px) 33vw, 300px"
                 width="300" height="300"
-                onerror="this.onerror=null;this.src='{{ $placeholderImage }}';">
+                onerror="this.onerror=null;this.src='{{ $mainImage }}';">
             @endif
         </a>
 

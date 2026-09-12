@@ -104,8 +104,8 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://www.bhssupplies.com/category/heating--air-conditioning</loc>
-    <lastmod>2026-06-29</lastmod>
+    <loc>https://www.bhssupplies.com/category/heating</loc>
+    <lastmod>2026-09-07</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
@@ -260,18 +260,6 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://www.bhssupplies.com/category/merchandise-unilite</loc>
-    <lastmod>2026-06-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://www.bhssupplies.com/category/spares-accessories-unilite</loc>
-    <lastmod>2026-06-25</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
     <loc>https://www.bhssupplies.com/category/water-softeners-290</loc>
     <lastmod>2026-06-26</lastmod>
     <changefreq>weekly</changefreq>
@@ -358,6 +346,24 @@
   <url>
     <loc>https://www.bhssupplies.com/category/excalibur-water-systems-yrp2h</loc>
     <lastmod>2026-06-29</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.bhssupplies.com/category/furnace-motor</loc>
+    <lastmod>2026-09-08</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.bhssupplies.com/category/inducer-motor</loc>
+    <lastmod>2026-09-08</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.bhssupplies.com/category/blower-motor</loc>
+    <lastmod>2026-09-08</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>

@@ -48,7 +48,7 @@ return [
             'endpoint' => env('ANTHROPIC_API_ENDPOINT', 'https://api.anthropic.com/v1/messages'),
         ],
         'gemini' => [
-            'model' => env('GEMINI_MODEL', 'gemini-2.0-flash'),
+            'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
             'api_key' => env('GEMINI_API_KEY'),
             'endpoint' => env('GEMINI_API_ENDPOINT', 'https://generativelanguage.googleapis.com/v1beta/models'),
         ],

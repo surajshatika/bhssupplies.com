@@ -10,7 +10,14 @@ class SeoProviderReliability
 {
     public const CACHE_PREFIX = 'seo:ai-provider-health:';
 
+    /** @deprecated Use SeoProviderManager::available() — kept only so external callers referencing this constant don't break. */
     public const PROVIDERS = ['openai', 'claude', 'gemini', 'grok'];
+
+    /** All registered providers, for health tracking and the dashboard. */
+    public static function providers(): array
+    {
+        return SeoProviderManager::available();
+    }
 
     public function shouldSkip(string $provider): bool
     {
@@ -98,7 +105,7 @@ class SeoProviderReliability
 
     public function dashboard(): array
     {
-        return collect(self::PROVIDERS)
+        return collect(self::providers())
             ->mapWithKeys(function (string $provider): array {
                 $coolingDown = $this->shouldSkip($provider);
                 $health = $this->health($provider);
@@ -129,7 +136,7 @@ class SeoProviderReliability
 
     public function reset(?string $provider = null): void
     {
-        $providers = $provider ? [$this->normalize($provider)] : self::PROVIDERS;
+        $providers = $provider ? [$this->normalize($provider)] : self::providers();
         foreach ($providers as $name) {
             Cache::forget(self::CACHE_PREFIX . $name);
             Cache::forget('seo:provider-last-error:' . $name);

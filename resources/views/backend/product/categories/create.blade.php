@@ -146,7 +146,16 @@
                         alert(data.message);
                     }
                 },
-                error: function () { $('#aizSubmitForm')[0].submit(); }
+                error: function (xhr) {
+                    // Falling back to a real form.submit() here used to re-POST the
+                    // same data even when the category had already been saved
+                    // server-side (e.g. a slow image upload timing out client-side
+                    // after the request succeeded) — that created duplicate categories.
+                    var message = xhr.responseJSON && xhr.responseJSON.message
+                        ? xhr.responseJSON.message
+                        : '{{ translate("Something went wrong! Please try again.") }}';
+                    alert(message);
+                }
             });
         });
     });

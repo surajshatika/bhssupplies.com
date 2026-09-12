@@ -27,11 +27,7 @@
     }
 @endphp
 
-{{-- Canonical is rendered by the parent layout via @yield('canonical') --}}
-
-@if(!empty($__seo['robots']))
-<meta name="robots" content="{{ $__seo['robots'] }}">
-@endif
+{{-- Canonical and robots are rendered by the parent layout via @yield('canonical') / @yield('meta_robots') --}}
 
 {{-- Open Graph --}}
 <meta property="og:locale" content="{{ $__seo['locale'] }}">

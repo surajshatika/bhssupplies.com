@@ -293,7 +293,7 @@
                 <div class="col-xl-4 col-md-6  py-3 py-md-2rem category-slide border-right border-bottom">
                     <div class="d-sm-flex text-center text-sm-left h-100 ">
                         <div class="mb-3">
-                            <img src="{{ isset($category->bannerImage->file_name) ? my_asset($category->bannerImage->file_name) : static_asset('assets/img/placeholder.jpg') }}"
+                            <img src="{{ isset($category->bannerImage->file_name) ? optimized_image_url(my_asset($category->bannerImage->file_name)) : static_asset('assets/img/placeholder.jpg') }}"
                                 class="lazyload w-150px h-auto mx-auto has-transition"
                                 alt="{{ $category->getTranslation('name') }}"
                                 onerror="this.onerror=null;this.src='{{ static_asset('assets/img/placeholder.jpg') }}';">

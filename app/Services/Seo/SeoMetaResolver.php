@@ -313,11 +313,16 @@ class SeoMetaResolver
         if (is_string($value) && filter_var($value, FILTER_VALIDATE_URL)) {
             return $value;
         }
-        if (is_string($value)) {
-            return asset('public/' . ltrim($value, '/'));
-        }
+        // Business settings always come back as strings, so a numeric upload
+        // id like "2309" must be checked before the generic is_string()
+        // branch below — otherwise it's treated as a literal file path
+        // (asset('public/2309')) instead of resolved via the uploads table,
+        // producing a 404 og:image.
         if (is_numeric($value)) {
             return $this->resolveUpload($value);
+        }
+        if (is_string($value)) {
+            return asset('public/' . ltrim($value, '/'));
         }
         return null;
     }

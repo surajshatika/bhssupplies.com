@@ -36,7 +36,8 @@ class DoubleValue extends \Google\Protobuf\Internal\Message
      *           The double value.
      * }
      */
-    public function __construct($data = NULL) {
+    public function __construct($data = null)
+    {
         \GPBMetadata\Google\Protobuf\Wrappers::initOnce();
         parent::__construct($data);
     }
@@ -59,9 +60,8 @@ class DoubleValue extends \Google\Protobuf\Internal\Message
      * @param float $var
      * @return $this
      */
-    public function setValue($var)
+    public function setValue(float $var)
     {
-        GPBUtil::checkDouble($var);
         $this->value = $var;
 
         return $this;

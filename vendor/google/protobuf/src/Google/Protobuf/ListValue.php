@@ -10,8 +10,7 @@ use Google\Protobuf\Internal\GPBUtil;
 use Google\Protobuf\RepeatedField;
 
 /**
- * `ListValue` is a wrapper around a repeated field of values.
- * The JSON representation for `ListValue` is JSON array.
+ * Represents a JSON array.
  *
  * Generated from protobuf message <code>google.protobuf.ListValue</code>
  */
@@ -34,7 +33,8 @@ class ListValue extends \Google\Protobuf\Internal\Message
      *           Repeated field of dynamically typed values.
      * }
      */
-    public function __construct($data = NULL) {
+    public function __construct($data = null)
+    {
         \GPBMetadata\Google\Protobuf\Struct::initOnce();
         parent::__construct($data);
     }
@@ -57,7 +57,7 @@ class ListValue extends \Google\Protobuf\Internal\Message
      * @param \Google\Protobuf\Value[] $var
      * @return $this
      */
-    public function setValues($var)
+    public function setValues(array|RepeatedField $var)
     {
         $arr = GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::MESSAGE, \Google\Protobuf\Value::class);
         $this->values = $arr;

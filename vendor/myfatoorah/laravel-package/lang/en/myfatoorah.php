@@ -2,7 +2,7 @@
 
 return [
     'pageCheckout'         => 'MyFatoorah - Checkout',
-    'pageError'            => 'MyFatoorah Error',
+    'pageError'            => 'MyFatoorah - Error',
     'noPaymentGateways'    => 'There are no payment methods available on your account, please contact your account manager.',
     'howWouldYouLikeToPay' => 'How would you like to pay?',
     'or'                   => 'Or',
@@ -11,7 +11,7 @@ return [
     'payNow'               => 'Pay Now',
     'holderName'           => 'Name On Card',
     'cardNumber'           => 'Number',
-    'expiryDate'           => 'MM/YY',
+    'expiryDate'           => 'MM / YY',
     'securityCode'         => 'CVV',
     'cardHolderNameLabel'  => 'Card Holder Name',
     'cardNumberLabel'      => 'Card Number',
@@ -23,5 +23,5 @@ return [
     'deleteAlert.message'  => 'Are you sure you want to remove this card?',
     'deleteAlert.confirm'  => 'Yes',
     'deleteAlert.cancel'   => 'No',
-    'Kindly review your MyFatoorah admin configuration due to a wrong entry.'   => 'Kindly review your MyFatoorah admin configuration due to a wrong entry.',
+    'Kindly review your MyFatoorah admin configuration due to a wrong entry.' => 'Kindly review your MyFatoorah admin configuration due to a wrong entry.',
 ];

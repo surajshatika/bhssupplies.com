@@ -206,7 +206,7 @@
 
 <script type="application/ld+json">
 {
-    "@context": "https://schema.org",
+    "@@context": "https://schema.org",
     "@type": "HardwareStore",
     "name": {!! json_encode($siteName) !!},
     "image": {!! json_encode(uploaded_asset(get_setting('header_logo'))) !!},

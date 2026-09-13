@@ -686,12 +686,12 @@ class OAuth2 implements FetchAuthTokenInterface
     }
 
     /**
-     * @deprecated
      *
      * Obtains a key that can used to cache the results of #fetchAuthToken.
      *
      * The key is derived from the scopes.
      *
+     * @deprecated
      * @return ?string a key that may be used to cache the auth token.
      */
     public function getCacheKey()
@@ -1684,7 +1684,7 @@ class OAuth2 implements FetchAuthTokenInterface
     /**
      * Get the client ID.
      *
-     * Alias of {@see Google\Auth\OAuth2::getClientId()}.
+     * Alias of {@see OAuth2::getClientId()}.
      *
      * @param callable|null $httpHandler
      * @return string

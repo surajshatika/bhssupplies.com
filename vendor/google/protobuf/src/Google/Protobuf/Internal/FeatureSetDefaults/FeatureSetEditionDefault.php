@@ -51,14 +51,15 @@ class FeatureSetEditionDefault extends \Google\Protobuf\Internal\Message
      *           Defaults of features that can't be overridden in this edition.
      * }
      */
-    public function __construct($data = NULL) {
+    public function __construct($data = null)
+    {
         \GPBMetadata\Google\Protobuf\Internal\Descriptor::initOnce();
         parent::__construct($data);
     }
 
     /**
      * Generated from protobuf field <code>optional .google.protobuf.Edition edition = 3;</code>
-     * @return int
+     * @return int one of the values in {@see \Google\Protobuf\Internal\Edition}
      */
     public function getEdition()
     {
@@ -77,10 +78,10 @@ class FeatureSetEditionDefault extends \Google\Protobuf\Internal\Message
 
     /**
      * Generated from protobuf field <code>optional .google.protobuf.Edition edition = 3;</code>
-     * @param int $var
+     * @param int $var one of the values in {@see \Google\Protobuf\Internal\Edition}
      * @return $this
      */
-    public function setEdition($var)
+    public function setEdition(int $var)
     {
         GPBUtil::checkEnum($var, \Google\Protobuf\Internal\Edition::class);
         $this->edition = $var;
@@ -116,9 +117,8 @@ class FeatureSetEditionDefault extends \Google\Protobuf\Internal\Message
      * @param \Google\Protobuf\Internal\FeatureSet $var
      * @return $this
      */
-    public function setOverridableFeatures($var)
+    public function setOverridableFeatures(\Google\Protobuf\Internal\FeatureSet|null $var)
     {
-        GPBUtil::checkMessage($var, \Google\Protobuf\Internal\FeatureSet::class);
         $this->overridable_features = $var;
 
         return $this;
@@ -152,9 +152,8 @@ class FeatureSetEditionDefault extends \Google\Protobuf\Internal\Message
      * @param \Google\Protobuf\Internal\FeatureSet $var
      * @return $this
      */
-    public function setFixedFeatures($var)
+    public function setFixedFeatures(\Google\Protobuf\Internal\FeatureSet|null $var)
     {
-        GPBUtil::checkMessage($var, \Google\Protobuf\Internal\FeatureSet::class);
         $this->fixed_features = $var;
 
         return $this;

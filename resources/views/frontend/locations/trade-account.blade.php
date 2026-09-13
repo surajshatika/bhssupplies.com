@@ -7,7 +7,7 @@
 @section('structured_data')
 <script type="application/ld+json">
 {
-  "@context": "https://schema.org",
+  "@@context": "https://schema.org",
   "@type": "Service",
   "name": "Contractor Trade Account — BHS Supplies",
   "description": "Wholesale HVAC, plumbing, and hardware trade accounts for licensed contractors across Mississauga and the GTA. Volume pricing, no minimum order, priority stock access.",

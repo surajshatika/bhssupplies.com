@@ -77,6 +77,7 @@ class Message
         }
         foreach ($this->desc->getField() as $field) {
             $setter = $field->getSetter();
+            $getter = $field->getGetter();
             if ($field->isMap()) {
                 $message_type = $field->getMessageType();
                 $key_field = $message_type->getFieldByNumber(1);
@@ -129,7 +130,7 @@ class Message
                 $oneof_name = $oneof->getName();
                 $this->$oneof_name = new OneofField($oneof);
             } else if (!$field->isRequired() && !$field->isRepeated() &&
-                       PHP_INT_SIZE == 4) {
+                PHP_INT_SIZE == 4 && $this->$getter() === 0) {
                 switch ($field->getType()) {
                     case GPBType::INT64:
                     case GPBType::UINT64:
@@ -237,6 +238,14 @@ class Message
         }
         $field = $this->desc->getFieldByNumber($number);
         return $field->getName();
+    }
+
+    /**
+     * @ignore
+     */
+    private function shouldEmitDefaults($options): bool
+    {
+        return ($options & \Google\Protobuf\PrintOptions::EMIT_DEFAULTS) !== 0;
     }
 
     /**
@@ -745,12 +754,14 @@ class Message
      * specified message.
      *
      * @param string $data Binary protobuf data.
+     * @param int $recursion_limit Maximum message nesting depth allowed while
+     *     parsing. Defaults to 100.
      * @return null
      * @throws \Exception Invalid data.
      */
-    public function mergeFromString($data)
+    public function mergeFromString($data, $recursion_limit = CodedInputStream::DEFAULT_RECURSION_LIMIT)
     {
-        $input = new CodedInputStream($data);
+        $input = new CodedInputStream($data, $recursion_limit);
         $this->parseFromStream($input);
     }
 
@@ -854,9 +865,10 @@ class Message
                 if (is_integer($value)) {
                     return $value;
                 }
-                $enum_value = $field->getEnumType()->getValueByName($value);
-                if (!is_null($enum_value)) {
-                    return $enum_value->getNumber();
+                $enum_desc = $field->getEnumType();
+                $enum_value_desc = $enum_desc->getValueByJsonName($value);
+                if (!is_null($enum_value_desc)) {
+                    return $enum_value_desc->getNumber();
                 } else if ($ignore_unknown) {
                     return $this->defaultValue($field);
                 } else {
@@ -1261,7 +1273,7 @@ class Message
                     if ($value_field->getType() == GPBType::ENUM &&
                         is_string($tmp_value) &&
                         is_null(
-                          $value_field->getEnumType()->getValueByName($tmp_value)
+                          $value_field->getEnumType()->getValueByJsonName($tmp_value)
                         ) &&
                         $ignore_unknown) {
                         continue;
@@ -1287,7 +1299,7 @@ class Message
                     // ignored if ignore_unknown is set.
                     if ($field->getType() == GPBType::ENUM &&
                         is_string($tmp) &&
-                        is_null($field->getEnumType()->getValueByName($tmp)) &&
+                        is_null($field->getEnumType()->getValueByJsonName($tmp)) &&
                         $ignore_unknown) {
                         continue;
                     }
@@ -1469,6 +1481,7 @@ class Message
      */
     public function serializeToJsonStream(&$output)
     {
+        $options = $output->getOptions();
         if (is_a($this, 'Google\Protobuf\Any')) {
             $output->writeRaw("{", 1);
             $type_field = $this->desc->getFieldByNumber(1);
@@ -1487,7 +1500,7 @@ class Message
             } else {
                 $value_fields = $value_msg->desc->getField();
                 foreach ($value_fields as $field) {
-                    if ($value_msg->existField($field)) {
+                    if ($value_msg->existField($field, $options)) {
                         $output->writeRaw(",", 1);
                         if (!$value_msg->serializeFieldToJsonStream($output, $field)) {
                             return false;
@@ -1513,7 +1526,7 @@ class Message
             $output->writeRaw($timestamp, strlen($timestamp));
         } elseif (get_class($this) === 'Google\Protobuf\ListValue') {
             $field = $this->desc->getField()[1];
-            if (!$this->existField($field)) {
+            if (!$this->existField($field, $options)) {
                 $output->writeRaw("[]", 2);
             } else {
                 if (!$this->serializeFieldToJsonStream($output, $field)) {
@@ -1522,7 +1535,7 @@ class Message
             }
         } elseif (get_class($this) === 'Google\Protobuf\Struct') {
             $field = $this->desc->getField()[1];
-            if (!$this->existField($field)) {
+            if (!$this->existField($field, $options)) {
                 $output->writeRaw("{}", 2);
             } else {
                 if (!$this->serializeFieldToJsonStream($output, $field)) {
@@ -1536,7 +1549,7 @@ class Message
             $fields = $this->desc->getField();
             $first = true;
             foreach ($fields as $field) {
-                if ($this->existField($field) ||
+                if ($this->existField($field, $options) ||
                     GPBUtil::hasJsonValue($this)) {
                     if ($first) {
                         $first = false;
@@ -1557,9 +1570,15 @@ class Message
 
     /**
      * Serialize the message to string.
+     * @param int $recursion_limit Accepted for API parity with the C extension
+     *     (and with mergeFromString). The pure-PHP encoder (CodedOutputStream)
+     *     does not enforce a recursion-depth guard, so this argument has no
+     *     effect here and deep messages always serialize successfully. The C
+     *     extension does enforce it and throws "Max nesting exceeded" past the
+     *     limit. Defaults to 100.
      * @return string Serialized binary protobuf data.
      */
-    public function serializeToString()
+    public function serializeToString($recursion_limit = CodedInputStream::DEFAULT_RECURSION_LIMIT)
     {
         $output = new CodedOutputStream($this->byteSize());
         $this->serializeToStream($output);
@@ -1580,7 +1599,7 @@ class Message
     /**
      * @ignore
      */
-    private function existField($field)
+    private function existField($field, $options = 0)
     {
         $getter = $field->getGetter();
         $hazzer = "has" . substr($getter, 3);
@@ -1597,10 +1616,19 @@ class Message
 
         $values = $this->$getter();
         if ($field->isMap()) {
+            if ($this->shouldEmitDefaults($options)) {
+                return true;
+            }
             return count($values) !== 0;
         } elseif ($field->isRepeated()) {
+            if ($this->shouldEmitDefaults($options)) {
+                return true;
+            }
             return count($values) !== 0;
         } else {
+            if ($this->shouldEmitDefaults($options)) {
+                return true;
+            }
             return $values !== $this->defaultValue($field);
         }
     }
@@ -1747,8 +1775,11 @@ class Message
                 } else {
                     $enum_value_desc = $enum_desc->getValueByNumber($value);
                     if (!is_null($enum_value_desc)) {
-                        $size += 2;  // size for ""
-                        $size += strlen($enum_value_desc->getName());
+                        $name = GPBJsonWire::formatEnumValueName($enum_value_desc);
+                        $encoded = json_encode(
+                            $name,
+                            JSON_UNESCAPED_UNICODE);
+                        $size += strlen($encoded);
                     } else {
                         $str_value = strval($value);
                         $size += strlen($str_value);
@@ -1863,7 +1894,7 @@ class Message
             $getter = $field->getGetter();
             $values = $this->$getter();
             $count = count($values);
-            if ($count !== 0) {
+            if ($count !== 0 || $this->shouldEmitDefaults($options)) {
                 if (!GPBUtil::hasSpecialJsonMapping($this)) {
                     $size += 3;                              // size for "\"\":".
                     if ($options & PrintOptions::PRESERVE_PROTO_FIELD_NAMES) {
@@ -1873,37 +1904,39 @@ class Message
                     } // size for field name
                 }
                 $size += 2;  // size for "{}".
-                $size += $count - 1;                     // size for commas
-                $getter = $field->getGetter();
-                $map_entry = $field->getMessageType();
-                $key_field = $map_entry->getFieldByNumber(1);
-                $value_field = $map_entry->getFieldByNumber(2);
-                switch ($key_field->getType()) {
-                case GPBType::STRING:
-                case GPBType::SFIXED64:
-                case GPBType::INT64:
-                case GPBType::SINT64:
-                case GPBType::FIXED64:
-                case GPBType::UINT64:
-                    $additional_quote = false;
-                    break;
-                default:
-                    $additional_quote = true;
-                }
-                foreach ($values as $key => $value) {
-                    if ($additional_quote) {
-                        $size += 2;  // size for ""
+                if ($count > 0) {
+                    $size += $count - 1;                     // size for commas
+                    $getter = $field->getGetter();
+                    $map_entry = $field->getMessageType();
+                    $key_field = $map_entry->getFieldByNumber(1);
+                    $value_field = $map_entry->getFieldByNumber(2);
+                    switch ($key_field->getType()) {
+                    case GPBType::STRING:
+                    case GPBType::SFIXED64:
+                    case GPBType::INT64:
+                    case GPBType::SINT64:
+                    case GPBType::FIXED64:
+                    case GPBType::UINT64:
+                        $additional_quote = false;
+                        break;
+                    default:
+                        $additional_quote = true;
                     }
-                    $size += $this->fieldDataOnlyJsonByteSize($key_field, $key, $options);
-                    $size += $this->fieldDataOnlyJsonByteSize($value_field, $value, $options);
-                    $size += 1;  // size for :
+                    foreach ($values as $key => $value) {
+                        if ($additional_quote) {
+                            $size += 2;  // size for ""
+                        }
+                        $size += $this->fieldDataOnlyJsonByteSize($key_field, $key, $options);
+                        $size += $this->fieldDataOnlyJsonByteSize($value_field, $value, $options);
+                        $size += 1;  // size for :
+                    }
                 }
             }
         } elseif ($field->isRepeated()) {
             $getter = $field->getGetter();
             $values = $this->$getter();
             $count = count($values);
-            if ($count !== 0) {
+            if ($count !== 0 || $this->shouldEmitDefaults($options)) {
                 if (!GPBUtil::hasSpecialJsonMapping($this)) {
                     $size += 3;                              // size for "\"\":".
                     if ($options & PrintOptions::PRESERVE_PROTO_FIELD_NAMES) {
@@ -1913,13 +1946,15 @@ class Message
                     } // size for field name
                 }
                 $size += 2;  // size for "[]".
-                $size += $count - 1;                     // size for commas
-                $getter = $field->getGetter();
-                foreach ($values as $value) {
-                    $size += $this->fieldDataOnlyJsonByteSize($field, $value, $options);
+                if ($count > 0) {
+                    $size += $count - 1;                     // size for commas
+                    $getter = $field->getGetter();
+                    foreach ($values as $value) {
+                        $size += $this->fieldDataOnlyJsonByteSize($field, $value, $options);
+                    }
                 }
             }
-        } elseif ($this->existField($field) || GPBUtil::hasJsonValue($this)) {
+        } elseif ($this->existField($field, $options) || GPBUtil::hasJsonValue($this)) {
             if (!GPBUtil::hasSpecialJsonMapping($this)) {
                 $size += 3;                              // size for "\"\":".
                 if ($options & PrintOptions::PRESERVE_PROTO_FIELD_NAMES) {
@@ -2017,7 +2052,7 @@ class Message
             $size += strlen($timestamp);
         } elseif (get_class($this) === 'Google\Protobuf\ListValue') {
             $field = $this->desc->getField()[1];
-            if ($this->existField($field)) {
+            if ($this->existField($field, $options)) {
                 $field_size = $this->fieldJsonByteSize($field, $options);
                 $size += $field_size;
             } else {
@@ -2026,7 +2061,7 @@ class Message
             }
         } elseif (get_class($this) === 'Google\Protobuf\Struct') {
             $field = $this->desc->getField()[1];
-            if ($this->existField($field)) {
+            if ($this->existField($field, $options)) {
                 $field_size = $this->fieldJsonByteSize($field, $options);
                 $size += $field_size;
             } else {

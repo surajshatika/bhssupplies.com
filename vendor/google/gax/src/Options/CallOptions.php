@@ -44,13 +44,17 @@ use Google\ApiCore\RetrySettings;
  * {@see \Google\ApiCore\Transport\TransportInterface::startClientStreamingCall()}, and
  * {@see \Google\ApiCore\Transport\TransportInterface::startServerStreamingCall()}.
  */
-class CallOptions implements ArrayAccess
+class CallOptions implements ArrayAccess, OptionsInterface
 {
     use OptionsTrait;
 
     private array $headers;
     private ?int $timeoutMillis;
     private array $transportOptions;
+    private ?array $middlewareOptions;
+
+    /** @var callable|null $metadataCallback */
+    private $metadataCallback;
 
     /** @var RetrySettings|array|null $retrySettings */
     private $retrySettings;
@@ -88,22 +92,28 @@ class CallOptions implements ArrayAccess
         $this->setTimeoutMillis($arr['timeoutMillis'] ?? null);
         $this->setTransportOptions($arr['transportOptions'] ?? []);
         $this->setRetrySettings($arr['retrySettings'] ?? null);
+        $this->setMetadataCallback($arr['metadataCallback'] ?? null);
+        $this->setMiddlewareOptions($arr['middlewareOptions'] ?? null);
     }
 
     /**
      * @param array $headers
      */
-    public function setHeaders(array $headers)
+    public function setHeaders(array $headers): self
     {
         $this->headers = $headers;
+
+        return $this;
     }
 
     /**
      * @param int|null $timeoutMillis
      */
-    public function setTimeoutMillis(?int $timeoutMillis)
+    public function setTimeoutMillis(?int $timeoutMillis): self
     {
         $this->timeoutMillis = $timeoutMillis;
+
+        return $this;
     }
 
     /**
@@ -125,24 +135,51 @@ class CallOptions implements ArrayAccess
      *           See {@link https://docs.guzzlephp.org/en/stable/request-options.html}.
      * }
      */
-    public function setTransportOptions(array $transportOptions)
+    public function setTransportOptions(array $transportOptions): self
     {
         $this->transportOptions = $transportOptions;
+
+        return $this;
     }
 
     /**
      * @deprecated use CallOptions::setTransportOptions
      */
-    public function setTransportSpecificOptions(array $transportSpecificOptions)
+    public function setTransportSpecificOptions(array $transportSpecificOptions): self
     {
         $this->setTransportOptions($transportSpecificOptions);
+
+        return $this;
     }
 
     /**
      * @param RetrySettings|array|null $retrySettings
+     *
+     * @return $this
      */
-    public function setRetrySettings($retrySettings)
+    public function setRetrySettings($retrySettings): self
     {
         $this->retrySettings = $retrySettings;
+
+        return $this;
+    }
+
+    /**
+     * @param array|null $middlewareOptions
+     *
+     * @return $this
+     */
+    public function setMiddlewareOptions(array|null $middlewareOptions): self
+    {
+        $this->middlewareOptions = $middlewareOptions;
+
+        return $this;
+    }
+
+    public function setMetadataCallback(callable|null $metadataCallback): self
+    {
+        $this->metadataCallback = $metadataCallback;
+
+        return $this;
     }
 }

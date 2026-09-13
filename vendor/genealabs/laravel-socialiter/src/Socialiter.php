@@ -1,9 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 namespace GeneaLabs\LaravelSocialiter;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Laravel\Socialite\AbstractUser;
 use Laravel\Socialite\Facades\Socialite;
@@ -11,6 +14,8 @@ use Laravel\Socialite\Facades\Socialite;
 class Socialiter
 {
     public static $runsMigrations = true;
+
+    protected static $userCreator = null;
 
     protected $isStateless = false;
     protected $config;
@@ -20,6 +25,16 @@ class Socialiter
     public static function ignoreMigrations(): void
     {
         static::$runsMigrations = false;
+    }
+
+    public static function createUsersUsing(callable $callback): void
+    {
+        static::$userCreator = $callback;
+    }
+
+    public static function createUsersUsingDefault(): void
+    {
+        static::$userCreator = null;
     }
 
     public function driver(string $driver): self
@@ -34,8 +49,7 @@ class Socialiter
         $socialite = Socialite::driver($this->driver);
 
         if ($this->config) {
-            $socialite = $socialite
-                ->setConfig($this->config);
+            $socialite = $socialite->setConfig($this->config);
         }
 
         if ($this->isStateless) {
@@ -60,7 +74,7 @@ class Socialiter
             ->getUser($socialiteUser, $this->driver);
         $user->load("socialCredentials");
 
-        auth()->login($user);
+        Auth::login($user);
 
         return $user;
     }
@@ -75,20 +89,34 @@ class Socialiter
     protected function createUser(AbstractUser $socialiteUser): Model
     {
         $userClass = config("auth.providers.users.model");
+        $user = (new $userClass)
+            ->where("email", $socialiteUser->getEmail())
+            ->first();
 
-        return (new $userClass)
-            ->updateOrCreate([
-                "email" => $socialiteUser->getEmail(),
-            ], [
-                "name" => $socialiteUser->getName(),
-                "password" => Str::random(64),
-            ]);
+        if ($user) {
+            return $user;
+        }
+
+        if (static::$userCreator) {
+            $user = call_user_func(static::$userCreator, $socialiteUser);
+
+            if (! $user instanceof Model || ! $user->exists) {
+                throw new \RuntimeException('The custom user creator must return a persisted User model.');
+            }
+
+            return $user;
+        }
+
+        return (new $userClass)->create([
+            "email" => $socialiteUser->getEmail(),
+            "name" => $socialiteUser->getName(),
+            "password" => Str::random(64),
+        ]);
     }
 
     protected function createCredentials(AbstractUser $socialiteUser): SocialCredentials
     {
-        $credentialsModel = SocialCredentials::model();
-        $socialiteCredentials = (new $credentialsModel)
+        $socialiteCredentials = (new SocialCredentials)
             ->with("user")
             ->firstOrNew([
                 "provider_id" => $socialiteUser->getId(),

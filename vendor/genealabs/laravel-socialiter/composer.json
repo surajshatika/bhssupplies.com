@@ -1,6 +1,6 @@
 {
     "name": "genealabs/laravel-socialiter",
-    "description": "Automatically manager user persistence and resolution for any Laravel Socialite provider.",
+    "description": "Automatically manage user persistence and resolution for any Laravel Socialite provider.",
     "type": "library",
     "license": "MIT",
     "authors": [
@@ -10,26 +10,45 @@
         }
     ],
     "require": {
-        "illuminate/auth": "^10.0",
-        "illuminate/database": "^10.0",
-        "illuminate/support": "^10.0",
-        "laravel/socialite": "^5.3",
-        "genealabs/laravel-overridable-model": "^10.0"
+        "php": "^8.2",
+        "illuminate/auth": "^11.0|^12.0|^13.0",
+        "illuminate/database": "^11.0|^12.0|^13.0",
+        "illuminate/support": "^11.0|^12.0|^13.0",
+        "laravel/socialite": "^5.3"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
+        "phpunit/phpunit": "^10.0|^11.0|^12.5",
+        "pestphp/pest": "^2.0|^3.0|^4.0"
     },
     "autoload": {
         "psr-4": {
             "GeneaLabs\\LaravelSocialiter\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "GeneaLabs\\LaravelSocialiter\\Tests\\": "tests/"
+        }
+    },
     "extra": {
         "laravel": {
             "providers": [
-                "\\GeneaLabs\\LaravelSocialiter\\Providers\\ServiceProvider"
+                "GeneaLabs\\LaravelSocialiter\\Providers\\ServiceProvider"
             ],
             "aliases": {
-                "Socialiter": "\\GeneaLabs\\LaravelSocialiter\\Facades\\Socialiter"
+                "Socialiter": "GeneaLabs\\LaravelSocialiter\\Facades\\Socialiter"
             }
         }
+    },
+    "config": {
+        "allow-plugins": {
+            "symfony/thanks": true,
+            "pestphp/pest-plugin": true
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest"
     },
     "minimum-stability": "dev",
     "prefer-stable": true

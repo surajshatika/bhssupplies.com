@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Stichoza\GoogleTranslate\Tokens;
 
 /**
@@ -17,6 +19,6 @@ class SampleTokenGenerator implements TokenProviderInterface
      */
     public function generateToken(string $source, string $target, string $text): string
     {
-        return microtime(true);
+        return 'example-' . time();
     }
 }

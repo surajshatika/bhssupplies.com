@@ -2,11 +2,13 @@
 
 namespace Spatie\Analytics;
 
-use Google\Analytics\Data\V1beta\BetaAnalyticsDataClient;
+use Google\Analytics\Data\V1beta\Client\BetaAnalyticsDataClient;
 use Google\Analytics\Data\V1beta\Dimension;
 use Google\Analytics\Data\V1beta\FilterExpression;
 use Google\Analytics\Data\V1beta\Metric;
+use Google\Analytics\Data\V1beta\RunRealtimeReportRequest;
 use Google\Analytics\Data\V1beta\RunRealtimeReportResponse;
+use Google\Analytics\Data\V1beta\RunReportRequest;
 use Google\Analytics\Data\V1beta\RunReportResponse;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Support\Collection;
@@ -43,17 +45,17 @@ class AnalyticsClient
 
         $response = $this->runReport([
             'property' => "properties/{$propertyId}",
-            'dateRanges' => [
+            'date_ranges' => [
                 $period->toDateRange(),
             ],
             'metrics' => $this->getFormattedMetrics($metrics),
             'dimensions' => $this->getFormattedDimensions($dimensions),
             'limit' => $maxResults,
             'offset' => $offset,
-            'orderBys' => $orderBy,
-            'dimensionFilter' => $dimensionFilter,
-            'keepEmptyRows' => $keepEmptyRows,
-            'metricFilter' => $metricFilter,
+            'order_bys' => $orderBy,
+            'dimension_filter' => $dimensionFilter,
+            'keep_empty_rows' => $keepEmptyRows,
+            'metric_filter' => $metricFilter,
         ]);
 
         $result = collect();
@@ -93,17 +95,15 @@ class AnalyticsClient
 
         $response = $this->runRealtimeReport([
             'property' => "properties/{$propertyId}",
-            'dateRanges' => [
-                $period->toDateRange(),
+            'minute_ranges' => [
+                $period->toMinuteRange(),
             ],
             'metrics' => $this->getFormattedMetrics($metrics),
             'dimensions' => $this->getFormattedDimensions($dimensions),
             'limit' => $maxResults,
-            'offset' => $offset,
-            'orderBys' => $orderBy,
-            'dimensionFilter' => $dimensionFilter,
-            'keepEmptyRows' => $keepEmptyRows,
-            'metricFilter' => $metricFilter,
+            'order_bys' => $orderBy,
+            'dimension_filter' => $dimensionFilter,
+            'metric_filter' => $metricFilter,
         ]);
 
         $result = collect();
@@ -135,11 +135,16 @@ class AnalyticsClient
             $this->cache->forget($cacheName);
         }
 
-        return $this->cache->remember(
+        $serialized = $this->cache->remember(
             $cacheName,
             $this->cacheLifeTimeInMinutes,
-            fn () => $this->service->runReport($request),
+            fn () => $this->service->runReport(new RunReportRequest($request))->serializeToString(),
         );
+
+        $response = new RunReportResponse();
+        $response->mergeFromString($serialized);
+
+        return $response;
     }
 
     public function runRealtimeReport(array $request): RunRealtimeReportResponse
@@ -150,11 +155,16 @@ class AnalyticsClient
             $this->cache->forget($cacheName);
         }
 
-        return $this->cache->remember(
+        $serialized = $this->cache->remember(
             $cacheName,
             $this->cacheLifeTimeInMinutes,
-            fn () => $this->service->runRealtimeReport($request),
+            fn () => $this->service->runRealtimeReport(new RunRealtimeReportRequest($request))->serializeToString(),
         );
+
+        $response = new RunRealtimeReportResponse();
+        $response->mergeFromString($serialized);
+
+        return $response;
     }
 
     public function getAnalyticsService(): BetaAnalyticsDataClient

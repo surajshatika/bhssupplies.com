@@ -38,6 +38,21 @@ class Location extends \Google\Protobuf\Internal\Message
      *   [ 4, 3, 2, 7 ]
      * this path refers to the whole field declaration (from the beginning
      * of the label to the terminating semicolon).
+     * For options, the path refers to the interpreted option in the descriptor.
+     * E.g., for a custom option `(my_opt) = "foo"` on a message using extension
+     * number 10101, the path is:
+     *   [ 4, 3, 7, 10101 ]
+     * refers to:
+     *   file.message_type(3)     // 4, 3
+     *       .options()           // 7
+     *       .my_opt()            // 10101
+     * Sub-locations corresponding to the interpreted option's corresponding
+     * `UninterpretedOption` are also appended to the interpreted option, which
+     * deviates from the actual FileDescriptorProto path. E.g.:
+     *   [ 4, 3, 7, 10101, 2 ]
+     * refers to the option name `(my_opt)`, and:
+     *   [ 4, 3, 7, 10101, 7 ]
+     * refers to the "foo" string value of the option.
      *
      * Generated from protobuf field <code>repeated int32 path = 1 [packed = true];</code>
      */
@@ -130,6 +145,21 @@ class Location extends \Google\Protobuf\Internal\Message
      *             [ 4, 3, 2, 7 ]
      *           this path refers to the whole field declaration (from the beginning
      *           of the label to the terminating semicolon).
+     *           For options, the path refers to the interpreted option in the descriptor.
+     *           E.g., for a custom option `(my_opt) = "foo"` on a message using extension
+     *           number 10101, the path is:
+     *             [ 4, 3, 7, 10101 ]
+     *           refers to:
+     *             file.message_type(3)     // 4, 3
+     *                 .options()           // 7
+     *                 .my_opt()            // 10101
+     *           Sub-locations corresponding to the interpreted option's corresponding
+     *           `UninterpretedOption` are also appended to the interpreted option, which
+     *           deviates from the actual FileDescriptorProto path. E.g.:
+     *             [ 4, 3, 7, 10101, 2 ]
+     *           refers to the option name `(my_opt)`, and:
+     *             [ 4, 3, 7, 10101, 7 ]
+     *           refers to the "foo" string value of the option.
      *     @type int[] $span
      *           Always has exactly three or four elements: start line, start column,
      *           end line (optional, otherwise assumed same as start line), end column.
@@ -177,7 +207,8 @@ class Location extends \Google\Protobuf\Internal\Message
      *     @type string[] $leading_detached_comments
      * }
      */
-    public function __construct($data = NULL) {
+    public function __construct($data = null)
+    {
         \GPBMetadata\Google\Protobuf\Internal\Descriptor::initOnce();
         parent::__construct($data);
     }
@@ -204,6 +235,21 @@ class Location extends \Google\Protobuf\Internal\Message
      *   [ 4, 3, 2, 7 ]
      * this path refers to the whole field declaration (from the beginning
      * of the label to the terminating semicolon).
+     * For options, the path refers to the interpreted option in the descriptor.
+     * E.g., for a custom option `(my_opt) = "foo"` on a message using extension
+     * number 10101, the path is:
+     *   [ 4, 3, 7, 10101 ]
+     * refers to:
+     *   file.message_type(3)     // 4, 3
+     *       .options()           // 7
+     *       .my_opt()            // 10101
+     * Sub-locations corresponding to the interpreted option's corresponding
+     * `UninterpretedOption` are also appended to the interpreted option, which
+     * deviates from the actual FileDescriptorProto path. E.g.:
+     *   [ 4, 3, 7, 10101, 2 ]
+     * refers to the option name `(my_opt)`, and:
+     *   [ 4, 3, 7, 10101, 7 ]
+     * refers to the "foo" string value of the option.
      *
      * Generated from protobuf field <code>repeated int32 path = 1 [packed = true];</code>
      * @return RepeatedField<int>
@@ -235,12 +281,27 @@ class Location extends \Google\Protobuf\Internal\Message
      *   [ 4, 3, 2, 7 ]
      * this path refers to the whole field declaration (from the beginning
      * of the label to the terminating semicolon).
+     * For options, the path refers to the interpreted option in the descriptor.
+     * E.g., for a custom option `(my_opt) = "foo"` on a message using extension
+     * number 10101, the path is:
+     *   [ 4, 3, 7, 10101 ]
+     * refers to:
+     *   file.message_type(3)     // 4, 3
+     *       .options()           // 7
+     *       .my_opt()            // 10101
+     * Sub-locations corresponding to the interpreted option's corresponding
+     * `UninterpretedOption` are also appended to the interpreted option, which
+     * deviates from the actual FileDescriptorProto path. E.g.:
+     *   [ 4, 3, 7, 10101, 2 ]
+     * refers to the option name `(my_opt)`, and:
+     *   [ 4, 3, 7, 10101, 7 ]
+     * refers to the "foo" string value of the option.
      *
      * Generated from protobuf field <code>repeated int32 path = 1 [packed = true];</code>
      * @param int[] $var
      * @return $this
      */
-    public function setPath($var)
+    public function setPath(array|RepeatedField $var)
     {
         $arr = GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::INT32);
         $this->path = $arr;
@@ -274,7 +335,7 @@ class Location extends \Google\Protobuf\Internal\Message
      * @param int[] $var
      * @return $this
      */
-    public function setSpan($var)
+    public function setSpan(array|RepeatedField $var)
     {
         $arr = GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::INT32);
         $this->span = $arr;
@@ -380,9 +441,9 @@ class Location extends \Google\Protobuf\Internal\Message
      * @param string $var
      * @return $this
      */
-    public function setLeadingComments($var)
+    public function setLeadingComments(string $var)
     {
-        GPBUtil::checkString($var, True);
+        GPBUtil::checkString($var, true);
         $this->leading_comments = $var;
 
         return $this;
@@ -412,9 +473,9 @@ class Location extends \Google\Protobuf\Internal\Message
      * @param string $var
      * @return $this
      */
-    public function setTrailingComments($var)
+    public function setTrailingComments(string $var)
     {
-        GPBUtil::checkString($var, True);
+        GPBUtil::checkString($var, true);
         $this->trailing_comments = $var;
 
         return $this;
@@ -434,7 +495,7 @@ class Location extends \Google\Protobuf\Internal\Message
      * @param string[] $var
      * @return $this
      */
-    public function setLeadingDetachedComments($var)
+    public function setLeadingDetachedComments(array|RepeatedField $var)
     {
         $arr = GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::STRING);
         $this->leading_detached_comments = $arr;

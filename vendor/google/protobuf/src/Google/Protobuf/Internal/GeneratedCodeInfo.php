@@ -39,7 +39,8 @@ class GeneratedCodeInfo extends \Google\Protobuf\Internal\Message
      *           of its generating .proto file.
      * }
      */
-    public function __construct($data = NULL) {
+    public function __construct($data = null)
+    {
         \GPBMetadata\Google\Protobuf\Internal\Descriptor::initOnce();
         parent::__construct($data);
     }
@@ -64,7 +65,7 @@ class GeneratedCodeInfo extends \Google\Protobuf\Internal\Message
      * @param \Google\Protobuf\Internal\GeneratedCodeInfo\Annotation[] $var
      * @return $this
      */
-    public function setAnnotation($var)
+    public function setAnnotation(array|RepeatedField $var)
     {
         $arr = GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::MESSAGE, \Google\Protobuf\Internal\GeneratedCodeInfo\Annotation::class);
         $this->annotation = $arr;

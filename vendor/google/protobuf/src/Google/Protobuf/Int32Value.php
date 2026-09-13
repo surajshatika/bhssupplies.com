@@ -36,7 +36,8 @@ class Int32Value extends \Google\Protobuf\Internal\Message
      *           The int32 value.
      * }
      */
-    public function __construct($data = NULL) {
+    public function __construct($data = null)
+    {
         \GPBMetadata\Google\Protobuf\Wrappers::initOnce();
         parent::__construct($data);
     }
@@ -59,7 +60,7 @@ class Int32Value extends \Google\Protobuf\Internal\Message
      * @param int $var
      * @return $this
      */
-    public function setValue($var)
+    public function setValue(int $var)
     {
         GPBUtil::checkInt32($var);
         $this->value = $var;

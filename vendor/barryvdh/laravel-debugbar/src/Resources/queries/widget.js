@@ -84,7 +84,7 @@
             const $explainButton = $('<a>Visual Explain</a>')
                 .addClass(csscls('visual-explain'))
                 .on('click', () => {
-                    if (!confirm(statement.explain['visual-confirm'])) return;
+                    if (!confirm(confirmMessage)) return;
                     fetch(statement.explain.url, {
                         method: "POST",
                         body: JSON.stringify({
@@ -231,6 +231,9 @@
                     .attr('data-duplicate', false)
                     .append($('<strong />').addClass(csscls('sql name')).text(statement.sql));
             } else {
+                if (statement.slow) {
+                    $li.addClass(csscls('sql-slow'));
+                }
                 const $code = $('<code />').html(PhpDebugBar.Widgets.highlight(statement.sql, 'sql')).addClass(csscls('sql')),
                     duplicated = this.duplicateQueries.has(statement);
                 $li.attr('data-connection', statement.connection)

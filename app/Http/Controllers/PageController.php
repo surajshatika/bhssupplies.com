@@ -94,7 +94,15 @@ class PageController extends Controller
         $page = Page::where('slug', $id)->first();
         if($page != null){
             if ($page_name == 'home') {
-                return view('backend.website_settings.pages.'.get_setting('homepage_select').'.home_page_edit', compact('page','lang'));
+                // homepage_select drives the view folder directly; an unrecognized
+                // or unset value (view directory renamed/removed, or the setting
+                // cleared) was crashing this page with a 500 instead of
+                // falling back to the default theme.
+                $homepage_theme = get_setting('homepage_select');
+                if (!$homepage_theme || !view()->exists('backend.website_settings.pages.'.$homepage_theme.'.home_page_edit')) {
+                    $homepage_theme = 'classic';
+                }
+                return view('backend.website_settings.pages.'.$homepage_theme.'.home_page_edit', compact('page','lang'));
             }
             elseif ($page_name == 'portfolio') {
                 return view('backend.website_settings.pages.portfolio.home_page_edit', compact('page','lang'));

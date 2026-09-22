@@ -1,8 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Stichoza\GoogleTranslate;
 
 use DOMDocument;
+use DOMElement;
+use DOMNodeList;
 use DOMXPath;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
@@ -22,6 +26,7 @@ use Throwable;
  * @author      Levan Velijanashvili <me@stichoza.com>
  * @link        https://stichoza.com/
  * @license     MIT
+ * @phpstan-consistent-constructor
  */
 class GoogleTranslate
 {
@@ -41,7 +46,7 @@ class GoogleTranslate
     protected ?string $target = null;
 
     /*
-     * @var string|null Regex pattern to match replaceable parts in a string, defualts to "words"
+     * @var string|null Regex pattern to match replaceable parts in a string, defaults to "words"
      */
     protected ?string $pattern = null;
 
@@ -56,15 +61,15 @@ class GoogleTranslate
     protected string $url = 'https://translate.google.com/translate_a/single';
 
     /**
-     * @var array Dynamic GuzzleHttp client options
+     * @var array<string, mixed> Dynamic GuzzleHttp client options
      */
     protected array $options = [];
 
     /**
-     * @var array URL Parameters
+     * @var array<string, mixed> URL Parameters
      */
     protected array $urlParams = [
-        'client'   => 'gtx',
+        'client'   => 'webapp',
         'hl'       => 'en',
         'dt'       => [
             't',   // Translate
@@ -94,7 +99,7 @@ class GoogleTranslate
     ];
 
     /**
-     * @var array Regex key-value patterns to replace on response data
+     * @var array<string, string> Regex key-value patterns to replace on response data
      */
     protected array $resultRegexes = [
         '/,+/'  => ',',
@@ -115,7 +120,7 @@ class GoogleTranslate
      *
      * @param string $target Target language code
      * @param string|null $source Source language code (null for automatic language detection)
-     * @param array $options HTTP client configuration options
+     * @param array<string, mixed> $options HTTP client configuration options
      * @param TokenProviderInterface|null $tokenProvider
      * @param bool|string $preserveParameters Boolean or custom regex pattern to match parameters
      */
@@ -136,24 +141,24 @@ class GoogleTranslate
     }
 
     /**
-     * Set target language for translation.
+     * Set the target language for translation.
      *
      * @param string $target Target language code
-     * @return GoogleTranslate
+     * @return static
      */
-    public function setTarget(string $target): self
+    public function setTarget(string $target): static
     {
         $this->target = $target;
         return $this;
     }
 
     /**
-     * Set source language for translation.
+     * Set the source language for translation.
      *
      * @param string|null $source Source language code (null for automatic language detection)
-     * @return GoogleTranslate
+     * @return static
      */
-    public function setSource(?string $source = null): self
+    public function setSource(?string $source = null): static
     {
         $this->source = $source ?? 'auto';
         return $this;
@@ -163,9 +168,9 @@ class GoogleTranslate
      * Set Google Translate URL base
      *
      * @param string $url Google Translate URL base
-     * @return GoogleTranslate
+     * @return static
      */
-    public function setUrl(string $url): self
+    public function setUrl(string $url): static
     {
         $this->url = $url;
         return $this;
@@ -175,9 +180,9 @@ class GoogleTranslate
      * Set Google Translate client param (webapp, gtx, etc.)
      *
      * @param string $client Google Translate client param (webapp, gtx, etc.)
-     * @return GoogleTranslate
+     * @return static
      */
-    public function setClient(string $client): self
+    public function setClient(string $client): static
     {
         $this->urlParams['client'] = $client;
         return $this;
@@ -186,10 +191,10 @@ class GoogleTranslate
     /**
      * Set GuzzleHttp client options.
      *
-     * @param array $options HTTP client options.
-     * @return GoogleTranslate
+     * @param array<string, mixed> $options HTTP client options.
+     * @return static
      */
-    public function setOptions(array $options = []): self
+    public function setOptions(array $options = []): static
     {
         $this->options = $options;
         return $this;
@@ -199,9 +204,9 @@ class GoogleTranslate
      * Set token provider.
      *
      * @param TokenProviderInterface $tokenProvider Token provider instance
-     * @return GoogleTranslate
+     * @return static
      */
-    public function setTokenProvider(TokenProviderInterface $tokenProvider): self
+    public function setTokenProvider(TokenProviderInterface $tokenProvider): static
     {
         $this->tokenProvider = $tokenProvider;
         return $this;
@@ -223,13 +228,13 @@ class GoogleTranslate
      * @param string $string String to translate
      * @param string $target Target language code
      * @param string|null $source Source language code (null for automatic language detection)
-     * @param array $options HTTP client configuration options
+     * @param array<string, mixed> $options HTTP client configuration options
      * @param TokenProviderInterface|null $tokenProvider Custom token provider
      * @param bool|string $preserveParameters Boolean or custom regex pattern to match parameters
      * @return null|string
-     * @throws LargeTextException If translation text is too large
+     * @throws LargeTextException If the translation text is too large
      * @throws RateLimitException If Google has blocked you for excessive requests
-     * @throws TranslationRequestException If any other HTTP related error occurs
+     * @throws TranslationRequestException If any other HTTP-related error occurs
      * @throws TranslationDecodingException If response JSON cannot be decoded
      */
     public static function trans(
@@ -241,9 +246,9 @@ class GoogleTranslate
         bool|string             $preserveParameters = false
     ): ?string
     {
-        return (new self)
+        return (new static)
             ->setTokenProvider($tokenProvider ?? new GoogleTokenGenerator)
-            ->setOptions($options) // Options are already set in client constructor tho.
+            ->setOptions($options) // Options are already set in the client constructor tho.
             ->setSource($source)
             ->setTarget($target)
             ->preserveParameters($preserveParameters)
@@ -253,14 +258,14 @@ class GoogleTranslate
     /**
      * Translate text.
      *
-     * This can be called from instance method translate() using __call() magic method.
+     * This can be called from the instance method translate () using __call() magic method.
      * Use $instance->translate($string) instead.
      *
      * @param string $string String to translate
      * @return string|null
-     * @throws LargeTextException If translation text is too large
+     * @throws LargeTextException If the translation text is too large
      * @throws RateLimitException If Google has blocked you for excessive requests
-     * @throws TranslationRequestException If any other HTTP related error occurs
+     * @throws TranslationRequestException If any other HTTP-related error occurs
      * @throws TranslationDecodingException If response JSON cannot be decoded
      */
     public function translate(string $string): ?string
@@ -296,10 +301,10 @@ class GoogleTranslate
             $detectedLanguages[] = $responseArray[count($responseArray) - 2][0][0];
         }
 
-        // Set initial detected language to null
+        // Set initially detected language to null
         $this->lastDetectedSource = null;
 
-        // Iterate and set last detected language
+        // Iterate and set the last detected language
         foreach ($detectedLanguages as $lang) {
             if ($this->isValidLocale($lang)) {
                 $this->lastDetectedSource = $lang;
@@ -307,10 +312,7 @@ class GoogleTranslate
             }
         }
 
-        // The response sometime can be a translated string.
-        if (is_string($responseArray)) {
-            $output = $responseArray;
-        } elseif (is_array($responseArray[0])) {
+        if (is_array($responseArray[0])) {
             $output = (string) array_reduce($responseArray[0], static function ($carry, $item) {
                 $carry .= $item[0];
                 return $carry;
@@ -324,14 +326,12 @@ class GoogleTranslate
 
     /**
      * Set a custom pattern for extracting replaceable keywords from the string,
-     * default to extracting words prefixed with a colon
-     *
-     * @example (e.g. "Hello :name" will extract "name")
+     * default to extracting words prefixed with a colon. (e.g. `Hello :name` will extract `name`)
      *
      * @param bool|string $pattern Boolean or custom regex pattern to match parameters
-     * @return self
+     * @return static
      */
-    public function preserveParameters(bool|string $pattern = true): self
+    public function preserveParameters(bool|string $pattern = true): static
     {
         if ($pattern === true) {
             $this->pattern = '/:(\w+)/'; // Default regex
@@ -360,13 +360,13 @@ class GoogleTranslate
         // Replace all matches of our pattern with #{\d} for replacement later
         return preg_replace_callback(
             pattern: $this->pattern,
-            callback: static function ($matches) {
+            callback: static function () {
                 static $index = 0;
 
                 return '#{' . $index++ . '}';
             },
             subject: $string
-        );
+        ) ?: $string;
     }
 
     /**
@@ -378,11 +378,11 @@ class GoogleTranslate
      */
     protected function injectParameters(string $string, array $replacements): string
     {
-        // Remove space added by google in the parameters
-        $string = preg_replace('/#\{\s*(\d+)\s*\}/', '#{$1}', $string);
+        // Remove space added by Google in the parameters
+        $string = preg_replace('/#\{\s*(\d+)\s*}/', '#{$1}', $string);
 
         return preg_replace_callback(
-            pattern: '/\#{(\d+)}/',
+            pattern: '/#{(\d+)}/',
             callback: static fn($matches) => $replacements[$matches[1]],
             subject: $string
         );
@@ -398,7 +398,7 @@ class GoogleTranslate
     {
         $matches = [];
 
-        // If no pattern is set, return empty array
+        // If no pattern is set, return an empty array
         if (!$this->pattern) {
             return $matches;
         }
@@ -413,10 +413,10 @@ class GoogleTranslate
      * Get response array.
      *
      * @param string $string String to translate
-     * @return array Response
-     * @throws LargeTextException If translation text is too large
+     * @return array<int|string, mixed> Response
+     * @throws LargeTextException If the translation text is too large
      * @throws RateLimitException If Google has blocked you for excessive requests
-     * @throws TranslationRequestException If any other HTTP related error occurs
+     * @throws TranslationRequestException If any other HTTP-related error occurs
      * @throws TranslationDecodingException If response JSON cannot be decoded
      */
     public function getResponse(string $string): array
@@ -445,9 +445,9 @@ class GoogleTranslate
             throw new TranslationRequestException($e->getMessage(), $e->getCode());
         }
 
-        $body = $response->getBody(); // Get response body
+        $body = $response->getBody()->getContents(); // Get response body
 
-        // Modify body to avoid json errors
+        // Modify the body to avoid JSON errors
         $bodyJson = preg_replace(array_keys($this->resultRegexes), array_values($this->resultRegexes), $body);
 
         // Decode JSON data
@@ -457,7 +457,7 @@ class GoogleTranslate
             throw new TranslationDecodingException('Data cannot be decoded or it is deeper than the recursion limit');
         }
 
-        return $bodyArray;
+        return (array) $bodyArray;
     }
 
     /**
@@ -514,8 +514,10 @@ class GoogleTranslate
     protected function localizedLanguages(string $target): array
     {
         $menu = 'sl'; // 'tl';
-        $url = parse_url($this->url);
-        $url = $url['scheme'] . '://' . $url['host'] . '/m?' . http_build_query(['mui' => $menu, 'hl' => $target]);
+
+        $url = (array) parse_url($this->url);
+
+        $url = ($url['scheme'] ?? 'http') . '://' . ($url['host'] ?? '') . '/m?' . http_build_query(['mui' => $menu, 'hl' => $target]);
 
         try {
             $response = $this->client->get($url, $this->options);
@@ -539,10 +541,20 @@ class GoogleTranslate
         $nodes = $xpath->query('//div[@class="language-item"]/a');
 
         $languages = [];
-        foreach ($nodes as $node) {
-            $href = $node->getAttribute('href');
-            $code = strtok(substr($href, strpos($href, "$menu=") + strlen("$menu=")), '&');
-            $languages[$code] = $node->nodeValue;
+
+        if ($nodes instanceof DOMNodeList) {
+            foreach ($nodes as $node) {
+                if (!$node instanceof DOMElement) {
+                    continue;
+                }
+
+                $href = $node->getAttribute('href');
+                $code = strtok(substr($href, strpos($href, "$menu=") + strlen("$menu=")), '&');
+
+                if ($code && $node->nodeValue !== null) {
+                    $languages[$code] = $node->nodeValue;
+                }
+            }
         }
 
         return $languages;

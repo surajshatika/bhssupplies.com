@@ -3,13 +3,19 @@
 namespace Spatie\LaravelPackageTools\Concerns\PackageServiceProvider;
 
 use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 
 trait ProcessMigrations
 {
+    private array $existingAppMigrations = [];
+
     protected function bootPackageMigrations(): self
     {
+        $this->existingAppMigrations = [];
+
         if ($this->package->discoversMigrations) {
             $this->discoverPackageMigrations();
 
@@ -20,7 +26,6 @@ trait ProcessMigrations
 
         foreach ($this->package->migrationFileNames as $migrationFileName) {
             $vendorMigration = $this->package->basePath("/../database/migrations/{$migrationFileName}.php");
-            $appMigration = $this->generateMigrationName($migrationFileName, $now->addSecond());
 
             // Support for the .stub file extension
             if (! file_exists($vendorMigration)) {
@@ -28,6 +33,8 @@ trait ProcessMigrations
             }
 
             if ($this->app->runningInConsole()) {
+                $appMigration = $this->generateMigrationName($migrationFileName, $now->addSecond());
+
                 $this->publishes(
                     [$vendorMigration => $appMigration],
                     "{$this->package->shortName()}-migrations"
@@ -74,10 +81,12 @@ trait ProcessMigrations
         }
     }
 
-    protected function generateMigrationName(string $migrationFileName, Carbon $now): string
+    protected function generateMigrationName(string $migrationFileName, Carbon|CarbonImmutable $now): string
     {
         $migrationsPath = 'migrations/' . dirname($migrationFileName) . '/';
         $migrationFileName = basename($migrationFileName);
+
+        $migrationFileName = self::stripTimestampPrefix($migrationFileName);
 
         $len = strlen($migrationFileName) + 4;
 
@@ -86,17 +95,21 @@ trait ProcessMigrations
             $migrationFileName = Str::of($migrationFileName)->afterLast('/');
         }
 
-        foreach (glob(database_path("{$migrationsPath}*.php")) as $filename) {
+        foreach ($this->existingAppMigrationsIn($migrationsPath) as $filename) {
             if ((substr($filename, -$len) === $migrationFileName . '.php')) {
                 return $filename;
             }
         }
 
-        $migrationFileName = self::stripTimestampPrefix($migrationFileName);
         $timestamp = $now->format('Y_m_d_His');
         $formattedFileName = Str::of($migrationFileName)->snake()->finish('.php');
 
         return database_path("{$migrationsPath}{$timestamp}_{$formattedFileName}");
+    }
+
+    private function existingAppMigrationsIn(string $migrationsPath): array
+    {
+        return $this->existingAppMigrations[$migrationsPath] ??= (File::glob(database_path("{$migrationsPath}*.php")) ?: []);
     }
 
     private static function stripTimestampPrefix(string $filename): string

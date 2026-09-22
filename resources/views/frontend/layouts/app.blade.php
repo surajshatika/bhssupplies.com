@@ -421,7 +421,7 @@
     @endphp
     <script type="application/ld+json">
     {
-      "@context": "https://schema.org",
+      "@@context": "https://schema.org",
       "@type": ["HVACBusiness", "Store"],
       "name": "BHS Supplies",
       @if($_siteIconUrl)"image": "{{ $_siteIconUrl }}",@endif
@@ -528,7 +528,7 @@
     <!-- Organization Schema — E-E-A-T authority signal -->
     <script type="application/ld+json">
     {
-      "@context": "https://schema.org",
+      "@@context": "https://schema.org",
       "@type": "Organization",
       "@id": "{{ url('/') }}#organization",
       "name": "BHS Supplies",
@@ -578,7 +578,7 @@
     <!-- FAQPage Schema — targets Google "People Also Ask" rich results -->
     <script type="application/ld+json">
     {
-      "@context": "https://schema.org",
+      "@@context": "https://schema.org",
       "@type": "FAQPage",
       "mainEntity": [
         {
@@ -652,7 +652,7 @@
     <!-- WebSite Schema — enables Sitelinks Searchbox in Google Search -->
     <script type="application/ld+json">
     {
-      "@context": "https://schema.org",
+      "@@context": "https://schema.org",
       "@type": "WebSite",
       "name": "{{ $_site_name }}",
       "url": "{{ url('/') }}",
@@ -717,13 +717,11 @@
         });
         $hasUnreviewed = false;
 
-        use App\Models\Order;
-        use App\Models\OrderDetail;
         if(auth()->user()){
             $userId = auth()->user()->id;
             $hasUnreviewed = \Illuminate\Support\Facades\Cache::remember('user_has_unreviewed_' . $userId, 300, function () use ($userId) {
-                $userOrderIds = Order::where('user_id', $userId)->pluck('id');
-                return OrderDetail::whereIn('order_id', $userOrderIds)->where('delivery_status', 'delivered')->where('reviewed', 0)->exists();
+                $userOrderIds = \App\Models\Order::where('user_id', $userId)->pluck('id');
+                return \App\Models\OrderDetail::whereIn('order_id', $userOrderIds)->where('delivery_status', 'delivered')->where('reviewed', 0)->exists();
             });
         }
     @endphp

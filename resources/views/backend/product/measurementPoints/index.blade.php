@@ -129,10 +129,10 @@
         @can('edit_measurement_points')
             function edit_measurement_point(id){
                 $('#measurement-point-edit-form #name').val('');
-                var actionUrl = "{{ route('measurement-points.update', '') }}/"+id
+                var actionUrl = "{{ route('measurement-points.update', ['measurement_point' => 'DUMMY_ID']) }}".replace('DUMMY_ID', id)
                 $.ajax({
                     type: "GET",
-                    url: "{{ route('measurement-points.show', '') }}/"+id,
+                    url: "{{ route('measurement-points.show', ['measurement_point' => 'DUMMY_ID']) }}".replace('DUMMY_ID', id),
                     data: {},
                     success: function(data) {
                         $('#measurement-point-edit-form').attr('action', actionUrl);

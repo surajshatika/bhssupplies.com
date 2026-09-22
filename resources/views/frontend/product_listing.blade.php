@@ -77,7 +77,7 @@
     @endphp
     <script type="application/ld+json">
     {
-      "@context": "https://schema.org",
+      "@@context": "https://schema.org",
       "@type": "BreadcrumbList",
       "itemListElement": @json($breadcrumbItems)
     }
@@ -103,7 +103,7 @@
     @if(!empty($_clItems))
     <script type="application/ld+json">
     {
-      "@context": "https://schema.org",
+      "@@context": "https://schema.org",
       "@type": "CollectionPage",
       "name": "{{ addslashes($_clPageTitle) }}",
       "description": "{{ addslashes($_clPageDesc) }}",

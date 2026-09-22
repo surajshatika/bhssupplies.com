@@ -40,9 +40,11 @@ use Google\ApiCore\Middleware\OptionsFilterMiddleware;
 use Google\ApiCore\Middleware\PagedMiddleware;
 use Google\ApiCore\Middleware\RequestAutoPopulationMiddleware;
 use Google\ApiCore\Middleware\RetryMiddleware;
+use Google\ApiCore\Middleware\TransportCallMiddleware;
 use Google\ApiCore\Options\CallOptions;
 use Google\ApiCore\Options\ClientOptions;
 use Google\ApiCore\Options\TransportOptions;
+use Google\ApiCore\ResumableUpload\ResumableUpload;
 use Google\ApiCore\Transport\GrpcFallbackTransport;
 use Google\ApiCore\Transport\GrpcTransport;
 use Google\ApiCore\Transport\RestTransport;
@@ -72,6 +74,8 @@ trait GapicClientTrait
     private string $serviceName = '';
     private array $agentHeader = [];
     private array $descriptors = [];
+    /** @var array<callable> $prependMiddlewareCallables */
+    private array $prependMiddlewareCallables = [];
     /** @var array<callable> $middlewareCallables */
     private array $middlewareCallables = [];
     private array $transportCallMethods = [
@@ -116,6 +120,52 @@ trait GapicClientTrait
     public function addMiddleware(callable $middlewareCallable): void
     {
         $this->middlewareCallables[] = $middlewareCallable;
+    }
+
+    /**
+     * Prepend a middleware to the call stack by providing a callable which will be
+     * invoked at the end of each call, and will return an instance of
+     * {@see MiddlewareInterface} when invoked.
+     *
+     * The callable must have the following method signature:
+     *
+     *     callable(MiddlewareInterface): MiddlewareInterface
+     *
+     * An implementation may look something like this:
+     * ```
+     * $client->prependMiddleware(function (MiddlewareInterface $handler) {
+     *     return new class ($handler) implements MiddlewareInterface {
+     *         public function __construct(private MiddlewareInterface $handler) {
+     *         }
+     *
+     *         public function __invoke(Call $call, array $options) {
+     *             // modify call and options (pre-request)
+     *             $response = ($this->handler)($call, $options);
+     *             // modify the response (post-request)
+     *             return $response;
+     *         }
+     *     };
+     * });
+     * ```
+     *
+     * @param callable $middlewareCallable A callable which returns an instance
+     *                 of {@see MiddlewareInterface} when invoked with a
+     *                 MiddlewareInterface instance as its first argument.
+     * @return void
+     */
+    public function prependMiddleware(callable $middlewareCallable): void
+    {
+        $this->prependMiddlewareCallables[] = $middlewareCallable;
+    }
+
+    /**
+     * Get the default scopes required by the service.
+     *
+     * @return array
+     */
+    public static function getServiceScopes(): array
+    {
+        return self::$serviceScopes;
     }
 
     /**
@@ -222,7 +272,7 @@ trait GapicClientTrait
         if (isset($options['serviceAddress'])) {
             $options['apiEndpoint'] = $this->pluck('serviceAddress', $options, false);
         }
-        $this->validateNotNull($options, [
+        self::validateNotNull($options, [
             'apiEndpoint',
             'serviceName',
             'descriptorsConfigPath',
@@ -231,7 +281,7 @@ trait GapicClientTrait
             'credentialsConfig',
             'transportConfig',
         ]);
-        $this->traitValidate($options, [
+        self::traitValidate($options, [
             'credentials',
             'transport',
             'gapicVersion',
@@ -305,10 +355,18 @@ trait GapicClientTrait
                 $options['credentialsConfig']['quotaProject'] ?? null
             );
         } else {
+            $enableRegionalAccessBoundary = filter_var(
+                getenv('GOOGLE_AUTH_TRUST_BOUNDARY_ENABLE_EXPERIMENT'),
+                FILTER_VALIDATE_BOOLEAN
+            );
+            $isRegional = str_ends_with($options['apiEndpoint'], '.rep.googleapis.com')
+                || str_ends_with($options['apiEndpoint'], '.rep.sandbox.googleapis.com');
             $this->credentialsWrapper = $this->createCredentialsWrapper(
                 $options['credentials'],
-                $options['credentialsConfig'],
-                $options['universeDomain']
+                $options['credentialsConfig'] + [
+                    'enableRegionalAccessBoundary' => $enableRegionalAccessBoundary && !$isRegional
+                ],
+                $options['universeDomain'],
             );
         }
 
@@ -510,6 +568,7 @@ trait GapicClientTrait
             case Call::SERVER_STREAMING_CALL:
             case Call::CLIENT_STREAMING_CALL:
             case Call::BIDI_STREAMING_CALL:
+            case Call::RESUMABLE_UPLOAD_CALL:
                 throw new ValidationException("Call type '$callType' of requested method " .
                     "'$methodName' is not supported for async execution.");
         }
@@ -570,6 +629,10 @@ trait GapicClientTrait
 
         if ($callType == Call::PAGINATED_CALL) {
             return $this->getPagedListResponse($methodName, $optionalArgs, $decodeType, $request, $interfaceName);
+        }
+
+        if ($callType == Call::RESUMABLE_UPLOAD_CALL) {
+            return $this->startResumableUploadCall($methodName, $optionalArgs, $decodeType, $request, $interfaceName);
         }
 
         // Unary, and all Streaming types handled by startCall.
@@ -659,10 +722,13 @@ trait GapicClientTrait
             ];
         }
 
-        $callStack = function (Call $call, array $options) {
-            $startCallMethod = $this->transportCallMethods[$call->getCallType()];
-            return $this->transport->$startCallMethod($call, $options);
-        };
+        $callStack = new TransportCallMiddleware($this->transport, $this->transportCallMethods);
+
+        foreach ($this->prependMiddlewareCallables as $fn) {
+            /** @var MiddlewareInterface $callStack */
+            $callStack = $fn($callStack);
+        }
+
         $callStack = new CredentialsWrapperMiddleware($callStack, $this->credentialsWrapper);
         $callStack = new FixedHeaderMiddleware($callStack, $fixedHeaders, true);
         $callStack = new RetryMiddleware($callStack, $callConstructionOptions['retrySettings']);
@@ -676,7 +742,8 @@ trait GapicClientTrait
             'transportOptions',
             'metadataCallback',
             'audience',
-            'metadataReturnType'
+            'metadataReturnType',
+            'middlewareOptions'
         ]);
 
         foreach (\array_reverse($this->middlewareCallables) as $fn) {
@@ -817,6 +884,38 @@ trait GapicClientTrait
             $request,
             $interfaceName
         )->wait();
+    }
+
+    /**
+     * @param string $methodName
+     * @param array $optionalArgs
+     * @param string $decodeType
+     * @param Message|null $request
+     * @param string|null $interfaceName
+     *
+     * @return ResumableUpload
+     */
+    private function startResumableUploadCall(
+        string $methodName,
+        array $optionalArgs,
+        string $decodeType,
+        ?Message $request,
+        ?string $interfaceName = null
+    ) {
+        $call = new Call(
+            $this->buildMethod($interfaceName, $methodName),
+            $decodeType,
+            $request,
+            $this->descriptors[$methodName] ?? [],
+            Call::RESUMABLE_UPLOAD_CALL
+        );
+
+        return new ResumableUpload(
+            $this->resumableUploadClient,
+            $call,
+            $optionalArgs,
+            $optionalArgs['uploadUrl'] ?? null
+        );
     }
 
     /**

@@ -261,7 +261,7 @@
 
             $.ajax({
                 type: "GET",
-                url: "{{ route('brand_category.show', '') }}/" + id,
+                url: "{{ route('brand_category.show', ['id' => 'DUMMY_ID']) }}".replace('DUMMY_ID', id),
                 success: function (data) {
                     rightOffcanvas.innerHTML = data;
                 },

@@ -9,7 +9,7 @@
 @section('structured_data')
 <script type="application/ld+json">
 {
-  "@context": "https://schema.org",
+  "@@context": "https://schema.org",
   "@type": "BreadcrumbList",
   "itemListElement": [
     {"@type": "ListItem", "position": 1, "name": "Home", "item": "{{ url('/') }}"},
@@ -19,7 +19,7 @@
 </script>
 <script type="application/ld+json">
 {
-  "@context": "https://schema.org",
+  "@@context": "https://schema.org",
   "@type": "Service",
   "@id": "{{ route('locations.vaughan') }}#service",
   "name": "Wholesale HVAC & Plumbing Supplies — Vaughan",

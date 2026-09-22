@@ -7,7 +7,7 @@
 @section('structured_data')
 <script type="application/ld+json">
 {
-  "@context": "https://schema.org",
+  "@@context": "https://schema.org",
   "@type": "BreadcrumbList",
   "itemListElement": [
     {"@type": "ListItem", "position": 1, "name": "Home", "item": "{{ url('/') }}"},
@@ -17,7 +17,7 @@
 </script>
 <script type="application/ld+json">
 {
-  "@context": "https://schema.org",
+  "@@context": "https://schema.org",
   "@type": "Blog",
   "name": "BHS Supplies — HVAC & Plumbing Contractor Guides",
   "description": "Wholesale buying guides, product tips, and contractor resources from BHS Supplies in Mississauga, Ontario.",

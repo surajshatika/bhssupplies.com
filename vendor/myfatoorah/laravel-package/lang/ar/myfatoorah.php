@@ -2,8 +2,8 @@
 
 return [
     'pageCheckout'         => 'ماي فاتورة - الدفع',
-    'pageError'            => 'خطأ ماي فاتورة',
-    'noPaymentGateways'    => 'عذرا: لا توجد أي بوابات دفع في حسابك. تواصل مع مدير الحساب الخاص بك',
+    'pageError'            => 'ماي فاتورة - خطأ',
+    'noPaymentGateways'    => 'عذرا، لا توجد أي بوابات دفع في حسابك. تواصل مع مدير الحساب الخاص بك',
     'howWouldYouLikeToPay' => 'كيف تريد أن تدفع؟',
     'or'                   => 'أو',
     'payWith'              => 'ادفع بواسطة',
@@ -23,5 +23,5 @@ return [
     'deleteAlert.message'  => 'هل أنت متأكد من حذف البطاقة؟',
     'deleteAlert.confirm'  => 'موافق',
     'deleteAlert.cancel'   => 'غير موافق',
-    'Kindly review your MyFatoorah admin configuration due to a wrong entry.'   => 'نرجو مراجعة إعدادت ماي فاتورة نتيجة لوجود خطأ بها.',
+    'Kindly review your MyFatoorah admin configuration due to a wrong entry.' => 'نرجو مراجعة إعدادت ماي فاتورة نتيجة لوجود خطأ بها.',
 ];

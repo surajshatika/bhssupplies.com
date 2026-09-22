@@ -33,13 +33,13 @@ class DescriptorPool
         return self::$pool;
     }
 
-    public function internalAddGeneratedFile($data, $use_nested = false)
+    public function internalAddGeneratedFile($data, $use_nested = false, $custom_json_names = [])
     {
         $files = new FileDescriptorSet();
         $files->mergeFromString($data);
 
         foreach($files->getFile() as $file_proto) {
-            $file = FileDescriptor::buildFromProto($file_proto);
+            $file = FileDescriptor::buildFromProto($file_proto, $custom_json_names);
 
             foreach ($file->getMessageType() as $desc) {
                 $this->addDescriptor($desc);
@@ -75,8 +75,8 @@ class DescriptorPool
         $this->unique_descs[$descriptor->getFullName()] =
             $descriptor;
         $this->class_to_desc[$descriptor->getClass()] = $descriptor;
-        $this->class_to_desc[$descriptor->getLegacyClass()] = $descriptor;
-        $this->class_to_desc[$descriptor->getPreviouslyUnreservedClass()] = $descriptor;
+        $this->class_to_desc[$descriptor->getLegacyClass() ?? ''] = $descriptor;
+        $this->class_to_desc[$descriptor->getPreviouslyUnreservedClass() ?? ''] = $descriptor;
         foreach ($descriptor->getNestedType() as $nested_type) {
             $this->addDescriptor($nested_type);
         }
@@ -90,7 +90,7 @@ class DescriptorPool
         $this->proto_to_class[$descriptor->getFullName()] =
             $descriptor->getClass();
         $this->class_to_enum_desc[$descriptor->getClass()] = $descriptor;
-        $this->class_to_enum_desc[$descriptor->getLegacyClass()] = $descriptor;
+        $this->class_to_enum_desc[$descriptor->getLegacyClass() ?? ''] = $descriptor;
     }
 
     public function getDescriptorByClassName($klass)

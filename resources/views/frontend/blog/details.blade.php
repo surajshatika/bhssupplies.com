@@ -37,7 +37,7 @@
 @else
 <script type="application/ld+json">
 {
-  "@context": "https://schema.org",
+  "@@context": "https://schema.org",
   "@type": "BlogPosting",
   "headline": "{{ addslashes($blog->title) }}",
   "description": "{{ addslashes($blog->meta_description) }}",
@@ -78,7 +78,7 @@
 
 <script type="application/ld+json">
 {
-  "@context": "https://schema.org",
+  "@@context": "https://schema.org",
   "@type": "BreadcrumbList",
   "itemListElement": [
     {

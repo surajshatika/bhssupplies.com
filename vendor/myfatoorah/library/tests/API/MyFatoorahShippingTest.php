@@ -6,7 +6,6 @@ use MyFatoorah\Library\API\MyFatoorahShipping;
 
 class MyFatoorahShippingTest extends \PHPUnit\Framework\TestCase
 {
-
     private $keys;
 
     //-----------------------------------------------------------------------------------------------------------------------------------------
@@ -57,8 +56,8 @@ class MyFatoorahShippingTest extends \PHPUnit\Framework\TestCase
             'ShippingMethod' => 1,
             'Items'          => [
                 [
-                    'ProductName' => 'product',
-                    'Description' => 'product',
+                    'ProductName' => '<span>product</span>',
+                    'Description' => '<strong>product</strong>',
                     'Weight'      => 10,
                     'Width'       => 10,
                     'Height'      => 10,
@@ -76,12 +75,13 @@ class MyFatoorahShippingTest extends \PHPUnit\Framework\TestCase
         $this->assertEquals('KD', $data->Currency);
     }
 
-    public function testCalculateShippingChargeExceptionProductName()
+    //-----------------------------------------------------------------------------------------------------------------------------------------
+    public function testCalculateShippingChargeExceptionEmptyProductName()
     {
         $mfObj = new MyfatoorahShipping($this->keys['valid']);
 
         //test empty ProductName
-        $shippingData1 = [
+        $shippingData = [
             'ShippingMethod' => 1,
             'Items'          => [[
             'ProductName' => '',
@@ -100,7 +100,7 @@ class MyFatoorahShippingTest extends \PHPUnit\Framework\TestCase
 
         $this->expectException(\Exception::class);
         $this->expectExceptionMessage('model.Items[0].ProductName: The field Product Name (En) is mandatory.');
-        $mfObj->calculateShippingCharge($shippingData1);
+        $mfObj->calculateShippingCharge($shippingData);
     }
 
     //-----------------------------------------------------------------------------------------------------------------------------------------

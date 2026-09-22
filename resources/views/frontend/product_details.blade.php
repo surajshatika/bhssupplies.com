@@ -78,7 +78,7 @@
     @endphp
     <script type="application/ld+json">
     {
-      "@context": "https://schema.org",
+      "@@context": "https://schema.org",
       "@type": "Product",
       "@id": {!! json_encode($_pd_url) !!},
       "name": {!! json_encode($_pd_title) !!},
@@ -126,7 +126,7 @@
     @endphp
     <script type="application/ld+json">
     {
-      "@context": "https://schema.org",
+      "@@context": "https://schema.org",
       "@type": "BreadcrumbList",
       "itemListElement": @json($pdBreadcrumbs)
     }

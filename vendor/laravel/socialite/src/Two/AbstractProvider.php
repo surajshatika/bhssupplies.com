@@ -141,7 +141,7 @@ abstract class AbstractProvider implements ProviderContract
      * Get the raw user for the given access token.
      *
      * @param  string  $token
-     * @return array
+     * @return mixed
      */
     abstract protected function getUserByToken($token);
 
@@ -262,7 +262,7 @@ abstract class AbstractProvider implements ProviderContract
     }
 
     /**
-     * Get a Social User instance from a known access token.
+     * Get a Socialite user instance from a known access token.
      *
      * @param  string  $token
      * @return \Laravel\Socialite\Two\User
@@ -287,14 +287,14 @@ abstract class AbstractProvider implements ProviderContract
 
         $state = $this->request->session()->pull('state');
 
-        return empty($state) || $this->request->input('state') !== $state;
+        return empty($state) || ! hash_equals($state, (string) $this->request->input('state'));
     }
 
     /**
      * Get the access token response for the given code.
      *
      * @param  string  $code
-     * @return array
+     * @return mixed
      */
     public function getAccessTokenResponse($code)
     {
@@ -362,7 +362,7 @@ abstract class AbstractProvider implements ProviderContract
      * Get the refresh token response for the given refresh token.
      *
      * @param  string  $refreshToken
-     * @return array
+     * @return mixed
      */
     protected function getRefreshTokenResponse($refreshToken)
     {
@@ -395,7 +395,7 @@ abstract class AbstractProvider implements ProviderContract
      */
     public function scopes($scopes)
     {
-        $this->scopes = array_unique(array_merge($this->scopes, (array) $scopes));
+        $this->scopes = array_values(array_unique(array_merge($this->scopes, (array) $scopes)));
 
         return $this;
     }
@@ -408,7 +408,7 @@ abstract class AbstractProvider implements ProviderContract
      */
     public function setScopes($scopes)
     {
-        $this->scopes = array_unique((array) $scopes);
+        $this->scopes = array_values(array_unique((array) $scopes));
 
         return $this;
     }

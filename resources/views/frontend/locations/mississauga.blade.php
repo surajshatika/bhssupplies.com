@@ -7,7 +7,7 @@
 @section('structured_data')
 <script type="application/ld+json">
 {
-  "@context": "https://schema.org",
+  "@@context": "https://schema.org",
   "@type": "HVACBusiness",
   "name": "BHS Supplies",
   "@id": "{{ url('/hvac-supplies-mississauga') }}#localbusiness-mississauga",

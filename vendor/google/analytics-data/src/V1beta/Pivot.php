@@ -39,18 +39,18 @@ class Pivot extends \Google\Protobuf\Internal\Message
      *
      * Generated from protobuf field <code>int64 offset = 3;</code>
      */
-    private $offset = 0;
+    protected $offset = 0;
     /**
      * The number of unique combinations of dimension values to return in this
      * pivot. The `limit` parameter is required. A `limit` of 10,000 is common for
      * single pivot requests.
      * The product of the `limit` for each `pivot` in a `RunPivotReportRequest`
-     * must not exceed 100,000. For example, a two pivot request with `limit:
+     * must not exceed 250,000. For example, a two pivot request with `limit:
      * 1000` in each pivot will fail because the product is `1,000,000`.
      *
      * Generated from protobuf field <code>int64 limit = 4;</code>
      */
-    private $limit = 0;
+    protected $limit = 0;
     /**
      * Aggregate the metrics by dimensions in this pivot using the specified
      * metric_aggregations.
@@ -83,7 +83,7 @@ class Pivot extends \Google\Protobuf\Internal\Message
      *           pivot. The `limit` parameter is required. A `limit` of 10,000 is common for
      *           single pivot requests.
      *           The product of the `limit` for each `pivot` in a `RunPivotReportRequest`
-     *           must not exceed 100,000. For example, a two pivot request with `limit:
+     *           must not exceed 250,000. For example, a two pivot request with `limit:
      *           1000` in each pivot will fail because the product is `1,000,000`.
      *     @type array<int>|\Google\Protobuf\Internal\RepeatedField $metric_aggregations
      *           Aggregate the metrics by dimensions in this pivot using the specified
@@ -192,7 +192,7 @@ class Pivot extends \Google\Protobuf\Internal\Message
      * pivot. The `limit` parameter is required. A `limit` of 10,000 is common for
      * single pivot requests.
      * The product of the `limit` for each `pivot` in a `RunPivotReportRequest`
-     * must not exceed 100,000. For example, a two pivot request with `limit:
+     * must not exceed 250,000. For example, a two pivot request with `limit:
      * 1000` in each pivot will fail because the product is `1,000,000`.
      *
      * Generated from protobuf field <code>int64 limit = 4;</code>
@@ -208,7 +208,7 @@ class Pivot extends \Google\Protobuf\Internal\Message
      * pivot. The `limit` parameter is required. A `limit` of 10,000 is common for
      * single pivot requests.
      * The product of the `limit` for each `pivot` in a `RunPivotReportRequest`
-     * must not exceed 100,000. For example, a two pivot request with `limit:
+     * must not exceed 250,000. For example, a two pivot request with `limit:
      * 1000` in each pivot will fail because the product is `1,000,000`.
      *
      * Generated from protobuf field <code>int64 limit = 4;</code>

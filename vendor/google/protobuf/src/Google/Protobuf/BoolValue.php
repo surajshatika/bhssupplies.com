@@ -36,7 +36,8 @@ class BoolValue extends \Google\Protobuf\Internal\Message
      *           The bool value.
      * }
      */
-    public function __construct($data = NULL) {
+    public function __construct($data = null)
+    {
         \GPBMetadata\Google\Protobuf\Wrappers::initOnce();
         parent::__construct($data);
     }
@@ -59,9 +60,8 @@ class BoolValue extends \Google\Protobuf\Internal\Message
      * @param bool $var
      * @return $this
      */
-    public function setValue($var)
+    public function setValue(bool $var)
     {
-        GPBUtil::checkBool($var);
         $this->value = $var;
 
         return $this;

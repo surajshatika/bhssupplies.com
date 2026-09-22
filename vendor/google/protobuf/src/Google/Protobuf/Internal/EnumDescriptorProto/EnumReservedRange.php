@@ -47,7 +47,8 @@ class EnumReservedRange extends \Google\Protobuf\Internal\Message
      *           Inclusive.
      * }
      */
-    public function __construct($data = NULL) {
+    public function __construct($data = null)
+    {
         \GPBMetadata\Google\Protobuf\Internal\Descriptor::initOnce();
         parent::__construct($data);
     }
@@ -80,7 +81,7 @@ class EnumReservedRange extends \Google\Protobuf\Internal\Message
      * @param int $var
      * @return $this
      */
-    public function setStart($var)
+    public function setStart(int $var)
     {
         GPBUtil::checkInt32($var);
         $this->start = $var;
@@ -116,7 +117,7 @@ class EnumReservedRange extends \Google\Protobuf\Internal\Message
      * @param int $var
      * @return $this
      */
-    public function setEnd($var)
+    public function setEnd(int $var)
     {
         GPBUtil::checkInt32($var);
         $this->end = $var;

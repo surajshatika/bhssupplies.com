@@ -18,7 +18,7 @@ class MyFatoorahServiceProvider extends ServiceProvider {
             __DIR__ . '/../config/myfatoorah.php'             => config_path('myfatoorah.php'),
             __DIR__ . '/../resources/views'                   => resource_path('views/myfatoorah'),
             __DIR__ . '/../public'                            => public_path('vendor/myfatoorah'),
-            __DIR__ . '/../lang'                              => lang_path(),
+            __DIR__ . '/../lang'                              => app()->langPath(''),
             __DIR__ . '/controllers/MyFatoorahController.php' => app_path() . '/Http/Controllers/MyFatoorahController.php',
                 ], 'myfatoorah');
 
@@ -26,19 +26,23 @@ class MyFatoorahServiceProvider extends ServiceProvider {
             'as'   => 'myfatoorah', 'uses' => MyFatoorahController::class . '@index'
         ]);
 
+        Route::get('myfatoorah/process', [
+            'as'   => 'myfatoorah.process', 'uses' => MyFatoorahController::class . '@process'
+        ]);
+
         Route::get('myfatoorah/callback', [
             'as'   => 'myfatoorah.callback', 'uses' => MyFatoorahController::class . '@callback'
         ]);
 
         Route::get('myfatoorah/checkout', [
-            'as'   => 'myfatoorah.cardView', 'uses' => MyFatoorahController::class . '@checkout'
+            'as'   => 'myfatoorah.checkout', 'uses' => MyFatoorahController::class . '@checkout'
         ]);
 
         Route::post('myfatoorah/webhook', [
             'as'   => 'myfatoorah.webhook', 'uses' => MyFatoorahController::class . '@webhook'
         ]);
 
-        defined('MYFATOORAH_LARAVEL_PACKAGE_VERSION') or define('MYFATOORAH_LARAVEL_PACKAGE_VERSION', '2.2.4');
+        defined('MYFATOORAH_LARAVEL_PACKAGE_VERSION') or define('MYFATOORAH_LARAVEL_PACKAGE_VERSION', '2.2.6');
     }
 
     /**

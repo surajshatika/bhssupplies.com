@@ -36,7 +36,8 @@ class SourceContext extends \Google\Protobuf\Internal\Message
      *           protobuf element.  For example: `"google/protobuf/source_context.proto"`.
      * }
      */
-    public function __construct($data = NULL) {
+    public function __construct($data = null)
+    {
         \GPBMetadata\Google\Protobuf\SourceContext::initOnce();
         parent::__construct($data);
     }
@@ -61,9 +62,9 @@ class SourceContext extends \Google\Protobuf\Internal\Message
      * @param string $var
      * @return $this
      */
-    public function setFileName($var)
+    public function setFileName(string $var)
     {
-        GPBUtil::checkString($var, True);
+        GPBUtil::checkString($var, true);
         $this->file_name = $var;
 
         return $this;

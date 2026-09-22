@@ -7,8 +7,8 @@ use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use GuzzleHttp\RequestOptions;
 use Illuminate\Support\Arr;
-use phpseclib3\Crypt\RSA;
-use phpseclib3\Math\BigInteger;
+use phpseclib4\Crypt\RSA;
+use phpseclib4\Math\BigInteger;
 
 class FacebookProvider extends AbstractProvider implements ProviderInterface
 {
@@ -24,14 +24,14 @@ class FacebookProvider extends AbstractProvider implements ProviderInterface
      *
      * @var string
      */
-    protected $version = 'v3.3';
+    protected $version = 'v23.0';
 
     /**
      * The user fields being requested.
      *
      * @var array
      */
-    protected $fields = ['name', 'email', 'gender', 'verified', 'link'];
+    protected $fields = ['name', 'email', 'gender', 'verified', 'link', 'picture.width(1920)'];
 
     /**
      * The scopes being requested.
@@ -60,6 +60,13 @@ class FacebookProvider extends AbstractProvider implements ProviderInterface
      * @var string|null
      */
     protected $lastToken;
+
+    /**
+     * The nonce expected when using Facebook Limited Login OIDC tokens.
+     *
+     * @var string|null
+     */
+    protected $expectedNonce;
 
     /**
      * {@inheritdoc}
@@ -103,6 +110,22 @@ class FacebookProvider extends AbstractProvider implements ProviderInterface
     }
 
     /**
+     * Get a Socialite user instance from a known access token.
+     *
+     * @param  string  $token
+     * @param  string|null  $nonce
+     * @return \Laravel\Socialite\Two\User
+     */
+    public function userFromToken($token, $nonce = null)
+    {
+        if ($nonce !== null) {
+            $this->withNonce($nonce);
+        }
+
+        return parent::userFromToken($token);
+    }
+
+    /**
      * Get user based on the OIDC token.
      *
      * @param  string  $token
@@ -120,6 +143,15 @@ class FacebookProvider extends AbstractProvider implements ProviderInterface
 
         throw_if($data['aud'] !== $this->clientId, new Exception('Token has incorrect audience.'));
         throw_if($data['iss'] !== 'https://www.facebook.com', new Exception('Token has incorrect issuer.'));
+
+        $expectedNonce = $this->getExpectedNonce();
+
+        throw_if(
+            $expectedNonce === null ||
+            ! isset($data['nonce']) ||
+            ! hash_equals($expectedNonce, (string) $data['nonce']),
+            new Exception('Token has incorrect nonce.')
+        );
 
         $data['id'] = $data['sub'];
 
@@ -186,19 +218,13 @@ class FacebookProvider extends AbstractProvider implements ProviderInterface
      */
     protected function mapUserToObject(array $user)
     {
-        if (! isset($user['sub'])) {
-            $avatarUrl = $this->graphUrl.'/'.$this->version.'/'.$user['id'].'/picture';
-
-            $avatarOriginalUrl = $avatarUrl.'?width=1920';
-        }
-
         return (new User)->setRaw($user)->map([
             'id' => $user['id'],
             'nickname' => null,
             'name' => $user['name'] ?? null,
             'email' => $user['email'] ?? null,
-            'avatar' => $avatarUrl ?? $user['picture'] ?? null,
-            'avatar_original' => $avatarOriginalUrl ?? $user['picture'] ?? null,
+            'avatar' => $avatarUrl = Arr::get($user, 'picture.data.url'),
+            'avatar_original' => $avatarUrl,
             'profileUrl' => $user['link'] ?? null,
         ]);
     }
@@ -266,6 +292,29 @@ class FacebookProvider extends AbstractProvider implements ProviderInterface
     public function lastToken()
     {
         return $this->lastToken;
+    }
+
+    /**
+     * Specify the nonce expected when using Facebook Limited Login OIDC tokens.
+     *
+     * @param  string  $nonce
+     * @return $this
+     */
+    public function withNonce($nonce)
+    {
+        $this->expectedNonce = $nonce;
+
+        return $this;
+    }
+
+    /**
+     * Get the expected OIDC token nonce.
+     *
+     * @return string|null
+     */
+    protected function getExpectedNonce()
+    {
+        return $this->expectedNonce ?? Arr::get($this->parameters, 'nonce');
     }
 
     /**

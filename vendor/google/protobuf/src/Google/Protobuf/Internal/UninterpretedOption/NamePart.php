@@ -41,7 +41,8 @@ class NamePart extends \Google\Protobuf\Internal\Message
      *     @type bool $is_extension
      * }
      */
-    public function __construct($data = NULL) {
+    public function __construct($data = null)
+    {
         \GPBMetadata\Google\Protobuf\Internal\Descriptor::initOnce();
         parent::__construct($data);
     }
@@ -70,9 +71,9 @@ class NamePart extends \Google\Protobuf\Internal\Message
      * @param string $var
      * @return $this
      */
-    public function setNamePart($var)
+    public function setNamePart(string $var)
     {
-        GPBUtil::checkString($var, True);
+        GPBUtil::checkString($var, true);
         $this->name_part = $var;
 
         return $this;
@@ -102,9 +103,8 @@ class NamePart extends \Google\Protobuf\Internal\Message
      * @param bool $var
      * @return $this
      */
-    public function setIsExtension($var)
+    public function setIsExtension(bool $var)
     {
-        GPBUtil::checkBool($var);
         $this->is_extension = $var;
 
         return $this;

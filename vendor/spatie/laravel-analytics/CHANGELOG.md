@@ -2,6 +2,97 @@
 
 All notable changes to Laravel-Analytics will be documented in this file
 
+## 5.7.0 - 2026-02-21
+
+### What's Changed
+
+- Add Laravel 13 support
+
+## 5.6.1 - 2025-11-26
+
+### What's Changed
+
+* Bump dependabot/fetch-metadata from 2.3.0 to 2.4.0 by @dependabot[bot] in https://github.com/spatie/laravel-analytics/pull/539
+* Bump aglipanci/laravel-pint-action from 2.5 to 2.6 by @dependabot[bot] in https://github.com/spatie/laravel-analytics/pull/544
+* Update README.md by @Krasomir in https://github.com/spatie/laravel-analytics/pull/542
+* Update issue template by @AlexVanderbist in https://github.com/spatie/laravel-analytics/pull/545
+* Bump actions/checkout from 4 to 6 by @dependabot[bot] in https://github.com/spatie/laravel-analytics/pull/549
+* Added Symfony 8 support to all symfony/* packages. by @thecaliskan in https://github.com/spatie/laravel-analytics/pull/548
+* Bump stefanzweifel/git-auto-commit-action from 5 to 7 by @dependabot[bot] in https://github.com/spatie/laravel-analytics/pull/546
+
+### New Contributors
+
+* @Krasomir made their first contribution in https://github.com/spatie/laravel-analytics/pull/542
+* @thecaliskan made their first contribution in https://github.com/spatie/laravel-analytics/pull/548
+
+**Full Changelog**: https://github.com/spatie/laravel-analytics/compare/5.6.0...5.6.1
+
+## 5.6.0 - 2025-04-28
+
+### What's Changed
+
+* Feat: Adds faking ability to facade by @chikondikamwendo in https://github.com/spatie/laravel-analytics/pull/538
+
+### New Contributors
+
+* @chikondikamwendo made their first contribution in https://github.com/spatie/laravel-analytics/pull/538
+
+**Full Changelog**: https://github.com/spatie/laravel-analytics/compare/5.5.4...5.6.0
+
+## 5.5.4 - 2025-03-21
+
+### What's Changed
+
+* Fix TypeError in runRealtimeReport after upgrading by @jaroslavstefanec in https://github.com/spatie/laravel-analytics/pull/536
+
+**Full Changelog**: https://github.com/spatie/laravel-analytics/compare/5.5.3...5.5.4
+
+## 5.5.3 - 2025-02-20
+
+### What's Changed
+
+* Fix TypeError in runReport after upgrading to 5.5.2 by @abr4xas in https://github.com/spatie/laravel-analytics/pull/535
+
+### New Contributors
+
+* @abr4xas made their first contribution in https://github.com/spatie/laravel-analytics/pull/535
+
+**Full Changelog**: https://github.com/spatie/laravel-analytics/compare/5.5.2...5.5.3
+
+## 5.5.2 - 2025-02-17
+
+### What's Changed
+
+* Bump dependabot/fetch-metadata from 2.2.0 to 2.3.0 by @dependabot in https://github.com/spatie/laravel-analytics/pull/531
+* Bump aglipanci/laravel-pint-action from 2.4 to 2.5 by @dependabot in https://github.com/spatie/laravel-analytics/pull/532
+* Laravel 12.x Compatibility by @laravel-shift in https://github.com/spatie/laravel-analytics/pull/533
+
+**Full Changelog**: https://github.com/spatie/laravel-analytics/compare/5.5.1...5.5.2
+
+## 5.5.1 - 2025-01-13
+
+### What's Changed
+
+* Update `googleapis/php-analytics-data` dependency by @JayBizzle in https://github.com/spatie/laravel-analytics/pull/529
+
+### New Contributors
+
+* @JayBizzle made their first contribution in https://github.com/spatie/laravel-analytics/pull/529
+
+**Full Changelog**: https://github.com/spatie/laravel-analytics/compare/5.5.0...5.5.1
+
+## 5.5.0 - 2024-12-11
+
+### What's Changed
+
+* Ability to run realtime reports from GA4 by @jaroslavstefanec in https://github.com/spatie/laravel-analytics/pull/528
+
+### New Contributors
+
+* @jaroslavstefanec made their first contribution in https://github.com/spatie/laravel-analytics/pull/528
+
+**Full Changelog**: https://github.com/spatie/laravel-analytics/compare/5.4.0...5.5.0
+
 ## 5.4.0 - 2024-07-22
 
 ### What's Changed

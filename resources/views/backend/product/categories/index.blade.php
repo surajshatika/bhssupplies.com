@@ -415,7 +415,7 @@
 
             $.ajax({
                 type: "GET",
-                url: "{{ route('categories.details', '') }}/" + id,
+                url: "{{ route('categories.details', ['id' => 'DUMMY_ID']) }}".replace('DUMMY_ID', id),
                 success: function (data) {
                     rightOffcanvas.innerHTML = data;
                 },

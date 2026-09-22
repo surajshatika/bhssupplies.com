@@ -81,7 +81,7 @@
 						</div>
 
 						<div class="border-top pt-3">
-							@foreach($element_type->element_styles as $style)
+							@foreach(($element_type->element_styles ?? []) as $style)
 
 							<div class="form-group row">
 								<label class="col-md-3 col-from-label">{{ translate($style->name) }}</label>

@@ -28,7 +28,10 @@ class WebsiteController extends Controller
     {
         $user = Auth::user();
         $system_language = Language::where('code', app()->getLocale())->first();
-        $element_type = ElementType::find(get_setting('header_element'));
+        // Falls back to the first available header ElementType if the
+        // configured header_element id no longer exists (e.g. was deleted) —
+        // an unset/stale id here was crashing this page with a 500.
+        $element_type = ElementType::find(get_setting('header_element')) ?: ElementType::first();
         return view('backend.website_settings.header', compact('system_language', 'user', 'element_type'));
     }
     public function footer(Request $request)
@@ -52,7 +55,14 @@ class WebsiteController extends Controller
 
     public function select_header(Request $request)
     {
-        $element = Element::find(1);
+        // There should be exactly one Element row (the header definition), but
+        // hard-coding id=1 breaks if that row was ever deleted and recreated
+        // (new auto-increment id) — this caused a 500 on this page.
+        $element = Element::find(1) ?: Element::first();
+        if ($element == null) {
+            flash(translate('Header element is not configured. Please contact support.'))->error();
+            return back();
+        }
         $element_types = ElementType::where('element_id', $element->id)->get();
         $user = Auth::user();
         $system_language = Language::where('code', app()->getLocale())->first();

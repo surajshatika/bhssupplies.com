@@ -153,7 +153,7 @@
             $('#payment-receipt-show-modal .modal-body').html('');
             $.ajax({
                 type: "GET",
-                url: "{{ route('payment_receipt.show', '') }}/"+id,
+                url: "{{ route('payment_receipt.show', ['id' => 'DUMMY_ID']) }}".replace('DUMMY_ID', id),
                 data: {},
                 success: function(data) {
                     $('#payment-receipt-show-modal .modal-body').html(data);

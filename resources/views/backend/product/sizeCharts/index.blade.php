@@ -78,7 +78,7 @@
             $('#size-chart-show-modal .modal-body').html('');
             $.ajax({
                 type: "GET",
-                url: "{{ route('size-charts.show', '') }}/"+id,
+                url: "{{ route('size-charts.show', ['size_chart' => 'DUMMY_ID']) }}".replace('DUMMY_ID', id),
                 data: {},
                 success: function(data) {
                     $('#size-chart-show-modal .modal-title').html(name);

@@ -1480,20 +1480,30 @@ if (!function_exists('isUnique')) {
 if (!function_exists('get_setting')) {
     function get_setting($key, $default = null, $lang = false)
     {
-        static $settings = null;
+        // Keyed index built once per request. The previous Collection::where()
+        // scan over every setting cost ~15ms per call, and pages make hundreds
+        // of calls. First matching row wins, same as before.
+        static $byType = null;
+        static $byTypeLang = null;
 
-        if ($settings === null) {
+        if ($byType === null) {
             $settings = Cache::remember('business_settings', 86400, function () {
                 return BusinessSetting::all();
             });
+            $byType = [];
+            $byTypeLang = [];
+            foreach ($settings as $row) {
+                $byType[$row->type] ??= $row;
+                if ($row->lang !== null && $row->lang !== '') {
+                    $byTypeLang[$row->type][$row->lang] ??= $row;
+                }
+            }
         }
 
-        if ($lang == false) {
-            $setting = $settings->where('type', $key)->first();
-        } else {
-            $setting = $settings->where('type', $key)->where('lang', $lang)->first();
-            $setting = !$setting ? $settings->where('type', $key)->first() : $setting;
-        }
+        $setting = $lang == false
+            ? ($byType[$key] ?? null)
+            : ($byTypeLang[$key][$lang] ?? $byType[$key] ?? null);
+
         return $setting == null ? $default : $setting->value;
     }
 }

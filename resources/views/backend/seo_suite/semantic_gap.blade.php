@@ -1,5 +1,6 @@
 @extends('backend.layouts.app')
 @section('content')
+@include('backend.seo.partials.suite_nav')
 @include('backend.partials.modern_module_styles')
 
 <div class="container-fluid py-4">

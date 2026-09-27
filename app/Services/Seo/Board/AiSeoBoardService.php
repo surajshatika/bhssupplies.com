@@ -587,12 +587,22 @@ class AiSeoBoardService
             return collect();
         }
 
-        return SeoMeta::query()
+        $map = SeoMeta::query()
             ->where('model_type', $class)
             ->where('lang', config('app.locale', 'en'))
             ->whereIn('model_id', $ids->all())
             ->get()
             ->keyBy(fn(SeoMeta $meta) => (int) $meta->model_id);
+
+        // Attach to the relation so HasSeoMeta accessors (meta_title etc.) don't
+        // re-query the same row per entity.
+        foreach ($entities as $entity) {
+            if (method_exists($entity, 'seoMeta') && !$entity->relationLoaded('seoMeta')) {
+                $entity->setRelation('seoMeta', $map->get((int) $entity->getKey()));
+            }
+        }
+
+        return $map;
     }
 
     protected function queueCandidateQuery(string $type): Builder

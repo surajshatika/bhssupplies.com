@@ -157,7 +157,8 @@ class AiSeoBoardService
         return !empty($row['has_meta'])
             && !empty($row['has_focus_kw'])
             && !empty($row['has_schema'])
-            && (int) ($row['score'] ?? 0) >= self::SEO_DONE_SCORE;
+            && (int) ($row['score'] ?? 0) >= self::SEO_DONE_SCORE
+            && !$this->isLegacyTemplateCopy($row['meta_title'] ?? null, $row['meta_description'] ?? null);
     }
 
     /**
@@ -530,6 +531,14 @@ class AiSeoBoardService
                 // Standard: unscored or below the done threshold.
                 $q->whereNull('seo_score')
                   ->orWhere('seo_score', '<', self::SEO_DONE_SCORE);
+                // Legacy one-size-fits-all template copy scored high but is
+                // near-duplicate across the site; queue it for an AI rewrite.
+                foreach (self::LEGACY_TITLE_TAILS as $tail) {
+                    $q->orWhere('meta_title', 'like', '%' . $tail);
+                }
+                foreach (self::LEGACY_DESC_MARKERS as $marker) {
+                    $q->orWhere('meta_description', 'like', '%' . $marker . '%');
+                }
                 // Also include done entities whose last analysis predates the
                 // most-recent keyword update — they need new keywords woven in.
                 if ($kwUpdatedAt) {
@@ -3203,54 +3212,43 @@ class AiSeoBoardService
         return $value === '' || mb_strlen($value) > 42 || str_word_count($value) > 4;
     }
 
+    /**
+     * Copy produced by the old one-size-fits-all templates, which ~97% of
+     * pages ended up with. Pages carrying it are queued for an AI rewrite.
+     */
+    public const LEGACY_TITLE_TAILS = [
+        'Trusted Canada Supplier 2026', 'Trusted Supplier 2026', 'Best Wholesale Canada 2026',
+        'Top Wholesale 2026', 'Trusted Canada Guide 2026', 'Top Canada Guide 2026',
+        'Top Canada 2026', 'Top Guide 2026', 'Best 2026',
+    ];
+    public const LEGACY_DESC_MARKERS = [
+        'for Mississauga, Brampton, Toronto and GTA buyers',
+        'for Mississauga, Brampton, Toronto and GTA contractors',
+    ];
+
+    public function isLegacyTemplateCopy(?string $title, ?string $description): bool
+    {
+        return Str::endsWith(trim((string) $title), self::LEGACY_TITLE_TAILS)
+            || Str::contains((string) $description, self::LEGACY_DESC_MARKERS);
+    }
+
     protected function needsMetaTitleRefresh($value, string $focus): bool
     {
+        // Rewrite only when missing/unusable or still the legacy template. The old
+        // rules (exact focus string, a number and a "power word" required) forced
+        // a paid rewrite loop on any natural title.
         $value = trim((string) $value);
-        $len = mb_strlen($value);
-
-        if ($value === '' || $len < 30 || $len > 60) {
-            return true;
-        }
-        if ($focus !== '' && mb_stripos($value, $focus) === false) {
-            return true;
-        }
-        // Refresh when title lacks a power word, positive-sentiment word, OR number —
-        // these are scored by TruSEO (5+4+4=13 pts) and the template title includes all three.
-        $hasPower    = (bool) preg_match('/\b(best|top|ultimate|proven|essential|complete|expert|professional|premium|quality|trusted|reliable|affordable|official|genuine|wholesale|bulk|fast|guaranteed|certified|leading)\b/i', $value);
-        $hasPositive = (bool) preg_match('/\b(best|top|trusted|proven|quality|reliable|premium|expert|leading|essential|complete|fast|guaranteed|professional|affordable|certified)\b/i', $value);
-        $hasNumber   = (bool) preg_match('/\d/', $value);
-        return !$hasPower || !$hasPositive || !$hasNumber;
+        return mb_strlen($value) < 15 || $this->isLegacyTemplateCopy($value, null);
     }
 
     protected function needsMetaDescriptionRefresh($value, string $focus, array $secondaries = []): bool
     {
+        // Rewrite only when missing/too short, too long to display, or still the
+        // legacy template. The old 140–160 window and exact-keyword rules
+        // re-flagged good AI copy every run (each rewrite is a paid AI call).
         $value = trim((string) $value);
         $len = mb_strlen($value);
-
-        // Min is 140 to match TruSEO desc_length scoring check (140–160 chars).
-        if ($value === '' || $len < 140 || $len > 160) {
-            return true;
-        }
-        if ($focus !== '' && mb_stripos($value, $focus) === false) {
-            return true;
-        }
-        // Refresh when NO secondary keyword appears in the description — TruSEO awards
-        // 5 pts for secondary_kw_in_desc, which every template description now satisfies.
-        if (!empty($secondaries)) {
-            $valueLower = mb_strtolower($value);
-            $hasSecondary = false;
-            foreach (array_slice($secondaries, 0, 10) as $kw) {
-                $kw = mb_strtolower(trim((string) $kw));
-                if ($kw !== '' && mb_stripos($valueLower, $kw) !== false) {
-                    $hasSecondary = true;
-                    break;
-                }
-            }
-            if (!$hasSecondary) {
-                return true;
-            }
-        }
-        return false;
+        return $len < 70 || $len > 170 || $this->isLegacyTemplateCopy(null, $value);
     }
 
     protected function needsSecondaryKeywordsRefresh($value): bool
@@ -3264,22 +3262,12 @@ class AiSeoBoardService
 
     protected function bestTitleForFocus($aiTitle, string $focus, string $name, string $type): string
     {
-        $aiTitle = trim((string) $aiTitle);
-        $len = mb_strlen($aiTitle);
-
-        // Accept the AI title only when it passes the same bar the analyzer scores:
-        // 30-60 chars, focus keyword within the FIRST FOUR words, and a power word.
-        $titleStart = mb_strtolower(implode(' ', array_slice(explode(' ', $aiTitle), 0, 4)));
-        $hasPowerWord = (bool) preg_match(
-            '/\b(best|top|ultimate|proven|essential|complete|expert|professional|premium|quality|trusted|reliable|affordable|official|genuine|wholesale|bulk|free|fast|guaranteed|certified|authorized|leading)\b/i',
-            $aiTitle
-        );
-
-        if ($aiTitle !== '' && $len >= 30 && $len <= 60
-            && $focus !== '' && mb_stripos($titleStart, $focus) !== false
-            && $hasPowerWord
-        ) {
-            return $aiTitle;
+        // Use the AI title whenever it's usable; the old bar (a "power word" and
+        // the exact focus keyword in the first four words) rejected most AI
+        // titles in favour of the shared template.
+        $aiTitle = trim(strip_tags((string) $aiTitle));
+        if (mb_strlen($aiTitle) >= 15 && !$this->isLegacyTemplateCopy($aiTitle, null)) {
+            return $this->fitTitle($aiTitle);
         }
 
         return $this->titleWithFocus($focus, $name, $type);
@@ -3287,8 +3275,8 @@ class AiSeoBoardService
 
     protected function bestDescriptionForFocus($aiDescription, string $focus, string $name, string $type): string
     {
-        $aiDescription = trim((string) $aiDescription);
-        if ($aiDescription !== '' && mb_stripos($aiDescription, $focus) !== false) {
+        $aiDescription = trim(strip_tags((string) $aiDescription));
+        if (mb_strlen($aiDescription) >= 70 && !$this->isLegacyTemplateCopy(null, $aiDescription)) {
             return $this->fitDescription($aiDescription);
         }
 

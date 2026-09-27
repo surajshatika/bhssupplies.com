@@ -179,7 +179,7 @@ class SmartSitemapService extends AbstractSeoService
         // ── Blog Posts ───────────────────────────────────────────────────
         if (Schema::hasTable('blogs')) {
             try {
-                \App\Models\Blog::where('published', 1)->whereNull('deleted_at')
+                \App\Models\Blog::where('status', 1)->whereNull('deleted_at')
                     ->select('slug', 'updated_at', 'created_at')
                     ->orderBy('created_at', 'desc')
                     ->chunk(200, function ($posts) use ($base, &$groups) {

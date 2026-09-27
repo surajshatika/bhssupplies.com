@@ -34,10 +34,10 @@ class VideoSitemapService extends AbstractSeoService
         $videos = [];
 
         try {
-            $products = \App\Models\Product::whereNotNull('video')
-                ->where('video', '!=', '')
+            $products = \App\Models\Product::whereNotNull('video_link')
+                ->where('video_link', '!=', '')
                 ->limit(200)
-                ->get(['id', 'name', 'slug', 'video', 'thumbnail_img', 'description']);
+                ->get(['id', 'name', 'slug', 'video_link', 'thumbnail_img', 'description']);
 
             foreach ($products as $product) {
                 $productUrl = $baseUrl . '/product/' . $product->slug;
@@ -46,7 +46,7 @@ class VideoSitemapService extends AbstractSeoService
                     'title'        => $product->name,
                     'description'  => strip_tags(substr($product->description ?? '', 0, 200)),
                     'thumbnail_url'=> $product->thumbnail_img ? uploaded_asset($product->thumbnail_img) : '',
-                    'content_url'  => $product->video,
+                    'content_url'  => $product->video_link,
                     'duration'     => null,
                     'publication_date' => now()->toAtomString(),
                     'family_friendly' => 'yes',

@@ -32,37 +32,16 @@ class RunAutoLinkerCommand extends Command
     {
         $this->info('Starting SEO Auto-Linker...');
 
-        // 1. Gather all targets (URLs we want to link TO)
-        // We'll use Products and Blogs that have an SEO keyword defined.
-        $targets = [];
-
-        // Assuming you have an SeoMeta model or a meta_title/meta_keyword column.
-        // For simplicity, we'll try to get keywords from Product/Blog or SeoMeta.
-        // Since we don't know the exact schema, let's look at SeoKeyword model we saw earlier.
-        
-        $keywords = \App\Models\SeoKeyword::whereNotNull('entity_type')->whereNotNull('entity_id')->get();
-        
-        foreach ($keywords as $kw) {
-            if (empty($kw->keyword)) continue;
-            
-            $url = '';
-            if ($kw->entity_type === 'product') {
-                $product = Product::find($kw->entity_id);
-                if ($product) $url = url('product/' . $product->slug);
-            } elseif ($kw->entity_type === 'blog') {
-                $blog = Blog::find($kw->entity_id);
-                if ($blog) $url = url('blog/' . $blog->slug);
-            }
-            
-            if ($url) {
-                $targets[] = [
-                    'keyword' => trim($kw->keyword),
-                    'url' => $url,
-                    'type' => $kw->entity_type,
-                    'id' => $kw->entity_id
-                ];
-            }
-        }
+        // Link targets come from tracked keywords that have a destination URL.
+        $targets = \App\Models\SeoKeyword::where('is_active', 1)
+            ->whereNotNull('target_url')->where('target_url', '!=', '')
+            ->get(['keyword', 'target_url'])
+            ->filter(fn($kw) => trim((string) $kw->keyword) !== '')
+            // Longest keywords first so "copper pipe fittings" wins over "copper pipe".
+            ->sortByDesc(fn($kw) => mb_strlen($kw->keyword))
+            ->map(fn($kw) => ['keyword' => trim($kw->keyword), 'url' => $this->absoluteUrl($kw->target_url)])
+            ->values()
+            ->all();
 
         $this->info("Found " . count($targets) . " link targets.");
         if (count($targets) === 0) {
@@ -72,73 +51,64 @@ class RunAutoLinkerCommand extends Command
 
         $linksAdded = 0;
 
-        // 2. Scan Products
-        $products = Product::where('published', 1)->get();
-        foreach ($products as $product) {
-            $content = $product->description;
-            if (!$content) continue;
-
-            $updatedContent = $this->injectLinks($content, $targets, $product->id, 'product');
-            if ($updatedContent !== $content) {
-                $product->description = $updatedContent;
-                $product->save();
-                $linksAdded++;
-                $this->info("Injected links into Product ID {$product->id}");
-            }
-        }
-
-        // 3. Scan Blogs
-        if (class_exists(Blog::class)) {
-            $blogs = Blog::where('status', 1)->get();
-            foreach ($blogs as $blog) {
-                $content = $blog->description ?? $blog->content;
-                if (!$content) continue;
-
-                $updatedContent = $this->injectLinks($content, $targets, $blog->id, 'blog');
-                if ($updatedContent !== $content) {
-                    if (isset($blog->description)) {
-                        $blog->description = $updatedContent;
-                    } else {
-                        $blog->content = $updatedContent;
+        Product::where('published', 1)->whereNotNull('description')
+            ->select('id', 'slug', 'description')
+            ->chunkById(200, function ($products) use ($targets, &$linksAdded) {
+                foreach ($products as $product) {
+                    $updated = $this->injectLinks($product->description, $targets, url('product/' . $product->slug));
+                    if ($updated !== $product->description) {
+                        // saveQuietly: skip observers (sitemap rebuild, cache purge) per row.
+                        $product->description = $updated;
+                        $product->saveQuietly();
+                        $linksAdded++;
                     }
-                    $blog->save();
-                    $linksAdded++;
-                    $this->info("Injected links into Blog ID {$blog->id}");
                 }
-            }
-        }
+            });
+
+        Blog::where('status', 1)->whereNotNull('description')
+            ->select('id', 'slug', 'description')
+            ->chunkById(200, function ($blogs) use ($targets, &$linksAdded) {
+                foreach ($blogs as $blog) {
+                    $updated = $this->injectLinks($blog->description, $targets, url('blog/' . $blog->slug));
+                    if ($updated !== $blog->description) {
+                        $blog->description = $updated;
+                        $blog->saveQuietly();
+                        $linksAdded++;
+                    }
+                }
+            });
 
         $this->info("Auto-Linker completed! Modified {$linksAdded} items.");
         return 0;
     }
 
-    protected function injectLinks($content, $targets, $currentId, $currentType)
+    protected function injectLinks(string $content, array $targets, string $selfUrl): string
     {
-        // Don't inject more than 3 links per content piece to avoid spam
-        $linksInjected = 0;
         $maxLinks = 3;
+        // Idempotent: count links we already added on earlier runs toward the cap,
+        // and never link the same destination twice.
+        $linksInjected = substr_count($content, 'class="seo-auto-link"');
+        $selfUrl = rtrim($selfUrl, '/');
 
         foreach ($targets as $target) {
             if ($linksInjected >= $maxLinks) break;
-            
-            // Don't link to itself
-            if ($target['id'] == $currentId && $target['type'] === $currentType) continue;
+            if (rtrim($target['url'], '/') === $selfUrl) continue;
+            if (str_contains($content, 'href="' . e($target['url']) . '"')) continue;
 
-            $keyword = preg_quote($target['keyword'], '/');
-            
-            // Check if the exact keyword exists in the content
-            // Ensure we don't inject inside an existing <a> tag or inside HTML attributes
-            // Negative lookahead to ensure we aren't already inside an <a> tag
-            $pattern = '/\b(' . $keyword . ')\b(?![^<]*>|[^<>]*<\/a>)/i';
+            // Whole word, not inside a tag's attributes, not inside an existing <a>.
+            $pattern = '/\b(' . preg_quote($target['keyword'], '/') . ')\b(?![^<]*>|[^<>]*<\/a>)/iu';
+            if (!preg_match($pattern, $content)) continue;
 
-            if (preg_match($pattern, $content)) {
-                // Only replace the FIRST occurrence
-                $replacement = '<a href="' . $target['url'] . '" class="seo-auto-link" title="Read more about ' . htmlentities($target['keyword']) . '">$1</a>';
-                $content = preg_replace($pattern, $replacement, $content, 1);
-                $linksInjected++;
-            }
+            $replacement = '<a href="' . e($target['url']) . '" class="seo-auto-link" title="' . e($target['keyword']) . '">$1</a>';
+            $content = preg_replace($pattern, $replacement, $content, 1);
+            $linksInjected++;
         }
 
         return $content;
+    }
+
+    protected function absoluteUrl(string $url): string
+    {
+        return preg_match('#^https?://#i', $url) ? $url : url('/' . ltrim($url, '/'));
     }
 }

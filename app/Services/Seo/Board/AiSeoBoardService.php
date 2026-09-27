@@ -2352,11 +2352,12 @@ class AiSeoBoardService
         $descLen = mb_strlen(trim((string) ($data['description'] ?? '')));
         return !empty($data['title'])
             && !empty($data['description'])
-            && $descLen >= 140
+            && $descLen >= 70
             && !empty($data['focus_keyword'])
-            // Raised from 220 → 450 to match content_length_500 scoring gate.
-            // Bundles under 450 words get rejected and retried on the next provider.
-            && str_word_count(strip_tags((string) ($data['content_html'] ?? ''))) >= 450;
+            // A 450-word floor rejected good copy for short-spec products (a pipe
+            // fitting doesn't need an essay), burning a paid retry on every
+            // provider and then falling back to the shared template.
+            && str_word_count(strip_tags((string) ($data['content_html'] ?? ''))) >= 150;
     }
 
     protected function repairSeoBundle(array $data, string $name, string $type): array
@@ -2367,20 +2368,19 @@ class AiSeoBoardService
             $data['focus_keyword'] = $focus;
         }
 
-        if (empty($data['title']) || mb_stripos((string) $data['title'], $focus) === false) {
-            $data['title'] = $this->titleWithFocus($focus, $name, $type);
-        }
+        // Keep AI-written copy whenever it's usable and only tidy its length.
+        // Previously any title missing the exact focus string, or any
+        // description outside 140–160 chars, was discarded for the shared
+        // template — which is why ~97% of pages ended up with identical text.
+        $titleVal = trim(strip_tags((string) ($data['title'] ?? '')));
+        $data['title'] = mb_strlen($titleVal) >= 15
+            ? $this->fitTitle($titleVal)
+            : $this->titleWithFocus($focus, $name, $type);
 
-        $descVal = trim((string) ($data['description'] ?? ''));
-        $descLen = mb_strlen($descVal);
-        if ($descVal === '' || mb_stripos($descVal, $focus) === false
-            || $descLen < 140 || $descLen > 160
-        ) {
-            // Regenerate when missing, lacks focus keyword, or outside 140–160 scoring window.
-            $data['description'] = $this->descriptionWithFocus($focus, $name, $type);
-        } else {
-            $data['description'] = $this->fitDescription($descVal);
-        }
+        $descVal = trim(strip_tags((string) ($data['description'] ?? '')));
+        $data['description'] = mb_strlen($descVal) >= 70
+            ? $this->fitDescription($descVal)
+            : $this->descriptionWithFocus($focus, $name, $type);
 
         if (empty($data['secondary_keywords']) || !is_array($data['secondary_keywords'])) {
             $data['secondary_keywords'] = $this->canadaKeywordSet($name, $type);
@@ -2853,49 +2853,46 @@ class AiSeoBoardService
 
     protected function titleWithFocus(string $focus, string $name, string $type): string
     {
-        $focusTitle = Str::title(trim($focus));
-
-        // Every tail carries a power word + positive-sentiment word ("Trusted",
-        // "Top", "Best") and a number ("2026") — three separate analyzer checks.
-        // The focus keyword leads so it lands inside the first four title words.
+        // Lead with the real product/category name (unique per page), not the
+        // focus keyword; no hard-coded year or "Trusted/Top/Best" filler.
+        $lead = trim($name) !== '' ? trim($name) : Str::title(trim($focus));
         $tails = match ($type) {
-            'product'  => ['Trusted Canada Supplier 2026', 'Trusted Supplier 2026', 'Top Canada 2026', 'Best 2026'],
-            'category' => ['Best Wholesale Canada 2026', 'Top Wholesale 2026', 'Top Canada 2026', 'Best 2026'],
-            'page'     => ['Trusted Canada Guide 2026', 'Top Canada Guide 2026', 'Top Guide 2026', 'Best 2026'],
-            default    => ['Trusted Canada Guide 2026', 'Top Guide 2026', 'Best 2026'],
+            'product'  => ['Buy in Canada | BHS Supplies', 'BHS Supplies'],
+            'category' => ['Wholesale | BHS Supplies', 'BHS Supplies'],
+            default    => ['BHS Supplies'],
         };
 
-        $title = '';
         foreach ($tails as $tail) {
-            $candidate = trim($focusTitle . ' | ' . $tail);
+            $candidate = $lead . ' | ' . $tail;
             if (mb_strlen($candidate) <= 60) {
-                $title = $candidate;
-                break;
+                return $candidate;
             }
         }
-        if ($title === '') {
-            $title = trim(Str::limit($focusTitle, 48, '') . ' | Best 2026');
-        }
-        if (mb_strlen($title) < 30) {
-            $title .= ' | BHS Supplies';
-        }
 
-        return Str::limit($title, 60, '');
+        return $this->fitTitle($lead);
     }
 
     protected function descriptionWithFocus(string $focus, string $name, string $type): string
     {
         $focusTitle = Str::title(trim($focus));
-        // Include a secondary keyword phrase naturally to pass TruSEO's secondary_kw_in_desc check.
-        $secondary = match ($type) {
-            'product'  => Str::lower($name) . ' supplier',
-            'category' => Str::lower($name) . ' wholesale',
-            'page'     => Str::lower($name) . ' Canada',
-            'blog'     => Str::lower($name) . ' guide',
-            default    => Str::lower($name),
+        // Fallback only (AI copy is preferred). Several phrasings chosen per item
+        // so the site doesn't carry one identical sentence on every page.
+        $n = trim($name) !== '' ? trim($name) : $focusTitle;
+        $variants = match ($type) {
+            'product' => [
+                "{$n} in stock at BHS Supplies, Mississauga. Trade pricing for contractors, fast shipping across Canada, and local pickup in the GTA.",
+                "Order {$n} from BHS Supplies. Wholesale pricing for HVAC and plumbing pros, Canada-wide delivery, and same-day pickup in Mississauga.",
+                "Get {$n} with contractor pricing from BHS Supplies — ships across Canada, or pick up at our Mississauga location.",
+            ],
+            'category' => [
+                "Browse {$n} at BHS Supplies: wholesale pricing, in-stock brands, and fast shipping across Canada from our Mississauga warehouse.",
+                "Shop our {$n} range for contractors and trade buyers — competitive wholesale prices, Canada-wide delivery, GTA pickup.",
+            ],
+            default => [
+                "{$n} — information from BHS Supplies, a Mississauga wholesale distributor of HVAC, plumbing and electrical supplies.",
+            ],
         };
-        $secondaryTitle = Str::title($secondary);
-        $text = "Shop {$focusTitle} — trusted {$secondaryTitle} for Mississauga, Brampton, Toronto and GTA buyers. Trade pricing, stock, fast pickup. Order from BHS Supplies.";
+        $text = $variants[abs(crc32($n)) % count($variants)];
 
         return $this->fitDescription($text);
     }
@@ -2930,27 +2927,38 @@ class AiSeoBoardService
      */
     protected function fitDescription(string $text, int $min = 150, int $max = 160): string
     {
+        // No padding: a short unique description beats one bulked out with
+        // the same stock sentences on every page.
         $text = trim(preg_replace('/\s+/', ' ', $text));
-
-        if (mb_strlen($text) < $min) {
-            foreach ([' Fast Canada-wide shipping and trade accounts available.', ' Trusted Canadian supplier with bulk and trade pricing.', ' Order online or request a quote today.'] as $suffix) {
-                if (mb_strlen($text) >= $min) {
-                    break;
-                }
-                $text = rtrim($text, '.') . '.' . $suffix;
-            }
+        if (mb_strlen($text) <= $max) {
+            return $text;
         }
 
-        if (mb_strlen($text) > $max) {
-            $text = mb_substr($text, 0, $max);
-            $lastSpace = mb_strrpos($text, ' ');
-            if ($lastSpace !== false && $lastSpace > $min - 15) {
-                $text = mb_substr($text, 0, $lastSpace);
-            }
-            $text = rtrim($text, " ,.;:") . '.';
+        $cut = mb_substr($text, 0, $max);
+        // Prefer ending on a complete sentence if one ends reasonably late.
+        if (preg_match('/^(.{90,}[.!?])\s/u', $cut . ' ', $m)) {
+            return $m[1];
         }
+        $lastSpace = mb_strrpos($cut, ' ');
+        return rtrim($lastSpace ? mb_substr($cut, 0, $lastSpace) : $cut, " ,;:—-") . '…';
+    }
 
-        return $text;
+    protected function fitTitle(string $title, int $max = 60): string
+    {
+        $title = trim(preg_replace('/\s+/', ' ', $title));
+        if (mb_strlen($title) <= $max) {
+            return $title;
+        }
+        // Drop trailing " | segment"s before cutting words, so we never end on
+        // a dangling fragment like "Quality AC,".
+        while (mb_strlen($title) > $max && preg_match('/^(.+)\s[|\-–—]\s[^|\-–—]+$/u', $title, $m)) {
+            $title = trim($m[1]);
+        }
+        if (mb_strlen($title) > $max) {
+            $cut = mb_substr($title, 0, $max);
+            $title = rtrim(mb_substr($cut, 0, mb_strrpos($cut, ' ') ?: $max), " ,;:|—-");
+        }
+        return $title;
     }
 
     protected function normalizeFocusKeyword($value, string $name, string $type): string

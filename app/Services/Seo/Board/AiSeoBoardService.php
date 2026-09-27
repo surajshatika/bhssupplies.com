@@ -44,6 +44,9 @@ class AiSeoBoardService
     /** @var array<string,array{class:string,label:string,url:string,name:string,description:?string,image:?string}> */
     protected array $typeMap;
 
+    /** "Class#id" => ?SeoMeta, only populated inside withPreloadedMeta(). */
+    protected array $preloadedMeta = [];
+
     protected array $tableExistsCache = [];
 
     protected array $tableColumnCache = [];
@@ -121,8 +124,7 @@ class AiSeoBoardService
 
         foreach (array_keys($this->typeMap) as $type) {
             $query = $this->baseQuery($type)->latest('updated_at')->limit(max($doneLimit, $pendingLimit) * 2);
-            foreach ($query->get() as $entity) {
-                $row = $this->buildRow($entity, $type);
+            foreach ($this->buildRows($query->get(), $type) as $row) {
                 if ($this->isSeoDoneRow($row)) {
                     $done->push($row);
                 } else {
@@ -743,8 +745,7 @@ class AiSeoBoardService
             }
 
             $entities = $this->baseQuery($type)->latest('updated_at')->limit($limit * 6)->get();
-            foreach ($entities as $entity) {
-                $row = $this->buildRow($entity, $type);
+            foreach ($this->buildRows($entities, $type) as $row) {
                 if (!$this->isSeoDoneRow($row)) {
                     continue;
                 }
@@ -903,7 +904,7 @@ class AiSeoBoardService
 
         $paginator = $query->paginate(perPage: $perPage, page: $page);
 
-        $rows = collect($paginator->items())->map(fn($entity) => $this->buildRow($entity, $type));
+        $rows = $this->buildRows($paginator->items(), $type);
 
         return new LengthAwarePaginator(
             $rows,
@@ -915,10 +916,50 @@ class AiSeoBoardService
     }
 
     /** Build a single Board row from any entity. Public so the fix flow can re-emit it. */
-    public function buildRow(Model $entity, string $type): array
+    /**
+     * Build rows for many entities of one type with a single seo_meta query
+     * instead of one query per row (the dashboard previews did hundreds).
+     */
+    public function buildRows(iterable $entities, string $type, bool $preferStoredScore = true): Collection
+    {
+        $entities = collect($entities);
+        $class = $this->typeMap[$type]['class'];
+        $ids = $entities->map(fn($e) => $e->getKey())->filter()->all();
+
+        $found = $ids ? SeoMeta::query()
+            ->where('model_type', $class)
+            ->whereIn('model_id', $ids)
+            ->where('lang', config('app.locale', 'en'))
+            ->get()->keyBy('model_id') : collect();
+
+        foreach ($ids as $id) {
+            $this->preloadedMeta[$class . '#' . $id] = $found->get($id);
+        }
+        // HasSeoMeta's meta_title/meta_description accessors would otherwise
+        // lazy-load the same seoMeta row again, one query per entity.
+        foreach ($entities as $e) {
+            if (method_exists($e, 'seoMeta') && !$e->relationLoaded('seoMeta')) {
+                $e->setRelation('seoMeta', $found->get($e->getKey()));
+            }
+        }
+
+        try {
+            return $entities->map(fn($e) => $this->buildRow($e, $type, $preferStoredScore))->values();
+        } finally {
+            foreach ($ids as $id) {
+                unset($this->preloadedMeta[$class . '#' . $id]);
+            }
+        }
+    }
+
+    public function buildRow(Model $entity, string $type, bool $preferStoredScore = false): array
     {
         $meta  = $this->loadOrSynthesizeMeta($entity, $type);
-        $score = $this->scoreEntity($entity, $type, $meta);
+        // Dashboard previews reuse the persisted analysis when it's newer than
+        // the entity; re-running every check per row made the SEO Suite
+        // dashboard take ~30s to load.
+        $score = ($preferStoredScore ? $this->storedScore($entity, $meta) : null)
+            ?? $this->scoreEntity($entity, $type, $meta);
 
         return [
             'type'          => $type,
@@ -943,6 +984,32 @@ class AiSeoBoardService
             'has_og'        => !empty($meta['og_image']),
             'has_schema'    => !empty($meta['schema_json']),
             'has_focus_kw'  => !empty($meta['focus_keyword']),
+        ];
+    }
+
+    protected function storedScore(Model $entity, array $meta): ?array
+    {
+        if (!isset($meta['seo_score'], $meta['last_analyzed_at']) || empty($meta['analysis_checks'])) {
+            return null;
+        }
+        $analyzedAt = \Carbon\Carbon::parse($meta['last_analyzed_at']);
+        foreach ([$entity->updated_at ?? null, $meta['updated_at'] ?? null] as $changedAt) {
+            if ($changedAt && $analyzedAt->lt(\Carbon\Carbon::parse($changedAt)->subSeconds(5))) {
+                return null;
+            }
+        }
+
+        $checks = is_array($meta['analysis_checks']) ? $meta['analysis_checks'] : json_decode((string) $meta['analysis_checks'], true);
+        if (!is_array($checks)) {
+            return null;
+        }
+
+        $score = (int) round((float) $meta['seo_score']);
+        return [
+            'score'  => $score,
+            'grade'  => $meta['seo_grade'] ?: $this->grade($score),
+            'checks' => $checks,
+            'issues' => array_values(array_map(fn($c) => $c['label'] ?? '', array_filter($checks, fn($c) => empty($c['pass'])))),
         ];
     }
 
@@ -1535,11 +1602,14 @@ class AiSeoBoardService
             'schema_json'      => null,
         ];
 
-        $meta = SeoMeta::query()
-            ->where('model_type', $class)
-            ->where('model_id', $entity->getKey())
-            ->where('lang', config('app.locale', 'en'))
-            ->first();
+        $cacheKey = $class . '#' . $entity->getKey();
+        $meta = array_key_exists($cacheKey, $this->preloadedMeta)
+            ? $this->preloadedMeta[$cacheKey]
+            : SeoMeta::query()
+                ->where('model_type', $class)
+                ->where('model_id', $entity->getKey())
+                ->where('lang', config('app.locale', 'en'))
+                ->first();
 
         if (!$meta) {
             return $inline;

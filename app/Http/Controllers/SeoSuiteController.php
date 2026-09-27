@@ -1921,7 +1921,7 @@ class SeoSuiteController extends Controller
         // and then send it to an LLM (OpenAI/Claude) to extract entities.
         
         $provider = get_setting('seo_suite_default_provider', 'openai');
-        $llmService = app(\App\Services\Seo\AiSeoProviderFactory::class)->make($provider);
+        $llmService = \App\Services\Seo\Providers\SeoProviderManager::make($provider);
 
         try {
             $html = \Illuminate\Support\Facades\Http::timeout(10)->get($url)->body();
@@ -1937,7 +1937,7 @@ class SeoSuiteController extends Controller
             . "Provide the output in a JSON array format where each item has 'entity' (string) and 'relevance' (High, Medium, Low).";
 
         try {
-            $response = $llmService->chat($prompt);
+            $response = (string) $llmService->generate($prompt);
             // Attempt to parse JSON from the response
             preg_match('/\[.*\]/s', $response, $matches);
             $entities = [];
@@ -2058,74 +2058,52 @@ class SeoSuiteController extends Controller
         $orphanedPages = collect();
         $powerfulPages = collect();
 
-        if (\Illuminate\Support\Facades\Schema::hasTable('seo_meta')) {
-            $metas = \App\Models\SeoMeta::whereNotNull('entity_type')->get();
-            $baseUrl = rtrim(url('/'), '/');
-            $host = parse_url($baseUrl, PHP_URL_HOST);
+        // Real graph of in-content links between products, blog posts and pages
+        // (nav/footer links aren't counted — they're identical on every page).
+        $graph = \Illuminate\Support\Facades\Cache::remember('seo:link-graph', 3600, function () {
+            $base = rtrim(url('/'), '/');
+            $host = parse_url($base, PHP_URL_HOST);
+            $nodes = [];   // normalized path => node
+            $content = []; // normalized path => html
 
-            $pageInlinks = [];
-            $pageOutlinks = [];
+            $add = function (string $type, string $title, string $path, ?string $html) use (&$nodes, &$content) {
+                $path = '/' . trim($path, '/');
+                $nodes[$path] = ['url' => url($path), 'type' => $type, 'title' => $title, 'inlinks' => 0, 'outlinks' => 0];
+                $content[$path] = (string) $html;
+            };
 
-            // 1. Collect all valid nodes and their URLs
-            $urlToEntity = [];
-            foreach ($metas as $meta) {
-                try {
-                    $url = app(\App\Services\Seo\Board\AiSeoBoardService::class)->getEntityUrl($meta->entity_type, $meta->entity_id);
-                    if ($url) {
-                        $normalizedUrl = rtrim($url, '/');
-                        $urlToEntity[$normalizedUrl] = $meta;
-                        $pageInlinks[$normalizedUrl] = 0;
-                        $pageOutlinks[$normalizedUrl] = 0;
-                    }
-                } catch (\Exception $e) {
-                    continue;
-                }
+            \App\Models\Product::where('published', 1)->select('id', 'name', 'slug', 'description')
+                ->chunkById(500, function ($rows) use ($add) {
+                    foreach ($rows as $r) $add('product', $r->name, 'product/' . $r->slug, $r->description);
+                });
+            \App\Models\Blog::where('status', 1)->select('id', 'title', 'slug', 'description')
+                ->chunkById(500, function ($rows) use ($add) {
+                    foreach ($rows as $r) $add('blog', $r->title, 'blog/' . $r->slug, $r->description);
+                });
+            foreach (\App\Models\Page::select('title', 'slug', 'content')->get() as $r) {
+                if ($r->slug) $add('page', $r->title, $r->slug, $r->content);
             }
 
-            // 2. We normally parse DOM content, but for this simulation, we'll randomize a bit based on entity type 
-            // to show how the graph works, since extracting all HTML is heavy.
-            // In a real advanced implementation, we'd use DOMDocument on the rendered blade views or content fields.
-            
-            // Simulation of graph builder for UI
-            $urls = array_keys($urlToEntity);
-            foreach ($urls as $url) {
-                // Generate 1-5 random outlinks to other internal pages
-                $outCount = rand(0, 5);
-                for ($i = 0; $i < $outCount; $i++) {
-                    $target = $urls[array_rand($urls)];
-                    if ($target !== $url) {
-                        $pageOutlinks[$url]++;
-                        $pageInlinks[$target]++;
-                    }
+            foreach ($content as $from => $html) {
+                if ($html === '' || !preg_match_all('/<a\s[^>]*href=["\']([^"\'#?]+)/i', $html, $m)) continue;
+                $targets = [];
+                foreach ($m[1] as $href) {
+                    $h = parse_url($href, PHP_URL_HOST);
+                    if ($h && strcasecmp($h, $host) !== 0 && strcasecmp(preg_replace('/^www\./', '', $h), preg_replace('/^www\./', '', $host)) !== 0) continue;
+                    $to = '/' . trim((string) parse_url($href, PHP_URL_PATH), '/');
+                    if ($to !== $from && isset($nodes[$to])) $targets[$to] = true;
                 }
+                $nodes[$from]['outlinks'] = count($targets);
+                foreach (array_keys($targets) as $to) $nodes[$to]['inlinks']++;
             }
 
-            // 3. Process results
-            foreach ($urls as $url) {
-                $meta = $urlToEntity[$url];
-                $in = $pageInlinks[$url];
-                $out = $pageOutlinks[$url];
+            $max = max([1, ...array_column($nodes, 'inlinks')]);
+            foreach ($nodes as &$n) $n['pr_score'] = round($n['inlinks'] / $max * 100, 1);
+            return array_values($nodes);
+        });
 
-                $node = [
-                    'url' => $url,
-                    'type' => $meta->entity_type,
-                    'title' => $meta->title ?? 'Untitled',
-                    'inlinks' => $in,
-                    'outlinks' => $out,
-                    'pr_score' => round(min(100, $in * 3.5), 1) // Fake PR score for demo
-                ];
-
-                if ($in === 0) {
-                    $orphanedPages->push($node);
-                }
-                
-                if ($in >= 3) {
-                    $powerfulPages->push($node);
-                }
-            }
-            
-            $powerfulPages = $powerfulPages->sortByDesc('inlinks')->take(20)->values();
-        }
+        $orphanedPages = collect($graph)->where('inlinks', 0)->sortBy('type')->values();
+        $powerfulPages = collect($graph)->where('inlinks', '>', 0)->sortByDesc('inlinks')->take(20)->values();
 
         return view('backend.seo_suite.link_graph', compact('orphanedPages', 'powerfulPages'));
     }

@@ -348,6 +348,9 @@ class PerformanceOutputMiddleware
             // Skip if already deferred or if it's meant to be print media
             if (preg_match('/\bmedia\s*=\s*["\']print["\']/i', $attrs)) return $m[0];
             if (preg_match('/\bonload\s*=/i', $attrs)) return $m[0];
+            // Never defer the layout stylesheets: without inlined critical CSS the
+            // page paints unstyled (raw links, stacked logos) until they load.
+            if (preg_match('/(vendors|aiz-core|bootstrap|thecore)[^"\']*\.css/i', $attrs)) return $m[0];
 
             // Add the media="print" onload trick
             return '<link' . $attrs . ' media="print" onload="this.media=\'all\'"><noscript><link' . $attrs . '></noscript>';

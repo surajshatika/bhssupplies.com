@@ -67,7 +67,16 @@ class BacklinkController extends Controller
             else $profile['Keyword / other']++;
         }
 
-        return view('backend.seo.backlinks.index', compact('backlinks', 'statusCounts', 'stats', 'profile'));
+        $nap = app(\App\Services\Seo\NapConsistencyService::class)->check();
+
+        return view('backend.seo.backlinks.index', compact('backlinks', 'statusCounts', 'stats', 'profile', 'nap'));
+    }
+
+    public function napRefresh()
+    {
+        $nap = app(\App\Services\Seo\NapConsistencyService::class)->check(true);
+        $nap['ok'] ? flash(translate('Google listing re-checked'))->success() : flash($nap['error'])->warning();
+        return back();
     }
 
     public function store(Request $request)

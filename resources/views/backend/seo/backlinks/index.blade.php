@@ -97,6 +97,40 @@
 
     <div class="col-lg-4">
         <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">{{ translate('NAP consistency (Google listing)') }}</h6>
+                <form method="POST" action="{{ route('admin.seo_backlinks.nap_refresh') }}">@csrf
+                    <button class="btn btn-xs btn-soft-secondary" title="{{ translate('Re-check') }}"><i class="las la-sync"></i></button>
+                </form>
+            </div>
+            <div class="card-body">
+                @if(!$nap['ok'])
+                    <p class="small text-muted mb-0">{{ translate('Could not read the Google listing') }}: {{ $nap['error'] }}</p>
+                @else
+                    @if($nap['mismatches'] === 0)
+                        <div class="alert alert-success small py-2">{{ translate('Website and Google listing match.') }}</div>
+                    @else
+                        <div class="alert alert-warning small py-2">{{ $nap['mismatches'] }} {{ translate('mismatch(es). Make the website and Google Business Profile identical — inconsistent details weaken local rankings.') }}</div>
+                    @endif
+                    @foreach($nap['fields'] as $key => $f)
+                        <div class="mb-2 small">
+                            <div class="fw-700">
+                                <i class="las {{ $f['match'] ? 'la-check-circle text-success' : 'la-exclamation-circle text-danger' }}"></i>
+                                {{ translate(ucfirst($key)) }}
+                            </div>
+                            <div class="text-muted">{{ translate('Website') }}: {{ $f['site'] ?: '—' }}</div>
+                            <div class="text-muted">{{ translate('Google') }}: {{ $f['google'] ?: '—' }}</div>
+                        </div>
+                    @endforeach
+                    <div class="small text-muted">
+                        @if($nap['rating']){{ $nap['rating'] }}★ · {{ $nap['reviews'] }} {{ translate('reviews') }} · @endif
+                        @if($nap['maps_url'])<a href="{{ $nap['maps_url'] }}" target="_blank" rel="noopener">{{ translate('Open listing') }} ↗</a>@endif
+                    </div>
+                @endif
+            </div>
+        </div>
+
+        <div class="card">
             <div class="card-header"><h6 class="mb-0">{{ translate('Anchor text profile (live links)') }}</h6></div>
             <div class="card-body">
                 @php $total = max(1, array_sum($profile)); @endphp

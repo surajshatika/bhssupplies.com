@@ -455,6 +455,7 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         Route::post('/seo/backlinks/seed', 'seed')->name('admin.seo_backlinks.seed');
         Route::post('/seo/backlinks/import', 'import')->name('admin.seo_backlinks.import');
         Route::post('/seo/backlinks/verify', 'verify')->name('admin.seo_backlinks.verify');
+        Route::post('/seo/backlinks/nap-refresh', 'napRefresh')->name('admin.seo_backlinks.nap_refresh');
         Route::post('/seo/backlinks/{backlink}', 'update')->name('admin.seo_backlinks.update');
         Route::post('/seo/backlinks/{backlink}/delete', 'destroy')->name('admin.seo_backlinks.destroy');
     });

@@ -238,7 +238,7 @@
             <div class="col-lg-4 col-md-4">
                 <h6 class="bhs-footer-heading">{{ translate('Contact Us') }}</h6>
 
-                @if(get_setting('contact_address'))
+                @if(get_setting('contact_address',null,App::getLocale()))
                 <div class="bhs-contact-item">
                     <div class="bhs-contact-icon"><i class="las la-map-marker-alt"></i></div>
                     <div>

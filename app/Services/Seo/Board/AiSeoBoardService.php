@@ -199,16 +199,28 @@ class AiSeoBoardService
 
             $class = $this->typeMap[$type]['class'];
             $total = $this->baseQuery($type)->count();
-            $done = Schema::hasTable('seo_meta')
-                ? SeoMeta::query()
+            // Only count live entities (seo_meta rows for deleted/unpublished
+            // items made "done" exceed "total"), and apply the same legacy-copy
+            // rule the autopilot uses.
+            $done = 0;
+            if (Schema::hasTable('seo_meta')) {
+                $q = SeoMeta::query()
                     ->where('model_type', $class)
+                    ->where('lang', config('app.locale', 'en'))
+                    ->whereIn('model_id', $this->baseQuery($type)->select($this->baseQuery($type)->getModel()->getQualifiedKeyName()))
                     ->whereNotNull('meta_title')
                     ->whereNotNull('meta_description')
                     ->whereNotNull('focus_keyword')
                     ->whereNotNull('schema_json')
-                    ->where('seo_score', '>=', self::SEO_DONE_SCORE)
-                    ->count()
-                : 0;
+                    ->where('seo_score', '>=', self::SEO_DONE_SCORE);
+                foreach (self::LEGACY_TITLE_TAILS as $tail) {
+                    $q->where('meta_title', 'not like', '%' . $tail);
+                }
+                foreach (self::LEGACY_DESC_MARKERS as $marker) {
+                    $q->where('meta_description', 'not like', '%' . $marker . '%');
+                }
+                $done = $q->count();
+            }
 
             $missingMetaQuery = $this->baseQuery($type);
             if (Schema::hasTable('seo_meta')) {

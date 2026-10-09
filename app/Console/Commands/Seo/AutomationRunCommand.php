@@ -157,6 +157,20 @@ class AutomationRunCommand extends Command
             }
         }
 
+        // Refresh related-links blocks so new products/categories get linked.
+        if ($this->isDue('internal_links', 24, $forceAll, $dryRun)) {
+            if ($dryRun) {
+                $this->line('> php artisan seo:build-internal-links (due, skipped in dry run)');
+            } else {
+                $exitCode = $this->callSeoCommand('seo:build-internal-links');
+                if ($exitCode === self::SUCCESS) {
+                    $this->markRan('internal_links', false);
+                } else {
+                    $hasFailures = true;
+                }
+            }
+        }
+
         if ($hasFailures) {
             $this->warn('SEO automation run finished with failures.');
             return self::FAILURE;

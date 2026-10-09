@@ -171,6 +171,19 @@ class AutomationRunCommand extends Command
             }
         }
 
+        if ($this->isDue('verify_backlinks', 168, $forceAll, $dryRun)) {
+            if ($dryRun) {
+                $this->line('> php artisan seo:verify-backlinks (due, skipped in dry run)');
+            } else {
+                $exitCode = $this->callSeoCommand('seo:verify-backlinks', ['--limit' => 200]);
+                if ($exitCode === self::SUCCESS) {
+                    $this->markRan('verify_backlinks', false);
+                } else {
+                    $hasFailures = true;
+                }
+            }
+        }
+
         if ($hasFailures) {
             $this->warn('SEO automation run finished with failures.');
             return self::FAILURE;

@@ -34,7 +34,15 @@ class AutoGenerateOffPageSeoCommand extends Command
         $limit = (int) ($this->option('limit') ?: get_setting('seo_auto_offpage_batch_size', 3));
         $limit = max(1, min(10, $limit));
         $provider = $this->option('provider') ?: get_setting('seo_suite_default_provider', config('seo.default_provider', 'openai'));
-        $targets = $board->offPageCampaignTargetPreview($limit, ['page', 'category', 'product']);
+        // Skip URLs that already have a campaign in the last 90 days — the preview
+        // always returned the same top URLs, so each got ~30 near-identical plans.
+        $recent = SeoRun::query()->where('module', 'off_page')->where('feature', 'ai_backlink_campaign')
+            ->whereIn('status', ['completed', 'queued', 'running'])
+            ->where('created_at', '>=', now()->subDays(90))
+            ->pluck('url')->filter()->map(fn($u) => $this->pathOf($u))->flip();
+        $targets = $board->offPageCampaignTargetPreview(20, ['page', 'category', 'product'])
+            ->reject(fn($t) => $recent->has($this->pathOf($t['url'])))
+            ->take($limit)->values();
 
         if ($targets->isEmpty()) {
             $this->info('No SEO-ready URLs found for off-page campaign generation.');
@@ -90,5 +98,16 @@ class AutoGenerateOffPageSeoCommand extends Command
 
         $this->info('Queued ' . $queued . ' AI off-page backlink campaign run(s).');
         return self::SUCCESS;
+    }
+
+    /** Compare by path so localhost/staging/www variants of a URL match. */
+    protected function pathOf(?string $url): string
+    {
+        $path = '/' . trim((string) parse_url((string) $url, PHP_URL_PATH), '/');
+        $base = '/' . trim((string) parse_url(url('/'), PHP_URL_PATH), '/');
+        if ($base !== '/' && str_starts_with($path, $base)) {
+            $path = '/' . ltrim(substr($path, strlen($base)), '/');
+        }
+        return $path;
     }
 }

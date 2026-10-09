@@ -449,6 +449,15 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         Route::get('/seo/off-page', 'index')->name('admin.seo_off_page.index');
         Route::post('/seo/off-page/run', 'run')->name('admin.seo_off_page.run');
     });
+    Route::controller(\App\Http\Controllers\Seo\BacklinkController::class)->group(function () {
+        Route::get('/seo/backlinks', 'index')->name('admin.seo_backlinks.index');
+        Route::post('/seo/backlinks', 'store')->name('admin.seo_backlinks.store');
+        Route::post('/seo/backlinks/seed', 'seed')->name('admin.seo_backlinks.seed');
+        Route::post('/seo/backlinks/import', 'import')->name('admin.seo_backlinks.import');
+        Route::post('/seo/backlinks/verify', 'verify')->name('admin.seo_backlinks.verify');
+        Route::post('/seo/backlinks/{backlink}', 'update')->name('admin.seo_backlinks.update');
+        Route::post('/seo/backlinks/{backlink}/delete', 'destroy')->name('admin.seo_backlinks.destroy');
+    });
 
     Route::controller(OptimizationController::class)->group(function () {
         Route::get('/seo/optimization', 'index')->name('admin.seo_optimization.index');

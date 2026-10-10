@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Throwable;
@@ -46,6 +47,59 @@ class AiSeoBoardService
 
     /** "Class#id" => ?SeoMeta, only populated inside withPreloadedMeta(). */
     protected array $preloadedMeta = [];
+
+    protected ?string $pendingProductAiHtml = null;
+    protected ?string $pendingProductFaqHtml = null;
+
+    protected const AI_START = '<!--seo-ai-content-->';
+    protected const AI_END = '<!--/seo-ai-content-->';
+
+    /** The description the product page actually renders (default-language translation). */
+    protected function visibleProductDescription(Model $product): ?string
+    {
+        $lang = env('DEFAULT_LANGUAGE', config('app.locale', 'en'));
+        $t = DB::table('product_translations')->where('product_id', $product->getKey())->where('lang', $lang)->value('description');
+        return $t !== null ? (string) $t : ($product->getRawOriginal('description') ?? null);
+    }
+
+    /**
+     * Write the pending AI copy + FAQ into the product's visible description:
+     * original merchant text first, then a marked AI block (replaced on re-runs),
+     * keeping the related-links block last. Nothing is written without AI copy.
+     */
+    protected function writeProductVisibleContent(Model $product): bool
+    {
+        $ai = $this->pendingProductAiHtml;
+        $faq = $this->pendingProductFaqHtml;
+        $this->pendingProductAiHtml = $this->pendingProductFaqHtml = null;
+        if (!$ai) {
+            return false;
+        }
+
+        $lang = env('DEFAULT_LANGUAGE', config('app.locale', 'en'));
+        $row = DB::table('product_translations')->where('product_id', $product->getKey())->where('lang', $lang)->first();
+        $current = (string) ($row ? $row->description : $product->getRawOriginal('description'));
+
+        $related = preg_match('/<!--seo-related-links-->.*?<!--\/seo-related-links-->/s', $current, $m) ? $m[0] : '';
+        $original = preg_replace([
+            '/\s*' . preg_quote(self::AI_START, '/') . '.*?' . preg_quote(self::AI_END, '/') . '/s',
+            '/\s*<!--seo-related-links-->.*?<!--\/seo-related-links-->/s',
+        ], '', $current);
+
+        $block = self::AI_START . '<div class="seo-ai-content">' . $ai
+            . ($faq && stripos($ai, 'frequently asked') === false ? $faq : '') . '</div>' . self::AI_END;
+        $updated = trim(rtrim($original) . "\n" . $block . ($related ? "\n" . $related : ''));
+        if ($updated === trim($current)) {
+            return false;
+        }
+
+        if ($row) {
+            DB::table('product_translations')->where('id', $row->id)->update(['description' => $updated, 'updated_at' => now()]);
+        } else {
+            $product::withoutEvents(fn() => $product->forceFill(['description' => $updated])->save());
+        }
+        return true;
+    }
 
     protected array $tableExistsCache = [];
 
@@ -1093,7 +1147,9 @@ class AiSeoBoardService
         }
 
         $currentRow = $this->buildRow($entity, $type);
-        if ($this->isSeoDoneRow($currentRow)) {
+        $productNeedsVisibleCopy = $type === 'product'
+            && !str_contains((string) $this->visibleProductDescription($entity), self::AI_START);
+        if ($this->isSeoDoneRow($currentRow) && !$productNeedsVisibleCopy) {
             // Allow re-processing when keywords were updated after this entity
             // was last analyzed — so new keywords get woven into its content.
             if (!$this->needsKeywordRefresh($entity)) {
@@ -1244,6 +1300,9 @@ class AiSeoBoardService
         $faqVisible = $this->injectFaqContent($entity, $type, $aiData['faqs'] ?? null);
         if ($faqVisible && empty($applied['faqs'])) {
             $applied['faqs'] = count($this->normalizeFaqs($aiData['faqs'] ?? null) ?? []) . ' FAQ(s) added';
+        }
+        if ($type === 'product' && $this->writeProductVisibleContent($entity)) {
+            $applied['description'] = 'AI description written to product page';
         }
 
         // Regenerate schema when: (a) none exists, or (b) existing schema doesn't
@@ -1829,7 +1888,9 @@ class AiSeoBoardService
     protected function rawContent(Model $entity, string $type): string
     {
         $candidates = match ($type) {
-            'product'  => [$entity->description ?? null, $entity->short_description ?? null],
+            // Score what the product page renders (the translation), not the
+            // hidden base column the autopilot used to fill with template text.
+            'product'  => [$this->visibleProductDescription($entity), $entity->short_description ?? null],
             'category' => [$entity->top_description ?? null, $entity->bottom_description ?? null],
             'page'     => [$entity->content ?? null],
             'blog'     => [$entity->description ?? null, $entity->short_description ?? null],
@@ -2052,8 +2113,17 @@ class AiSeoBoardService
             return false;
         }
 
+        $html = '<h2>Frequently Asked Questions</h2>';
+        foreach ($clean as $faq) {
+            $html .= '<h3>' . e($faq['question']) . '</h3><p>' . e($faq['answer']) . '</p>';
+        }
+
+        if ($type === 'product') {
+            $this->pendingProductFaqHtml = $html; // written with the AI block
+            return true;
+        }
+
         $field = match ($type) {
-            'product'  => 'description',
             'category' => 'bottom_description',
             'page'     => 'content',
             'blog'     => 'description',
@@ -2066,11 +2136,6 @@ class AiSeoBoardService
         $existing = (string) ($entity->{$field} ?? '');
         if (stripos($existing, 'frequently asked') !== false) {
             return true; // already visible — don't duplicate
-        }
-
-        $html = '<h2>Frequently Asked Questions</h2>';
-        foreach ($clean as $faq) {
-            $html .= '<h3>' . e($faq['question']) . '</h3><p>' . e($faq['answer']) . '</p>';
         }
 
         $entity->forceFill([$field => trim($existing . "\n" . $html)])->save();
@@ -2581,6 +2646,19 @@ class AiSeoBoardService
 
     protected function contentPatch(Model $entity, string $type, ?array $aiData, array $meta): array
     {
+        if ($type === 'product') {
+            // Products: only real AI copy, written to the visible description by
+            // writeProductVisibleContent(). Never the city-list template, which
+            // was identical on every product page.
+            $ai = $this->cleanGeneratedHtml(trim((string) ($aiData['content_html'] ?? '')));
+            $this->pendingProductAiHtml = $ai !== '' && !$this->isLegacyTemplateCopy(null, strip_tags($ai)) ? $ai : null;
+            $patch = [];
+            if (Schema::hasColumn($entity->getTable(), 'short_description') && $this->isBlank($entity->short_description ?? null)) {
+                $patch['short_description'] = $this->shortSeoText($this->displayName($entity, $type), $type, $meta);
+            }
+            return $patch;
+        }
+
         $html = trim((string) ($aiData['content_html'] ?? ''));
         if ($html === '') {
             $html = $this->templateContentHtml($this->displayName($entity, $type), $type, $meta, $entity);
@@ -3133,6 +3211,10 @@ class AiSeoBoardService
     {
         $focus = trim((string) ($meta['focus_keyword'] ?? ''));
 
+        // Products need one AI pass to get a unique visible description.
+        if ($type === 'product' && !str_contains((string) $this->visibleProductDescription($entity), self::AI_START)) {
+            return true;
+        }
         if ($this->needsFocusKeywordRefresh($meta['focus_keyword'] ?? null)) {
             return true;
         }

@@ -42,9 +42,24 @@ class BuildInternalLinksCommand extends Command
 
         Product::where('published', 1)->select('id', 'category_id', 'brand_id', 'name', 'slug', 'description')
             ->chunkById(200, function ($rows) use (&$changed) {
+                $translations = \Illuminate\Support\Facades\DB::table('product_translations')
+                    ->whereIn('product_id', $rows->pluck('id'))->get(['id', 'product_id', 'description'])->groupBy('product_id');
                 foreach ($rows as $p) {
                     $links = $this->productLinks($p);
-                    if ($this->save($p, 'description', $links)) $changed['product']++;
+                    $hit = $this->save($p, 'description', $links);
+                    // The product page renders the translation's description, not
+                    // products.description, so the links must go there to be seen.
+                    foreach ($translations->get($p->id, []) as $t) {
+                        $updated = $this->withBlock((string) $t->description, $links);
+                        if ($updated !== (string) $t->description) {
+                            $hit = true;
+                            if (!$this->option('dry-run')) {
+                                \Illuminate\Support\Facades\DB::table('product_translations')->where('id', $t->id)
+                                    ->update(['description' => $updated, 'updated_at' => now()]);
+                            }
+                        }
+                    }
+                    if ($hit) $changed['product']++;
                 }
             });
 
@@ -116,13 +131,7 @@ class BuildInternalLinksCommand extends Command
     protected function save($model, string $field, array $links): bool
     {
         $current = (string) $model->{$field};
-        $base = $this->stripBlock($current);
-        $links = collect($links)->unique(0)->take(8);
-
-        $updated = $links->isEmpty() ? $base : rtrim($base) . "\n" . self::START
-            . '<div class="seo-related-links"><h3>' . e(translate('Related')) . '</h3><ul>'
-            . $links->map(fn($l) => '<li><a href="' . e($l[0]) . '">' . e($l[1]) . '</a></li>')->implode('')
-            . '</ul></div>' . self::END;
+        $updated = $this->withBlock($current, $links);
 
         if ($updated === $current) return false;
         if (!$this->option('dry-run')) {
@@ -130,6 +139,18 @@ class BuildInternalLinksCommand extends Command
             $model->saveQuietly();
         }
         return true;
+    }
+
+    protected function withBlock(string $html, array $links): string
+    {
+        $base = $this->stripBlock($html);
+        $links = collect($links)->unique(0)->take(8);
+        if ($links->isEmpty()) return $base;
+
+        return rtrim($base) . "\n" . self::START
+            . '<div class="seo-related-links"><h3>' . e(translate('Related')) . '</h3><ul>'
+            . $links->map(fn($l) => '<li><a href="' . e($l[0]) . '">' . e($l[1]) . '</a></li>')->implode('')
+            . '</ul></div>' . self::END;
     }
 
     protected function stripBlock(string $html): string

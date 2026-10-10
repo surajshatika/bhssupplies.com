@@ -32,7 +32,7 @@
 @section('structured_data')
 @if(!empty($blog->seoMeta?->schema_json))
 <script type="application/ld+json">
-{!! $blog->seoMeta->schema_json !!}
+{!! is_string($blog->seoMeta->schema_json) ? $blog->seoMeta->schema_json : json_encode($blog->seoMeta->schema_json, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG) !!}
 </script>
 @else
 <script type="application/ld+json">

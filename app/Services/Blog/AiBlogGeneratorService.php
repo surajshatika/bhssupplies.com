@@ -57,7 +57,7 @@ class AiBlogGeneratorService
     public function generate(array $options = []): Blog
     {
         $provider = $options['ai_provider'] ?? $this->provider;
-        $ai       = SocialAiProviderManager::make($provider);
+        $ai       = \App\Services\Seo\Providers\SeoProviderManager::make($provider);
 
         // 1. Resolve or create blog category
         $category = $this->resolveCategory($options);
@@ -185,7 +185,7 @@ class AiBlogGeneratorService
         $raw = $options['competitor_urls'] ?? SocialAutomationSetting::get('ai_blog_competitor_urls', '');
         $competitorUrls = is_array($raw) ? implode(',', $raw) : trim((string)$raw);
 
-        $ai     = SocialAiProviderManager::make($provider);
+        $ai     = \App\Services\Seo\Providers\SeoProviderManager::make($provider);
         $country = SocialAutomationSetting::get('ai_blog_target_country', 'Canada');
 
         $urlContext = '';
@@ -225,7 +225,7 @@ class AiBlogGeneratorService
         string $provider,
         array $options = []
     ): array {
-        $ai       = SocialAiProviderManager::make($provider);
+        $ai       = \App\Services\Seo\Providers\SeoProviderManager::make($provider);
         $siteName = $this->siteName;
         $siteUrl  = $this->siteUrl;
         $country  = SocialAutomationSetting::get('ai_blog_target_country', 'Canada');
@@ -288,13 +288,69 @@ class AiBlogGeneratorService
             . "SHORT_DESC: [3-4 sentences. Must naturally include EVERY target keyword. Written as a compelling blog listing excerpt that also works as a standalone SEO paragraph. Mention {$siteName}, Mississauga/GTA, and the product category. Do NOT cut off mid-sentence.]\n"
             . "SLUG: [lowercase-url-slug]";
 
-        $raw = $ai->generate($prompt, $system, ['max_tokens' => 4000]);
-
-        if (!$raw) {
-            return $this->fallbackContent($topic, $category);
+        if (!empty($options['source_context'])) {
+            [$prompt, $system] = $this->guidePrompt($topic, $keywords, $tone, $options);
         }
 
-        return $this->parseGeneratedContent($raw, $topic);
+        $raw = $ai->generate($prompt, $system, ['max_tokens' => 4000]);
+
+        // No AI copy → no post. Publishing the canned fallback produced
+        // identical filler posts whenever a provider ran out of credits.
+        if (!$raw || mb_strlen(strip_tags((string) $raw)) < 1500) {
+            throw new \RuntimeException('AI provider returned no usable blog content.');
+        }
+
+        $content = $this->parseGeneratedContent($raw, $topic);
+        return $this->appendInternalLinks($content, $options['internal_links'] ?? []);
+    }
+
+    /** Helpful, specific guide built from real catalogue data (no city lists). */
+    private function guidePrompt(string $topic, string $keywords, string $tone, array $options): array
+    {
+        $siteName = $this->siteName;
+        $wordCount = (int) SocialAutomationSetting::get('ai_blog_word_count', 1200);
+        $links = collect($options['internal_links'] ?? [])
+            ->map(fn($l) => "- {$l[1]}: {$l[0]}")->implode("\n");
+
+        $system = "You are an experienced HVAC, plumbing and electrical trade writer for {$siteName}, "
+            . "a wholesale supplier in Mississauga, Ontario serving contractors and homeowners across Canada. "
+            . "Write genuinely useful, accurate, specific articles that answer what buyers actually ask. "
+            . "Use plain {$tone} English, short paragraphs, and concrete details (sizes, materials, ratings, codes, "
+            . "compatibility, common mistakes). Never invent prices, stock levels, certifications or specs you were "
+            . "not given; describe what to check instead. No keyword stuffing, no lists of city names, no hype.";
+
+        $prompt = "Write a blog article. Working topic: {$topic}\n\n"
+            . "Facts from our catalogue (use them; don't contradict them):\n{$options['source_context']}\n\n"
+            . "Keywords to cover where they fit naturally (do not force every one): {$keywords}\n\n"
+            . "Our pages to link to with descriptive anchor text (use <a href=\"...\">), 3-5 links total:\n{$links}\n\n"
+            . "Length: about {$wordCount} words. Structure it to suit the topic — for example: what it is and where it's used, "
+            . "types/sizes and how to choose, materials or specs that matter, installation or maintenance tips, mistakes to avoid, "
+            . "and a short FAQ (<h2>Frequently Asked Questions</h2> with 4 <h3> questions). Mention once, briefly, that "
+            . "{$siteName} in Mississauga stocks these for trade and retail buyers.\n"
+            . "Write a specific, click-worthy title in an <h1> (not a generic 'Buyer's Guide to X').\n"
+            . "Format: clean HTML body only (h1, h2, h3, p, ul, li, a, strong). No inline styles, no images.\n\n"
+            . "After the HTML, output metadata EXACTLY in this format:\n"
+            . "META_TITLE: [under 60 chars, specific]\n"
+            . "META_DESC: [140-160 chars, what the reader will learn]\n"
+            . "META_KEYWORDS: [6-10 relevant keywords, comma-separated]\n"
+            . "SHORT_DESC: [2-3 sentence summary for the blog listing, complete sentences]\n"
+            . "SLUG: [lowercase-url-slug]";
+
+        return [$prompt, $system];
+    }
+
+    /** Guarantee the post links to its source category/products even if the AI skipped them. */
+    private function appendInternalLinks(array $content, array $links): array
+    {
+        $html = (string) ($content['description'] ?? '');
+        $missing = collect($links)->reject(fn($l) => str_contains($html, $l[0]))->take(5);
+        if ($missing->isNotEmpty()) {
+            $html .= "\n<h2>" . e(translate('Shop the products in this guide')) . '</h2><ul>'
+                . $missing->map(fn($l) => '<li><a href="' . e($l[0]) . '">' . e($l[1]) . '</a></li>')->implode('')
+                . '</ul>';
+            $content['description'] = $html;
+        }
+        return $content;
     }
 
     private function parseGeneratedContent(string $raw, string $topic): array

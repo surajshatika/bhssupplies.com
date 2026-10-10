@@ -543,6 +543,7 @@ Route::group(['prefix' => 'admin', 'middleware' => ['auth', 'admin', 'prevent-ba
         Route::get('/settings',       'settings')->name('settings');
         Route::post('/settings',      'saveSettings')->name('settings.save');
         Route::post('/generate',      'generateNow')->name('generate');
+        Route::post('/create-next',   'createNext')->name('create-next');
         Route::post('/publish/{blog}','publishBlog')->name('publish');
     });
 

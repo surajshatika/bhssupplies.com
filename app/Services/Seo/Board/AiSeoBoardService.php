@@ -1980,7 +1980,7 @@ class AiSeoBoardService
         $trail = [['name' => 'Home', 'url' => $base . '/']];
 
         $section = match ($type) {
-            'product'  => ['name' => 'Shop', 'url' => $base . '/shop'],
+            'product'  => ['name' => 'Shop', 'url' => $base . '/search'],
             'category' => ['name' => 'Categories', 'url' => $base . '/categories'],
             'blog'     => ['name' => 'Blog', 'url' => $base . '/blog'],
             default    => null,
@@ -2922,7 +2922,7 @@ class AiSeoBoardService
         }
 
         $base = rtrim(config('seo.site_url', url('/')), '/');
-        $links[] = ['url' => $base . '/shop', 'label' => 'BHS Supplies products'];
+        $links[] = ['url' => $base . '/search', 'label' => 'BHS Supplies products'];
         $links[] = ['url' => $base . '/contractor-trade-account', 'label' => 'contractor trade account'];
         $links[] = ['url' => $base . '/review', 'label' => 'leave a review'];
         $links[] = $this->localLandingLink($entity, $type);

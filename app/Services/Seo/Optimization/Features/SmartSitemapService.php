@@ -216,9 +216,7 @@ class SmartSitemapService extends AbstractSeoService
         // ── Known static pages ────────────────────────────────────────────
         foreach ([
             ['path' => '/about-us',   'priority' => '0.6', 'changefreq' => 'monthly'],
-            ['path' => '/contact',    'priority' => '0.6', 'changefreq' => 'monthly'],
-            ['path' => '/faq',        'priority' => '0.5', 'changefreq' => 'monthly'],
-            ['path' => '/shop',       'priority' => '0.8', 'changefreq' => 'daily'],
+            ['path' => '/contact-us',  'priority' => '0.6', 'changefreq' => 'monthly'],
             ['path' => '/blog',       'priority' => '0.7', 'changefreq' => 'daily'],
             ['path' => '/brands',     'priority' => '0.6', 'changefreq' => 'weekly'],
             ['path' => '/categories', 'priority' => '0.8', 'changefreq' => 'weekly'],

@@ -37,7 +37,13 @@ class GoogleSearchConsoleService
 
     public function siteUrl(): ?string
     {
-        return get_setting('seo_search_console_site') ?: config('seo.search_console.site_url');
+        $site = trim((string) (get_setting('seo_search_console_site') ?: config('seo.search_console.site_url')));
+        // Must be a GSC property ("https://www.example.com/" or "sc-domain:example.com").
+        // An email address was saved here, so every sync failed and rankings showed 0.
+        if ($site === '' || (!str_starts_with($site, 'sc-domain:') && !preg_match('#^https?://#i', $site))) {
+            $site = rtrim((string) (config('seo.site_url') ?: config('app.url')), '/') . '/';
+        }
+        return $site;
     }
 
     /**

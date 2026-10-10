@@ -246,6 +246,10 @@ Route::controller(CustomerProductController::class)->group(function () {
     Route::get('/customer-product/{slug}', 'customer_product')->name('customer.product');
 });
 
+// /shop never existed, but SEO autopilot wrote it into ~740 product
+// descriptions, breadcrumb schema and the sitemap (415 broken links).
+Route::get('/shop', fn () => redirect()->route('search', request()->query(), 301));
+
 // Search
 Route::controller(SearchController::class)->group(function () {
     Route::get('/search', 'index')->name('search');

@@ -32,6 +32,7 @@
         'Links' => ['icon' => 'la-link', 'items' => [
             ['route' => 'admin.seo-suite.link_assistant', 'icon' => 'la-link', 'label' => 'Links'],
             ['route' => 'admin.seo-suite.link_graph', 'icon' => 'la-network-wired', 'label' => 'Link Graph'],
+            ['route' => 'admin.seo_backlinks.index', 'icon' => 'la-external-link-alt', 'label' => 'Backlinks & Citations'],
             ['route' => 'admin.seo_off_page.index', 'icon' => 'la-bullhorn', 'label' => 'Off-Page'],
         ]],
     ];

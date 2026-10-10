@@ -70,27 +70,35 @@ class AiBlogPost extends Command
         $bar = $this->output->createProgressBar($count);
         $bar->start();
 
+        // No manual topic → work through every category, then every product, once each.
+        $planner = app(\App\Services\Blog\AiBlogTopicPlanner::class);
+        $usePlanner = !array_intersect_key($options, array_flip(['blog_title', 'topic', 'product_category_id', 'category_name']));
+
         $generated = 0;
         for ($i = 0; $i < $count; $i++) {
+            $plan = $usePlanner ? $planner->next() : null;
+            if ($usePlanner && !$plan) {
+                $this->info('All categories and products already have a blog post.');
+                break;
+            }
             try {
-                // Rotate through product categories automatically if no specific one given
-                if (!isset($options['product_category_id']) && !isset($options['category_name'])) {
-                    $productCat = Category::inRandomOrder()->first();
-                    if ($productCat) {
-                        $options['product_category_id'] = $productCat->id;
-                    }
-                }
-
-                $blog = $service->generate($options);
+                $blog = $service->generate($plan ? array_merge($options, $plan) : $options);
+                if ($plan) $planner->record($plan['source_type'], $plan['source_id'], $blog->id);
                 $bar->advance();
                 $this->newLine();
                 $this->line("  [{$blog->id}] <info>{$blog->title}</info> → " . ($publish ? 'Published' : 'Draft'));
                 $generated++;
             } catch (\Throwable $e) {
+                if ($plan) $planner->record($plan['source_type'], $plan['source_id'], null, $e->getMessage());
                 $bar->advance();
                 $this->newLine();
                 $this->error("  Generation #{$i} failed: " . $e->getMessage());
             }
+        }
+
+        if ($generated > 0) {
+            // New posts get their category related-links block straight away.
+            \Illuminate\Support\Facades\Artisan::call('seo:build-internal-links');
         }
 
         $bar->finish();

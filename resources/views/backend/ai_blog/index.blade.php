@@ -27,7 +27,25 @@
                 </div>
             </div>
         </div>
-        <div class="d-flex flex-wrap mt-3 mt-md-0" style="gap:.5rem;">
+        @php
+            $blogPlanner = app(\App\Services\Blog\AiBlogTopicPlanner::class);
+            $blogNext = \Illuminate\Support\Facades\Schema::hasTable('ai_blog_topics') ? $blogPlanner->next() : null;
+            $blogLeft = $blogNext ? $blogPlanner->remaining() : null;
+        @endphp
+        <div class="d-flex flex-wrap mt-3 mt-md-0 align-items-start" style="gap:.5rem;">
+            @if($blogNext)
+                <form method="POST" action="{{ route('admin.ai-blog.create-next') }}"
+                      onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerHTML='{{ translate('Writing blog… (1-2 min)') }}';">
+                    @csrf
+                    <button class="mm-btn mm-btn-light" title="{{ translate('Next') }}: {{ $blogNext['topic'] }}">
+                        <i class="las la-robot"></i> {{ translate('Create Full AI Blog') }}
+                    </button>
+                    <div class="small mt-1" style="max-width:320px;opacity:.85">
+                        {{ translate('Next') }} ({{ $blogNext['source_type'] }}): {{ \Illuminate\Support\Str::limit($blogNext['topic'], 70) }}<br>
+                        {{ $blogLeft['categories'] }} {{ translate('categories') }} · {{ $blogLeft['products'] }} {{ translate('products left') }}
+                    </div>
+                </form>
+            @endif
             <button class="mm-btn mm-btn-light" data-toggle="modal" data-target="#generateModal">
                 <i class="las la-magic"></i> {{ translate('Generate Now') }}
             </button>

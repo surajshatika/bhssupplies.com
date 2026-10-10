@@ -164,6 +164,35 @@ class AiBlogController extends Controller
         }
     }
 
+    /** One click: write and publish the next queued topic (category first, then product). */
+    public function createNext(): RedirectResponse
+    {
+        @set_time_limit(300);
+        $planner = app(\App\Services\Blog\AiBlogTopicPlanner::class);
+        $plan = $planner->next();
+        if (!$plan) {
+            flash(translate('Every category and product already has a blog post.'))->info();
+            return back();
+        }
+
+        $provider = SocialAutomationSetting::get('ai_blog_provider', 'openai');
+        try {
+            $blog = (new AiBlogGeneratorService($provider))->generate($plan + [
+                'ai_provider' => $provider,
+                'tone' => SocialAutomationSetting::get('ai_blog_tone', 'professional'),
+                'publish' => true,
+            ]);
+            $planner->record($plan['source_type'], $plan['source_id'], $blog->id);
+            \Illuminate\Support\Facades\Artisan::call('seo:build-internal-links');
+            flash(translate('Blog published') . ': ' . $blog->title)->success();
+            return redirect()->route('blog.edit', $blog->id);
+        } catch (\Throwable $e) {
+            $planner->record($plan['source_type'], $plan['source_id'], null, $e->getMessage());
+            flash(translate('Blog generation failed') . ': ' . $e->getMessage())->error();
+            return back();
+        }
+    }
+
     // ─── Quick Publish ────────────────────────────────────────────────────────
 
     public function publishBlog(Blog $blog): JsonResponse

@@ -10,7 +10,7 @@ return [
     'provider_failover' => [
         'enabled' => env('SEO_AI_FAILOVER_ENABLED', true),
         'order' => array_values(array_filter(array_map('trim', explode(',', env('SEO_AI_FAILOVER_ORDER', 'claude,openai,gemini,grok,perplexity,mistral,deepseek'))))),
-        'max_attempts' => env('SEO_AI_FAILOVER_MAX_ATTEMPTS', 4),
+        'max_attempts' => env('SEO_AI_FAILOVER_MAX_ATTEMPTS', 8),
         'cooldown_enabled' => env('SEO_AI_PROVIDER_COOLDOWN_ENABLED', true),
         'failure_threshold' => env('SEO_AI_PROVIDER_FAILURE_THRESHOLD', 3),
         'cooldown_minutes' => env('SEO_AI_PROVIDER_COOLDOWN_MINUTES', 15),

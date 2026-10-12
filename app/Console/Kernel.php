@@ -24,6 +24,12 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
+        // Heartbeat: proves cron runs `schedule:run` every minute. The SEO Suite
+        // warns when it goes stale (a cron calling only seo:automation-run
+        // silently skips every other scheduled job).
+        $schedule->call(fn () => \Illuminate\Support\Facades\Cache::put('scheduler:heartbeat', now()->toIso8601String(), now()->addDay()))
+            ->everyMinute()->name('scheduler-heartbeat');
+
         // Social Media — process queued posts every 5 minutes
         $schedule->command('social:process-queue')
             ->everyFiveMinutes()

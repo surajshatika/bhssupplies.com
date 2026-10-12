@@ -136,6 +136,15 @@
 </div>
 @endif
 
+@foreach($systemWarnings ?? [] as $w)
+    <div class="alert alert-{{ $w['level'] }} mb-3">
+        <strong><i class="las la-exclamation-triangle mr-1"></i>{{ $w['title'] }}</strong>
+        <div class="small mt-1">{{ $w['text'] }}</div>
+        @if(!empty($w['code']))<code class="d-block mt-2 p-2 bg-white text-dark rounded" style="user-select:all">{{ $w['code'] }}</code>@endif
+        @if(!empty($w['list']))<ul class="small mb-0 mt-2">@foreach($w['list'] as $item)<li>{{ $item }}</li>@endforeach</ul>@endif
+    </div>
+@endforeach
+
 @php
     $aiHealth = $aiProviderHealth ?? ['providers' => [], 'any_working' => false];
     $aiProviders = $aiHealth['providers'] ?? [];

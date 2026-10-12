@@ -82,8 +82,10 @@ class SeoSuiteController extends Controller
         $keywordIntelligence = $setupRequired ? $this->emptyKeywordIntelligence() : $this->buildKeywordIntelligence();
         $automationCoverage = app(SeoAutomationCoverage::class)->summary();
         $aiProviderHealth = $this->quickProviderHealthCheck($settings);
+        $systemWarnings = $this->automationWarnings();
 
         return view('backend.seo_suite.index', compact(
+            'systemWarnings',
             'project',
             'features',
             'runs',
@@ -1640,6 +1642,47 @@ class SeoSuiteController extends Controller
             'spent_today' => 0,
             'remaining_today' => null,
         ];
+    }
+
+    /**
+     * Plain-language warnings for the two failures that silently stall the
+     * autopilot: cron not running the scheduler, and AI producing nothing.
+     */
+    protected function automationWarnings(): array
+    {
+        $warnings = [];
+
+        $beat = \Illuminate\Support\Facades\Cache::get('scheduler:heartbeat');
+        if (!$beat || \Carbon\Carbon::parse($beat)->lt(now()->subMinutes(15))) {
+            $warnings[] = [
+                'level' => 'danger',
+                'title' => translate('Scheduler is not running'),
+                'text' => ($beat ? translate('Last run') . ' ' . \Carbon\Carbon::parse($beat)->diffForHumans() . '. ' : '')
+                    . translate('Batches stall, and blogs/sitemaps/scores never run. In cPanel → Cron Jobs, run this every minute:'),
+                'code' => '* * * * * ' . (is_file('/usr/local/bin/php') ? '/usr/local/bin/php' : 'php') . ' ' . base_path('artisan') . ' schedule:run >> /dev/null 2>&1',
+            ];
+        }
+
+        if (Schema::hasTable('seo_fix_batches')) {
+            $recent = SeoFixBatch::query()->whereIn('status', ['completed', 'failed'])->latest('id')->limit(3)->get();
+            $noAi = $recent->count() >= 3
+                && $recent->every(fn($b) => (float) $b->actual_cost_usd <= 0 && (int) $b->succeeded === 0);
+            if ($noAi) {
+                $errors = collect(SeoProviderManager::available())
+                    ->mapWithKeys(fn($p) => [$p => \Illuminate\Support\Facades\Cache::get("seo:provider-last-error:{$p}")])
+                    ->filter()
+                    ->map(fn($e, $p) => SeoProviderManager::labels()[$p] . ': ' . \Illuminate\Support\Str::limit(strip_tags((string) ($e['error'] ?? '')), 90))
+                    ->values()->all();
+                $warnings[] = [
+                    'level' => 'warning',
+                    'title' => translate('AI is not producing any content'),
+                    'text' => translate('The last 3 batches cost $0 and improved nothing, so every AI request is failing. Add credit to at least one provider (or a new key) in Settings → AI Providers.'),
+                    'list' => $errors,
+                ];
+            }
+        }
+
+        return $warnings;
     }
 
     protected function quickProviderHealthCheck(array $settings): array

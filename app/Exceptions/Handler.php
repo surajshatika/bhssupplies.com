@@ -51,7 +51,13 @@ class Handler extends ExceptionHandler
             if ($request->is('customer-products/admin')) {
                 return NgeniusUtility::initPayment();
             }
-            
+
+            // Dead slug → 301 to the closest live page (saved in seo_redirects).
+            if ($e->getStatusCode() === 404 && $request->isMethod('GET')
+                && ($target = app(\App\Services\Seo\NotFoundResolver::class)->resolve($request->path()))) {
+                return redirect()->away($target, 301);
+            }
+
             return parent::render($request, $e);
         }
         else
